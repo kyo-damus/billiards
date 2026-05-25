@@ -1,3 +1,0 @@
-/home/k-yoshikawa/research/build/CMakeFiles/billiard_env_cpp.dir
-/home/k-yoshikawa/research/build/CMakeFiles/edit_cache.dir
-/home/k-yoshikawa/research/build/CMakeFiles/rebuild_cache.dir

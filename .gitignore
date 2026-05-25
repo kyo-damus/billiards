@@ -1,0 +1,10 @@
+# Python
+__pycache__/
+*.pyc
+
+# C++ Build Artifacts (ソースコードは無視せず、生成物だけを無視)
+*.so
+*.o
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
