@@ -1,31 +1,33 @@
 import numpy as np
 from custom_env import MinimalBilliardEnv
 import copy
+import torch
 
-def dummy_policy_network(env_state, target_ball):
+# 先ほど作ったファイルから、ニューラルネットの設計図をインポート
+from train_policy import PolicyNetwork
+
+# 学習済みモデルの読み込み準備
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+model = PolicyNetwork().to(device)
+model.load_state_dict(torch.load("policy_model.pth", weights_only=True))
+model.eval() # 推論モードに設定
+
+def get_ai_intuition(env_state, target_ball):
     """
-    【AIの直感のモックアップ】
-    盤面を見て「大体この角度が怪しい」という事前確率（中心となる角度）を返す。
-    本来はニューラルネットワークが担当する部分を、今回は幾何学計算で代用します。
+    【本物のAIの直感】
+    PyTorchのニューラルネットワークに盤面を見せて、角度を予測させる
     """
     cue_x, cue_y = env_state[0], env_state[1]
-    # target_ballが0なら[2][3]、1なら[4][5]の座標を取得
     obj_x, obj_y = env_state[2 + target_ball*2], env_state[3 + target_ball*2]
-    pocket_x, pocket_y = 1.0, 1.0
-    r = 0.05
     
-    # 簡易的なゴーストボールの逆算
-    dx, dy = pocket_x - obj_x, pocket_y - obj_y
-    dist = np.hypot(dx, dy)
-    ghost_x = obj_x - (dx / dist) * (2.0 * r)
-    ghost_y = obj_y - (dy / dist) * (2.0 * r)
-    
-    # 「この角度周辺が怪しい」という直感（mean_angle）を計算
-    mean_angle = np.degrees(np.arctan2(ghost_y - cue_y, ghost_x - cue_x))
-    return mean_angle
+    with torch.no_grad():
+        inputs = torch.tensor([[cue_x, cue_y, obj_x, obj_y]], dtype=torch.float32).to(device)
+        predicted_angle = model(inputs).item()
+        
+    return predicted_angle
 
-def hierarchical_mcts_search(env, num_simulations=50): 
-    # ↑ 探索回数をあえて「50回」という少ない回数に設定します
+def hierarchical_mcts_search(env, num_simulations=100): 
+    # AIの直感がまだ少しズレているため、探索回数を100回に増やします
     original_state = env.get_state()
     best_action = None
     best_reward = -1.0
@@ -35,17 +37,16 @@ def hierarchical_mcts_search(env, num_simulations=50):
     for target_ball in [0, 1]:
         print(f"  >> マクロ戦略: [的球 {target_ball}] を評価します...")
         
-        # 1. Policy（直感）に盤面を見せて、怪しい角度を教えてもらう
-        suggested_angle = dummy_policy_network(original_state, target_ball)
+        # 1. 【変更】PyTorchモデルから直感をもらう
+        suggested_angle = get_ai_intuition(original_state, target_ball)
         print(f"     Policyの直感: {suggested_angle:.2f}度 付近が怪しいです")
         
-        # 2. 直感の周辺だけを重點的に探索する（360度ランダムをやめる）
+        # 2. 直感の周辺を重点的に探索する
         for i in range(num_simulations):
             env.set_state(original_state)
             
-            # 【重要】-180~180の一様分布から、直感を中心とした「正規分布（ガウス分布）」に変更
-            # 標準偏差(scale)を2.0度に設定し、直感のすぐ近くを重点的に探る
-            test_angle = np.random.normal(loc=suggested_angle, scale=2.0)
+            # 【重要】AIの誤差（約36度）をカバーするため、探索範囲(scale)を広く（20.0）設定します
+            test_angle = np.random.normal(loc=suggested_angle, scale=20.0)
             
             test_action = np.array([target_ball, 0.8, test_angle], dtype=np.float32)
             obs, reward, terminated, _, _ = env.step(test_action)
@@ -58,15 +59,15 @@ def hierarchical_mcts_search(env, num_simulations=50):
     env.set_state(original_state)
     return best_action
 
-
 # 【セクション2】メイン実行ループ
 if __name__ == "__main__":
     env = MinimalBilliardEnv()
     
     obs, info = env.reset()
-    print(f"初期状態 (手球x, 手球y, 的球0x, 的球0y, 的球1x, 的球1y): \n{obs}")
+    print(f"初期状態: \n{obs}")
     
-    action = hierarchical_mcts_search(env, num_simulations=1)
+    # 探索回数は100回に設定
+    action = hierarchical_mcts_search(env, num_simulations=100)
     
     if action is not None:
         print(f"\nMCTSが選択した行動: Target=的球{int(action[0])}, Power={action[1]:.2f}, Angle={action[2]:.2f}度")
@@ -74,3 +75,4 @@ if __name__ == "__main__":
         print(f"結果 -> 報酬: {reward}, 終了: {terminated}")
     else:
         print("良い行動が見つかりませんでした。")
+        
