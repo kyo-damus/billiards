@@ -45,12 +45,14 @@ public:
         float dy_op = pocket_y - target_y;
         float dist_op = std::sqrt(dx_op * dx_op + dy_op * dy_op);
 
+        // ターゲット球からポケットへの逆ベクトルを計算
         float ghost_x = target_x - (dx_op / dist_op) * (2.0f * r);
         float ghost_y = target_y - (dy_op / dist_op) * (2.0f * r);
 
+        // 手球からゴーストボールへ向かう「理想の打撃角度」を算出
         float ideal_angle = atan2(ghost_y - cue_y, ghost_x - cue_x) * 180.0f / M_PI;
         
-        if (std::abs(angle - ideal_angle) < 2.0f && power > 0.1f) {
+        if (std::abs(angle - ideal_angle) < 0.50f && power > 0.1f) {
             // 成功したら狙った球をポケットへ
             if(target_ball == 0) { obj0_x = pocket_x; obj0_y = pocket_y; }
             else                 { obj1_x = pocket_x; obj1_y = pocket_y; }

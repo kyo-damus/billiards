@@ -45,7 +45,6 @@ def hierarchical_mcts_search(env, num_simulations=100):
         for i in range(num_simulations):
             env.set_state(original_state)
             
-            # 【重要】AIの誤差（約36度）をカバーするため、探索範囲(scale)を広く（20.0）設定します
             test_angle = np.random.normal(loc=suggested_angle, scale=20.0)
             
             test_action = np.array([target_ball, 0.8, test_angle], dtype=np.float32)
@@ -66,8 +65,8 @@ if __name__ == "__main__":
     obs, info = env.reset()
     print(f"初期状態: \n{obs}")
     
-    # 探索回数は100回に設定
-    action = hierarchical_mcts_search(env, num_simulations=100)
+    # 探索回数
+    action = hierarchical_mcts_search(env, num_simulations=30)
     
     if action is not None:
         print(f"\nMCTSが選択した行動: Target=的球{int(action[0])}, Power={action[1]:.2f}, Angle={action[2]:.2f}度")
