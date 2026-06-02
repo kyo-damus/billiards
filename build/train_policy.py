@@ -7,44 +7,49 @@ import numpy as np
 class PolicyNetwork(nn.Module):
     def __init__(self):
         super(PolicyNetwork, self).__init__()
-        # 入力: 4次元 (手球x, 手球y, 的球x, 的球y)
-        # 出力: 1次元 (予測される最適な角度)
+        # 入力層を4から6へ拡張
+        # 入力フォーマット: [手球x, 手球y, 狙う的球x, 狙う的球y, その他の球x, その他の球y]
         self.fc = nn.Sequential(
-            nn.Linear(4, 64),
+            nn.Linear(6, 64), 
             nn.ReLU(),
             nn.Linear(64, 64),
             nn.ReLU(),
-            nn.Linear(64, 1)
+            nn.Linear(64, 2)
         )
 
     def forward(self, x):
         return self.fc(x)
 
 # 【2】トレーニング用データセットの自動生成
-def generate_synthetic_data(num_samples=10000):
-    print(f"--- {num_samples}件の教師データ（配置と正解角度）を生成中 ---")
+def generate_synthetic_data(num_samples=50000):
     inputs = []
     targets = []
     pocket_x, pocket_y = 1.0, 1.0
     r = 0.05
 
     for _ in range(num_samples):
-        # ランダムな配置を生成
+        # 盤面の球をすべてランダムに配置
         cue_x, cue_y = np.random.uniform(-1.0, 1.0, 2)
-        obj_x, obj_y = np.random.uniform(-0.8, 0.8, 2)
+        obj0_x, obj0_y = np.random.uniform(-0.8, 0.8, 2) # ターゲットにする球
+        obj1_x, obj1_y = np.random.uniform(-0.8, 0.8, 2) # 障害物(その他の球)
         
-        # ゴーストボールの計算（教師データの「正解ラベル」を作成）
-        dx, dy = pocket_x - obj_x, pocket_y - obj_y
+        # 【重要】ゴーストボール（正解角度）の計算は、常に obj0 に対してのみ行う
+        dx, dy = pocket_x - obj0_x, pocket_y - obj0_y
         dist = np.hypot(dx, dy)
-        ghost_x = obj_x - (dx / dist) * (2.0 * r)
-        ghost_y = obj_y - (dy / dist) * (2.0 * r)
+        ghost_x = obj0_x - (dx / dist) * (2.0 * r)
+        ghost_y = obj0_y - (dy / dist) * (2.0 * r)
         
         ideal_angle = np.degrees(np.arctan2(ghost_y - cue_y, ghost_x - cue_x))
         
-        inputs.append([cue_x, cue_y, obj_x, obj_y])
-        targets.append([ideal_angle])
+        # 角度をラジアンに直し、sin と cos を計算
+        rad = np.radians(ideal_angle)
+        sin_val = np.sin(rad)
+        cos_val = np.cos(rad)
+        
+        inputs.append([cue_x, cue_y, obj0_x, obj0_y, obj1_x, obj1_y])
+        # targetsを [sin, cos] の2つの値として保存
+        targets.append([sin_val, cos_val])
 
-    # PyTorchで扱えるTensor型に変換（GPUがある場合はGPUへ送る）
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     inputs_tensor = torch.tensor(inputs, dtype=torch.float32).to(device)
     targets_tensor = torch.tensor(targets, dtype=torch.float32).to(device)

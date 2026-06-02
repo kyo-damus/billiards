@@ -13,16 +13,20 @@ model.load_state_dict(torch.load("policy_model.pth", weights_only=True))
 model.eval() # 推論モードに設定
 
 def get_ai_intuition(env_state, target_ball):
-    """
-    【本物のAIの直感】
-    PyTorchのニューラルネットワークに盤面を見せて、角度を予測させる
-    """
-    cue_x, cue_y = env_state[0], env_state[1]
-    obj_x, obj_y = env_state[2 + target_ball*2], env_state[3 + target_ball*2]
+    state_for_ai = list(env_state) 
     
+    if target_ball == 1:
+        state_for_ai[2], state_for_ai[3], state_for_ai[4], state_for_ai[5] = \
+            state_for_ai[4], state_for_ai[5], state_for_ai[2], state_for_ai[3]
+
     with torch.no_grad():
-        inputs = torch.tensor([[cue_x, cue_y, obj_x, obj_y]], dtype=torch.float32).to(device)
-        predicted_angle = model(inputs).item()
+        inputs = torch.tensor([state_for_ai], dtype=torch.float32).to(device)
+        # 【変更】AIの出力は [sin, cos] の2つの値になる
+        output = model(inputs)[0].cpu().numpy()
+        sin_val, cos_val = output[0], output[1]
+        
+        # arctan2を使って、sinとcosから正しい角度（度数法）を復元
+        predicted_angle = np.degrees(np.arctan2(sin_val, cos_val))
         
     return predicted_angle
 
@@ -45,7 +49,7 @@ def hierarchical_mcts_search(env, num_simulations=100):
         for i in range(num_simulations):
             env.set_state(original_state)
             
-            test_angle = np.random.normal(loc=suggested_angle, scale=20.0)
+            test_angle = np.random.normal(loc=suggested_angle, scale=5.0)
             
             test_action = np.array([target_ball, 0.8, test_angle], dtype=np.float32)
             obs, reward, terminated, _, _ = env.step(test_action)
@@ -58,20 +62,42 @@ def hierarchical_mcts_search(env, num_simulations=100):
     env.set_state(original_state)
     return best_action
 
-# 【セクション2】メイン実行ループ
 if __name__ == "__main__":
     env = MinimalBilliardEnv()
     
-    obs, info = env.reset()
-    print(f"初期状態: \n{obs}")
+    # 【追加】成功体験を保存するためのリスト（Experience Replay Buffer）
+    experience_buffer_states = []
+    experience_buffer_targets = []
     
-    # 探索回数
-    action = hierarchical_mcts_search(env, num_simulations=30)
+    num_episodes = 100  # まずは10回の自己対局でテスト
+    print(f"=== Self-Play（自己対局）データ収集開始: {num_episodes}エピソード ===")
     
-    if action is not None:
-        print(f"\nMCTSが選択した行動: Target=的球{int(action[0])}, Power={action[1]:.2f}, Angle={action[2]:.2f}度")
-        next_obs, reward, terminated, _, _ = env.step(action)
-        print(f"結果 -> 報酬: {reward}, 終了: {terminated}")
+    for episode in range(num_episodes):
+        obs, info = env.reset()
+        print(f"\n[Episode {episode+1}/{num_episodes}] 初期状態: {obs}")
+        
+        # 探索回数は30回のストイック設定
+        action = hierarchical_mcts_search(env, num_simulations=30)
+        
+        if action is not None:
+            next_obs, reward, terminated, _, _ = env.step(action)
+            print(f" -> 結果: 報酬 {reward}")
+            
+            # 【手法の要】報酬が1.0（成功）だった場合のみ、その「状態」と「MCTSが見つけた正解角度」を学習データとして保存する
+            if reward == 1.0:
+                experience_buffer_states.append(list(obs))
+                experience_buffer_targets.append([action[2]]) # action[2] は角度
+        else:
+            print(" -> 失敗: 良い行動が見つかりませんでした。")
+            
+    # 集めた成功体験をPyTorchのTensor形式に変換してファイルに保存
+    if len(experience_buffer_states) > 0:
+        states_tensor = torch.tensor(experience_buffer_states, dtype=torch.float32)
+        targets_tensor = torch.tensor(experience_buffer_targets, dtype=torch.float32)
+        
+        # 辞書形式で保存
+        torch.save({"states": states_tensor, "targets": targets_tensor}, "mcts_experience.pt")
+        print(f"\n=== データ収集完了! {len(experience_buffer_states)}件の成功体験を 'mcts_experience.pt' に保存しました ===")
     else:
-        print("良い行動が見つかりませんでした。")
+        print("\n=== データ収集完了...しかし成功体験は0件でした。===")
         
