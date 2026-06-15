@@ -2,74 +2,102 @@
 #include <pybind11/stl.h>
 #include <vector>
 #include <cmath>
-#include <cstdlib>
+#include "FastFiz.h" // FastFizをインクルード
 
 namespace py = pybind11;
+using namespace Pool;
 
 class BilliardSimulator {
 private:
-    float cue_x, cue_y; 
-    float obj0_x, obj0_y; // 的球0
-    float obj1_x, obj1_y; // 的球1
-    float pocket_x = 1.0f, pocket_y = 1.0f;
+    TableState ts; // FastFizの盤面クラス
+
+    // 内部用のヘルパー関数：FastFizの座標(Point)から std::vector を作る
+    std::vector<float> _get_state_vector() {
+        Point cue_p = ts.getBall(Ball::CUE).getPos();
+        Point obj0_p = ts.getBall(Ball::ONE).getPos();
+        Point obj1_p = ts.getBall(Ball::TWO).getPos();
+        return {
+            static_cast<float>(cue_p.x), static_cast<float>(cue_p.y),
+            static_cast<float>(obj0_p.x), static_cast<float>(obj0_p.y),
+            static_cast<float>(obj1_p.x), static_cast<float>(obj1_p.y)
+        };
+    }
 
 public:
     BilliardSimulator() { reset(); }
 
     void reset() {
-        cue_x = 0.0f; cue_y = 0.0f;
-        obj0_x = 0.5f; obj0_y = 0.5f;
-        obj1_x = -0.5f; obj1_y = 0.5f;
+        ts = TableState(); // 盤面をクリア
+        
+        // 【修正点】一度変数として球を作ってから、セットする
+        Ball cue_ball(Ball::CUE, Ball::STATIONARY, 0.5, 0.5);
+        Ball obj0_ball(Ball::ONE, Ball::STATIONARY, 0.5, 1.5);
+        Ball obj1_ball(Ball::TWO, Ball::STATIONARY, 0.8, 1.5);
+        
+        ts.setBall(cue_ball);
+        ts.setBall(obj0_ball);
+        ts.setBall(obj1_ball);
     }
 
     void set_state(std::vector<float> state) {
-        cue_x = state[0]; cue_y = state[1];
-        obj0_x = state[2]; obj0_y = state[3];
-        obj1_x = state[4]; obj1_y = state[5];
+        ts = TableState();
+        
+        // 【修正点】一度変数として球を作ってから、セットする
+        Ball cue_ball(Ball::CUE, Ball::STATIONARY, state[0], state[1]);
+        Ball obj0_ball(Ball::ONE, Ball::STATIONARY, state[2], state[3]);
+        Ball obj1_ball(Ball::TWO, Ball::STATIONARY, state[4], state[5]);
+        
+        ts.setBall(cue_ball);
+        ts.setBall(obj0_ball);
+        ts.setBall(obj1_ball);
     }
 
     std::vector<float> get_state() {
-        return {cue_x, cue_y, obj0_x, obj0_y, obj1_x, obj1_y};
+        return _get_state_vector();
     }
 
-    // 【変更点】引数に target_ball (0 か 1) を追加
     std::vector<float> step(int target_ball, float power, float angle) {
-        float target_x = (target_ball == 0) ? obj0_x : obj1_x;
-        float target_y = (target_ball == 0) ? obj0_y : obj1_y;
-        
         float reward = 0.0f;
-        float done = 0.0f; 
-        float r = 0.05f;
+        float done = 1.0f; 
 
-        float dx_op = pocket_x - target_x;
-        float dy_op = pocket_y - target_y;
-        float dist_op = std::sqrt(dx_op * dx_op + dy_op * dy_op);
+        // 1. Pythonからの入力(angle, power)をFastFizのShotParamsに変換
+        ShotParams sp(0.0, 0.0, 10.0, angle, power);
 
-        // ターゲット球からポケットへの逆ベクトルを計算
-        float ghost_x = target_x - (dx_op / dist_op) * (2.0f * r);
-        float ghost_y = target_y - (dy_op / dist_op) * (2.0f * r);
-
-        // 手球からゴーストボールへ向かう「理想の打撃角度」を算出
-        float ideal_angle = atan2(ghost_y - cue_y, ghost_x - cue_x) * 180.0f / M_PI;
-        
-        if (std::abs(angle - ideal_angle) < 0.50f && power > 0.1f) {
-            // 成功したら狙った球をポケットへ
-            if(target_ball == 0) { obj0_x = pocket_x; obj0_y = pocket_y; }
-            else                 { obj1_x = pocket_x; obj1_y = pocket_y; }
-            reward = 1.0f;    
-            done = 1.0f;      
-        } else {
-            cue_x += power * cos(angle * M_PI / 180.0f) * 0.1f;
-            cue_y += power * sin(angle * M_PI / 180.0f) * 0.1f;
-            reward = 0.0f;
-            done = 1.0f; 
+        // 2. ショットが物理的に可能かチェック
+        if (ts.isPhysicallyPossible(sp) != TableState::OK_PRECONDITION) {
+            auto state = _get_state_vector();
+            state.push_back(-1.0f); // ペナルティ
+            state.push_back(1.0f);  
+            return state;
         }
 
-        return {cue_x, cue_y, obj0_x, obj0_y, obj1_x, obj1_y, reward, done};
+        // 3. FastFizでシミュレーションを実行！
+        Shot* shot = ts.executeShot(sp);
+
+        // 4. イベントリストを解析して報酬(Reward)を計算
+        const std::vector<Event*>& events = shot->getEventList();
+        Ball::Type target_id = (target_ball == 0) ? Ball::ONE : Ball::TWO;
+
+        for (Event* e : events) {
+            if (e->getType() == Event::POCKETED) {
+                PocketedEvent* pe = static_cast<PocketedEvent*>(e);
+                if (pe->getBall1() == target_id) {
+                    reward = 1.0f; // ターゲットの球を落とせたら報酬1.0
+                }
+            }
+        }
+
+        delete shot; // メモリ解放
+
+        // 5. 新しい座標を取得してPythonに返す
+        auto next_state = _get_state_vector();
+        next_state.push_back(reward);
+        next_state.push_back(done);
+
+        return next_state;
     }
 };
 
-// 【セクション3】Pythonへのバインディング
 PYBIND11_MODULE(billiard_env_cpp, m) {
     py::class_<BilliardSimulator>(m, "BilliardSimulator")
         .def(py::init<>())

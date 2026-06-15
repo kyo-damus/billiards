@@ -1,0 +1,3 @@
+[submodule "libs/fastfiz"]
+	path = libs/fastfiz
+	url = https://github.com/ekiefl/fastfiz.git
