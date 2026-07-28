@@ -3,11 +3,17 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.distributions import Normal
+
+import os
+import matplotlib.pyplot as plt
+
+import copy
+
 from custom_env import MinimalBilliardEnv
 
 # 【1】PyTorchモデルの定義 (SAC + MuZero 統合型アーキテクチャ)
 class MuZeroSACPolicyNet(nn.Module):
-    def __init__(self, state_dim=6, action_dim=2, hidden_dim=64):
+    def __init__(self, state_dim=12, action_dim=2, hidden_dim=64):
         """
         state_dim: 6 (cue_x, cue_y, obj0_x, obj0_y, obj1_x, obj1_y)
         action_dim: 2 (例: 力の強さ, 角度のズレ など。要件に合わせて変更可)
@@ -88,7 +94,7 @@ class MuZeroSACPolicyNet(nn.Module):
 
 
 class TwinQCriticNet(nn.Module):
-    def __init__(self, state_dim=6, action_dim=2, hidden_dim=64):
+    def __init__(self, state_dim=12, action_dim=2, hidden_dim=64):
         super(TwinQCriticNet, self).__init__()
         
         # --- Q1 ネットワーク ---
@@ -164,7 +170,7 @@ def test_sac_update_step():
     critic_optimizer = optim.Adam(critic.parameters(), lr=3e-4)
     
     # エントロピー係数 α (探索と活用のバランス。本来は自動調整するが今回は固定値)
-    alpha = 0.2 
+    alpha = 0.01
     gamma = 0.99 # 割引率
     
     # --- ダミーの経験バッチ(Replay Bufferから取り出したと仮定) ---
@@ -217,64 +223,116 @@ def test_sac_update_step():
     print(f"Actor Loss (方策の更新誤差): {actor_loss.item():.4f}")
     print("\n--- テスト完了：誤差逆伝播とパラメータ更新に成功 ---")
 
-if __name__ == "__main__":
-    test_sac_update_step()
+# if __name__ == "__main__":
+#     test_sac_update_step()
 
-# ※環境(custom_env)のインポートが必要になります
-# from custom_env import CustomEnv 
+
+def plot_metrics(rewards, actor_losses, critic_losses, save_dir="results"):
+    """学習結果を英語表記のグラフとして出力し保存する関数"""
+    os.makedirs(save_dir, exist_ok=True)
+    fig, axs = plt.subplots(2, 1, figsize=(10, 10))
+
+    # 1. Reward Plot
+    axs[0].plot(rewards, alpha=0.3, color='gray', label='Raw Reward')
+    # 移動平均 (Moving Average) の計算とプロット
+    window = min(100, len(rewards))
+    if window > 0:
+        rolling_avg = np.convolve(rewards, np.ones(window)/window, mode='valid')
+        axs[0].plot(range(window-1, len(rewards)), rolling_avg, color='blue', label=f'Moving Average ({window} eps)')
+    
+    axs[0].set_title('Episode Reward over Time')
+    axs[0].set_xlabel('Episode')
+    axs[0].set_ylabel('Reward')
+    axs[0].legend()
+    axs[0].grid(True)
+
+    # 2. Loss Plot
+    axs[1].plot(critic_losses, alpha=0.8, color='red', label='Critic Loss')
+    axs[1].plot(actor_losses, alpha=0.8, color='green', label='Actor Loss')
+    axs[1].set_title('Training Losses over Time')
+    axs[1].set_xlabel('Episode')
+    axs[1].set_ylabel('Loss')
+    axs[1].legend()
+    axs[1].grid(True)
+
+    plt.tight_layout()
+    plot_path = os.path.join(save_dir, 'training_metrics.png')
+    plt.savefig(plot_path)
+    plt.close()
+    print(f"Saved training metrics plot to: {plot_path}")
 
 def train_sac_real_env():
-    print("\n--- FastFiz(実環境)でのSAC学習ループ開始 ---")
+    print("\n--- Starting SAC Training Loop on Real Environment (FastFiz) ---")
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     
-    # 1. 環境とネットワークの初期化
-    env = MinimalBilliardEnv() # C++と繋がる実際の環境を初期化
-    actor = MuZeroSACPolicyNet(state_dim=6, action_dim=2).to(device)
-    critic = TwinQCriticNet(state_dim=6, action_dim=2).to(device)
+    env = MinimalBilliardEnv()
+    actor = MuZeroSACPolicyNet(state_dim=12, action_dim=2, hidden_dim=256).to(device)
+    critic = TwinQCriticNet(state_dim=12, action_dim=2, hidden_dim=256).to(device)
+    
+    # ターゲットネットワーク
+    critic_target = copy.deepcopy(critic).to(device)
+    critic_target.eval()
     
     actor_optimizer = optim.Adam(actor.parameters(), lr=3e-4)
     critic_optimizer = optim.Adam(critic.parameters(), lr=3e-4)
     
-    replay_buffer = ReplayBuffer(capacity=50000)
+    # ==========================================
+    # α（エントロピー係数）の自動調整用セットアップ
+    # ==========================================
+    target_entropy = -2.0  # action_dimが2次元なので -2.0
+    # αは正の値である必要があるため、対数空間(log_alpha)で学習させる
+    log_alpha = torch.zeros(1, requires_grad=True, device=device)
+    alpha_optimizer = optim.Adam([log_alpha], lr=3e-4)
+    
+    # ループ開始前の初期値（exp(0) = 1.0）
+    alpha = log_alpha.exp().item() 
+    
+    replay_buffer = ReplayBuffer(capacity=100000) 
     
     batch_size = 64
-    max_episodes = 500
-    alpha = 0.2
+    max_episodes = 100000
     gamma = 0.99
+    tau = 0.005
+    
+    history_reward = []
+    history_actor_loss = []
+    history_critic_loss = []
+    
+    save_dir = "results"
+    os.makedirs(save_dir, exist_ok=True)
     
     for episode in range(max_episodes):
-        # 環境の初期化 (Gymnasiumの仕様に合わせて obs と info を受け取る)
         state, _ = env.reset() 
         episode_reward = 0
         
+        ep_actor_loss = 0.0
+        ep_critic_loss = 0.0
+        update_steps = 0
+        
         done = False
         while not done:
-            # --- 実行フェーズ ---
-            # 状態をテンソル化してActorに行動を決めさせる
             state_tensor = torch.FloatTensor(state).unsqueeze(0).to(device)
             with torch.no_grad():
                 action_tensor = actor.sample_action(state_tensor)
             
-            # GPUテンソルからNumpy配列(1D)に変換して環境に渡す
             action = action_tensor.cpu().numpy()[0]
-            
-            # 物理エンジンに行動を渡し、結果を受け取る
             next_state, reward, terminated, truncated, _ = env.step(action)
             done = terminated or truncated
             
-            # 経験をバッファに保存
             replay_buffer.push(state, action, reward, next_state, done)
             state = next_state
             episode_reward += reward
             
-            # --- 学習フェーズ ---
             if len(replay_buffer) > batch_size:
                 b_state, b_action, b_reward, b_next_state, b_done = replay_buffer.sample(batch_size, device)
                 
-                # Criticの更新
+                # ==========================================
+                # 1. Critic Update
+                # ==========================================
                 with torch.no_grad():
                     next_action, next_log_prob = actor.sample_action_and_log_prob(b_next_state)
-                    next_q1, next_q2 = critic(b_next_state, next_action)
+                    # 次のQ値（目標値）の計算には、ブレないターゲットネットワークを使う
+                    next_q1, next_q2 = critic_target(b_next_state, next_action)
                     next_q_target = torch.min(next_q1, next_q2) - alpha * next_log_prob
                     expected_q = b_reward + (1 - b_done) * gamma * next_q_target
 
@@ -285,7 +343,13 @@ def train_sac_real_env():
                 critic_loss.backward()
                 critic_optimizer.step()
                 
-                # Actorの更新
+                # ==========================================
+                # 2. Actor Update
+                # ==========================================
+                # 計算効率化：Actor更新中はCriticの勾配計算をフリーズする
+                for p in critic.parameters():
+                    p.requires_grad = False
+                    
                 new_action, log_prob = actor.sample_action_and_log_prob(b_state)
                 q1_new, q2_new = critic(b_state, new_action)
                 q_new = torch.min(q1_new, q2_new)
@@ -295,11 +359,60 @@ def train_sac_real_env():
                 actor_loss.backward()
                 actor_optimizer.step()
                 
-        if (episode + 1) % 10 == 0:
-            print(f"Episode {episode + 1} | 獲得報酬: {episode_reward:.4f} | バッファサイズ: {len(replay_buffer)}")
+                # フリーズ解除
+                for p in critic.parameters():
+                    p.requires_grad = True
 
-    print("--- 実環境での学習ループ完了 ---")
+                # ==========================================
+                # 3. Alpha Update (Auto-tuning)
+                # ==========================================
+                # 現在の方策の確率密度(log_prob)と目標値(target_entropy)の差分からLossを計算
+                alpha_loss = -(log_alpha * (log_prob + target_entropy).detach()).mean()
 
+                alpha_optimizer.zero_grad()
+                alpha_loss.backward()
+                alpha_optimizer.step()
+                
+                with torch.no_grad():
+                    # log_alpha の下限を ln(0.05) ≈ -2.99 に制限する
+                    log_alpha.copy_(torch.clamp(log_alpha, min=np.log(0.01)))
+
+                # 次のステップ用に、更新された tensor から実数値を取り出す
+                alpha = log_alpha.exp().item()
+                
+                # ==========================================
+                # 4. Target Network Update
+                # ==========================================
+                for target_param, param in zip(critic_target.parameters(), critic.parameters()):
+                    target_param.data.copy_(target_param.data * (1.0 - tau) + param.data * tau)
+                
+                ep_critic_loss += critic_loss.item()
+                ep_actor_loss += actor_loss.item()
+                update_steps += 1
+                
+        history_reward.append(episode_reward)
+        if update_steps > 0:
+            history_actor_loss.append(ep_actor_loss / update_steps)
+            history_critic_loss.append(ep_critic_loss / update_steps)
+        else:
+            history_actor_loss.append(0.0)
+            history_critic_loss.append(0.0)
+                
+        if (episode + 1) % 100 == 0:
+            avg_rew = np.mean(history_reward[-100:])
+            # 【追加】Alphaの推移を確認できるようにprint文を拡張
+            print(f"Episode {episode + 1}/{max_episodes} | Avg Reward (last 100): {avg_rew:.4f} | Buffer: {len(replay_buffer)} | Alpha: {alpha:.4f}")
+            
+        if (episode + 1) % 1000 == 0:
+            torch.save(actor.state_dict(), os.path.join(save_dir, f'sac_actor_ep{episode+1}.pth'))
+            plot_metrics(history_reward, history_actor_loss, history_critic_loss, save_dir)
+
+    print("--- Training Loop Completed ---")
+    torch.save(actor.state_dict(), os.path.join(save_dir, 'sac_actor_final.pth'))
+    torch.save(critic.state_dict(), os.path.join(save_dir, 'sac_critic_final.pth'))
+    plot_metrics(history_reward, history_actor_loss, history_critic_loss, save_dir)
+    print("Models and final plots have been saved in the 'results' directory.")
+    
 if __name__ == "__main__":
     train_sac_real_env()
 
@@ -308,11 +421,11 @@ def test_architecture():
     print("--- ネットワークアーキテクチャのテスト開始 ---")
     
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = MuZeroSACPolicyNet(state_dim=6, action_dim=2, hidden_dim=64).to(device)
+    model = MuZeroSACPolicyNet(state_dim=12, action_dim=2, hidden_dim=256).to(device)
     
     # ダミーの入力データ (バッチサイズ1, state_dim=6)
     # [cue_x, cue_y, obj0_x, obj0_y, obj1_x, obj1_y] を想定
-    dummy_state = torch.tensor([[0.5, -0.5, 0.1, 0.2, -0.8, 0.3]], dtype=torch.float32).to(device)
+    dummy_state = torch.tensor([[0.5, -0.5, 0.1, 0.2, -0.8, 0.3, 0.9, 0.8]], dtype=torch.float32).to(device)
     
     print(f"入力Stateの形状: {dummy_state.shape}")
     
@@ -329,7 +442,7 @@ def test_architecture():
     print(f"決定された行動 (Action ∈ [-1, 1]): {action.detach().cpu().numpy()}")
 
     # 3. Criticネットワーク (Twin Q-Networks) のテスト
-    critic = TwinQCriticNet(state_dim=6, action_dim=2, hidden_dim=64).to(device)
+    critic = TwinQCriticNet(state_dim=12, action_dim=2, hidden_dim=256).to(device)
     
     # Policyが決定した行動(action)と状態(dummy_state)をCriticに渡す
     q1, q2 = critic(dummy_state, action)
@@ -342,5 +455,5 @@ def test_architecture():
     print("\n--- テスト完了：勾配計算可能な確率的出力モデルの構築に成功 ---")
     
 
-if __name__ == "__main__":
-    test_architecture()
+# if __name__ == "__main__":
+#     test_architecture()

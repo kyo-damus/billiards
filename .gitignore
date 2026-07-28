@@ -11,3 +11,4 @@ cmake_install.cmake*.pth
 policy_model.pth
 cmake_install.cmake
 Gomi/
+build/results/
