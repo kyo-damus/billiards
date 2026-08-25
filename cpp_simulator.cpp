@@ -2,6 +2,7 @@
 #include <pybind11/stl.h>
 #include <vector>
 #include <cmath>
+#include <stdexcept>
 #include "FastFiz.h" // FastFizをインクルード
 
 namespace py = pybind11;
@@ -21,6 +22,36 @@ private:
             static_cast<float>(obj0_p.x), static_cast<float>(obj0_p.y),
             static_cast<float>(obj1_p.x), static_cast<float>(obj1_p.y)
         };
+    }
+
+    Ball::State _state_from_pocket_index(int pocket_index) {
+        switch (pocket_index) {
+            case -1:
+                return Ball::STATIONARY;
+
+            case 0:
+                return Ball::POCKETED_SW;
+
+            case 1:
+                return Ball::POCKETED_W;
+
+            case 2:
+                return Ball::POCKETED_NW;
+
+            case 3:
+                return Ball::POCKETED_NE;
+
+            case 4:
+                return Ball::POCKETED_E;
+
+            case 5:
+                return Ball::POCKETED_SE;
+
+            default:
+                throw std::invalid_argument(
+                    "pocket_index must be -1 or 0..5"
+                );
+        }
     }
 
 public:
@@ -52,8 +83,97 @@ public:
         ts.setBall(obj1_ball);
     }
 
+    void set_full_state(
+        std::vector<float> positions,
+        std::vector<int> pocket_indices
+    ){
+        if (positions.size() != 6) {
+            throw std::invalid_argument(
+                "positions must contain 6 values"
+            );
+        }
+
+        if (pocket_indices.size() != 3) {
+            throw std::invalid_argument(
+                "pocket_indices must contain 3 values"
+            );
+        }
+
+        ts = TableState();
+
+        Ball cue_ball(
+            Ball::CUE,
+            _state_from_pocket_index(pocket_indices[0]),
+            positions[0],
+            positions[1]
+        );
+
+        Ball obj0_ball(
+            Ball::ONE,
+            _state_from_pocket_index(pocket_indices[1]),
+            positions[2],
+            positions[3]
+        );
+
+        Ball obj1_ball(
+            Ball::TWO,
+            _state_from_pocket_index(pocket_indices[2]),
+            positions[4],
+            positions[5]
+        );
+
+        ts.setBall(cue_ball);
+        ts.setBall(obj0_ball);
+        ts.setBall(obj1_ball);
+    }
+
     std::vector<float> get_state() {
         return _get_state_vector();
+    }
+
+    int get_pocket_index(int ball_id) {
+        Ball::Type id;
+
+        // Python側:
+        // -1 = cue ball
+        //  0 = object ball 0 (ONE)
+        //  1 = object ball 1 (TWO)
+        if (ball_id == -1) {
+            id = Ball::CUE;
+        } else if (ball_id == 0) {
+            id = Ball::ONE;
+        } else if (ball_id == 1) {
+            id = Ball::TWO;
+        } else {
+            throw std::invalid_argument(
+                "ball_id must be -1, 0, or 1"
+            );
+        }
+
+        Ball::State state = ts.getBall(id).getState();
+
+        switch (state) {
+            case Ball::POCKETED_SW:
+                return 0;
+
+            case Ball::POCKETED_W:
+                return 1;
+
+            case Ball::POCKETED_NW:
+                return 2;
+
+            case Ball::POCKETED_NE:
+                return 3;
+
+            case Ball::POCKETED_E:
+                return 4;
+
+            case Ball::POCKETED_SE:
+                return 5;
+
+            default:
+                return -1;
+        }
     }
 
     std::vector<float> step(int target_ball, float power, float angle) {
@@ -103,6 +223,8 @@ PYBIND11_MODULE(billiard_env_cpp, m) {
         .def(py::init<>())
         .def("reset", &BilliardSimulator::reset)
         .def("set_state", &BilliardSimulator::set_state)
+        .def("set_full_state", &BilliardSimulator::set_full_state)
         .def("get_state", &BilliardSimulator::get_state)
+        .def("get_pocket_index", &BilliardSimulator::get_pocket_index)
         .def("step", &BilliardSimulator::step);
 }

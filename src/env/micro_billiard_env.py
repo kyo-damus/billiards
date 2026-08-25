@@ -2,8 +2,28 @@ import gymnasium as gym
 from gymnasium import spaces
 import numpy as np
 
-from src.common.types import MacroAction, Strategy
+from src.common.types import (
+    GameState,
+    MacroAction,
+    Strategy,
+)
+
 from src.env.fastfiz_simulator import FastFizSimulator
+
+from src.env.shot_geometry import (
+    ghost_ball_position,
+    is_direct_shot_feasible,
+)
+
+from src.env.simulator_state import (
+    SimulatorSnapshot,
+)
+
+from src.common.table import (
+    TABLE_WIDTH,
+    TABLE_LENGTH,
+    POCKET_POSITIONS,
+)
 
 
 class MicroBilliardEnv(gym.Env):
@@ -16,11 +36,15 @@ class MicroBilliardEnv(gym.Env):
 
     metadata = {}
 
-    # 現シミュレータで使用しているポケット
-    # 将来的に複数ポケットへ拡張する
-    POCKET_POSITIONS = {
-        0: np.array([1.0, 1.0], dtype=np.float32),
-    }
+    TABLE_WIDTH = TABLE_WIDTH
+    TABLE_LENGTH = TABLE_LENGTH
+
+    POCKET_POSITIONS = POCKET_POSITIONS
+
+    MIN_POWER = 0.5
+    MAX_POWER = 3.0
+
+    MAX_ANGLE_OFFSET = 10.0
 
     def __init__(self):
         super().__init__()
@@ -99,6 +123,57 @@ class MicroBilliardEnv(gym.Env):
         self._episode_active = True
 
         return self._build_observation(raw_obs), {}
+    
+    def reset_to_game_state(
+        self,
+        game_state,
+        macro_action,
+    ):
+        """
+        Macro/MCTSから渡されたGameStateを使って、
+        Microの1-shot episodeを開始する。
+        """
+
+        self.set_macro_action(macro_action)
+
+        # 対象球が既にポケット済みなら実行不可
+        target_state_index = (
+            macro_action.target_ball + 1
+        )
+
+        if game_state.is_pocketed(
+            target_state_index
+        ):
+            raise ValueError(
+                "Cannot target an already pocketed ball."
+            )
+
+        positions = np.asarray(
+            game_state.ball_positions,
+            dtype=np.float32,
+        )
+
+        if positions.shape != (3, 2):
+            raise ValueError(
+                "game_state.ball_positions must "
+                f"have shape (3, 2), got {positions.shape}"
+            )
+
+        snapshot = SimulatorSnapshot(
+            positions=positions,
+            pocket_indices=np.asarray(
+                game_state.ball_pocket_indices,
+                dtype=np.int32,
+            ),
+        )
+
+        self.sim.restore(snapshot)
+
+        self._episode_active = True
+
+        return self._build_observation(
+            self.sim.get_state()
+        )
 
     def step(self, action):
 
@@ -134,16 +209,30 @@ class MicroBilliardEnv(gym.Env):
         # SAC action -> physical shot parameters
         # -----------------------------------------
 
-        power = 0.4 + 0.6 * ((action[0] + 1.0) / 2.0)
+        power = self.MIN_POWER + (
+            self.MAX_POWER - self.MIN_POWER
+        ) * ((action[0] + 1.0) / 2.0)
 
+        # 対象球を指定ポケットへ送るための
+        # ghost-ball位置を計算
+        ghost_pos = ghost_ball_position(
+            target_pos,
+            pocket_pos,
+        )
+
+        # 手球 -> ghost-ball が基準ショット方向
         ideal_angle = np.degrees(
             np.arctan2(
-                target_pos[1] - cue_pos[1],
-                target_pos[0] - cue_pos[0],
+                ghost_pos[1] - cue_pos[1],
+                ghost_pos[0] - cue_pos[0],
             )
         )
 
-        angle = ideal_angle + action[1] * 45.0
+        # SACは基準方向からの微調整を担当
+        angle = (
+            ideal_angle
+            + action[1] * self.MAX_ANGLE_OFFSET
+        )
 
         result = self.sim.step(
             target_ball=target_ball,
@@ -153,11 +242,28 @@ class MicroBilliardEnv(gym.Env):
 
         raw_obs = result.state
 
-        reward, success, scratched = self._calculate_reward(
+        target_pocketed_at = self.sim.get_pocket_index(
+            target_ball
+        )
+
+        cue_pocketed_at = self.sim.get_pocket_index(-1)
+
+        success = (
+            target_pocketed_at
+            == self.macro_action.target_pocket
+        )
+
+        scratched = (
+            cue_pocketed_at != -1
+        )
+
+        reward = self._calculate_reward(
             prev_state,
             raw_obs,
             target_ball,
             pocket_pos,
+            success,
+            scratched,
         )
 
         observation = self._build_observation(raw_obs)
@@ -167,8 +273,24 @@ class MicroBilliardEnv(gym.Env):
             "target_pocket": self.macro_action.target_pocket,
             "power": float(power),
             "angle": float(angle),
+            "ideal_angle": float(ideal_angle),
+            "angle_offset": float(
+                action[1] * self.MAX_ANGLE_OFFSET
+            ),
+
             "success": success,
             "scratched": scratched,
+
+            "target_pocketed_at": target_pocketed_at,
+            "cue_pocketed_at": cue_pocketed_at,
+
+            "target_pocketed_anywhere": (
+                target_pocketed_at != -1
+            ),
+
+            "physically_possible": (
+                result.legacy_reward >= 0.0
+            ),
         }
 
         # Microは1ショットで必ずepisode終了
@@ -263,6 +385,8 @@ class MicroBilliardEnv(gym.Env):
         current_state,
         target_ball,
         pocket_pos,
+        success,
+        scratched,
     ):
         previous_target_pos = self._get_ball_position(
             prev_state,
@@ -289,8 +413,6 @@ class MicroBilliardEnv(gym.Env):
         )
 
         reward = -1.0
-        success = False
-        scratched = False
 
         # 空振り
         if movement < 0.001:
@@ -327,17 +449,12 @@ class MicroBilliardEnv(gym.Env):
         # ポケットイン
         if final_dist < self.pocket_radius:
             reward += 10.0
-            success = True
 
         # スクラッチ
-        if (
-            np.linalg.norm(pocket_pos - cue_pos)
-            < self.pocket_radius
-        ):
+        if scratched:
             reward -= 10.0
-            scratched = True
 
-        return float(reward), success, scratched
+        return float(reward)
 
     # ============================================================
     # Utility
@@ -365,30 +482,51 @@ class MicroBilliardEnv(gym.Env):
 
     def _sample_initial_state(self):
         """
-        球同士が重ならない初期配置を生成。
-        Gymnasiumのseedに従う。
+        FastFizのテーブル内部に3球をランダム配置する。
+        レール・ポケット付近は避ける。
         """
 
+        margin = 0.15
+
         while True:
+
             cue = self.np_random.uniform(
-                low=[-1.0, -1.0],
-                high=[1.0, 1.0],
+                low=[
+                    margin,
+                    margin,
+                ],
+                high=[
+                    self.TABLE_WIDTH - margin,
+                    self.TABLE_LENGTH - margin,
+                ],
             )
 
             obj0 = self.np_random.uniform(
-                low=[0.0, 0.0],
-                high=[1.0, 1.0],
+                low=[
+                    margin,
+                    margin,
+                ],
+                high=[
+                    self.TABLE_WIDTH - margin,
+                    self.TABLE_LENGTH - margin,
+                ],
             )
 
             obj1 = self.np_random.uniform(
-                low=[-1.0, -1.0],
-                high=[0.0, 0.0],
+                low=[
+                    margin,
+                    margin,
+                ],
+                high=[
+                    self.TABLE_WIDTH - margin,
+                    self.TABLE_LENGTH - margin,
+                ],
             )
 
             if (
-                np.linalg.norm(cue - obj0) > 0.06
-                and np.linalg.norm(cue - obj1) > 0.06
-                and np.linalg.norm(obj0 - obj1) > 0.06
+                np.linalg.norm(cue - obj0) > 0.10
+                and np.linalg.norm(cue - obj1) > 0.10
+                and np.linalg.norm(obj0 - obj1) > 0.10
             ):
                 return np.array(
                     [
@@ -401,6 +539,39 @@ class MicroBilliardEnv(gym.Env):
                     ],
                     dtype=np.float32,
                 )
+
+    def is_current_macro_feasible(self) -> bool:
+        if self.macro_action is None:
+            raise RuntimeError(
+                "MacroAction has not been set."
+            )
+
+        state = self.sim.get_state()
+
+        cue_pos = state[0:2]
+
+        target_ball = self.macro_action.target_ball
+
+        target_pos = self._get_ball_position(
+            state,
+            target_ball,
+        )
+
+        other_pos = self._get_ball_position(
+            state,
+            1 - target_ball,
+        )
+
+        pocket_pos = self._get_target_pocket_position()
+
+        return is_direct_shot_feasible(
+            cue_pos=cue_pos,
+            target_pos=target_pos,
+            other_pos=other_pos,
+            pocket_pos=pocket_pos,
+            table_width=self.TABLE_WIDTH,
+            table_length=self.TABLE_LENGTH,
+        )
 
     def get_state(self):
         return self.sim.get_state()
