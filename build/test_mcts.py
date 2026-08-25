@@ -1,87 +1,61 @@
-import numpy as np
-import billiard_env_cpp # C++ FastFiz環境
-import copy
 import torch
-from train_policy import PolicyNetwork
+import torch.nn.functional as F
+import numpy as np
 
-# 学習済みモデルの読み込み
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-model = PolicyNetwork().to(device)
-# 注: 必要に応じてパスを確認してください
-model.load_state_dict(torch.load("policy_model.pth", weights_only=True))
-model.eval()
-
-def get_ai_intuition(env_state, target_ball):
-    # FastFiz環境の state は [cue_x, cue_y, obj0_x, obj0_y, obj1_x, obj1_y]
-    state_for_ai = list(env_state)
+def run_muzero_mcts(obs, rep_net, dyn_net, pred_net, config, num_simulations=30, discount=0.99):
+    """
+    物理シミュレータを使わず、AIの3つのネットワークだけでMCTS（先読み探索）を行う
+    """
+    # 1. まず、現在の現実の盤面を「脳内言語（潜在状態）」に変換する
+    # ※ここは representation_net の出番です
+    obs_tensor = torch.FloatTensor(obs).unsqueeze(0)
     
-    # ターゲット球が1番の場合、的球の位置を入れ替えてAIに入力するロジックは維持
-    if target_ball == 1:
-        state_for_ai[2], state_for_ai[3], state_for_ai[4], state_for_ai[5] = \
-            state_for_ai[4], state_for_ai[5], state_for_ai[2], state_for_ai[3]
-
-    with torch.no_grad():
-        inputs = torch.tensor([state_for_ai], dtype=torch.float32).to(device)
-        output = model(inputs)[0].cpu().numpy()
-        # [sin, cos] から角度を復元
-        predicted_angle = np.degrees(np.arctan2(output[0], output[1]))
-    return predicted_angle
-
-def hierarchical_mcts_search(env, num_simulations=30):
-    original_state = env.get_state()
-    best_action = None
-    best_reward = -1.0
-
-    # ターゲット0(的球1)とターゲット1(的球2)の両方を探索
-    for target_ball in [0, 1]:
-        suggested_angle = get_ai_intuition(original_state, target_ball)
+    with torch.no_grad(): # 探索中は学習しないので勾配計算をオフ
+        latent_state = rep_net(obs_tensor)
         
-        for i in range(num_simulations):
-            env.set_state(original_state)
+        # 2. 現在の盤面に対するAIの「直感（Prior）」を取得する
+        mu, log_std, current_value = pred_net(latent_state)
+        std = log_std.exp()
+        
+        # --- 行動候補のサンプリング (以前の get_sac_candidates と同じ) ---
+        action_candidates = []
+        best_guess = torch.tanh(mu).cpu().numpy()[0]
+        action_candidates.append(best_guess) # 本命
+        
+        dist = torch.distributions.Normal(mu, std)
+        for _ in range(num_simulations - 1): # 揺らぎ
+            u = dist.rsample()
+            action = torch.tanh(u).cpu().numpy()[0]
+            action_candidates.append(action)
             
-            # 物理エンジンのため、角度の揺らぎを適度に設定
-            test_angle = np.random.normal(loc=suggested_angle, scale=2.0)
-            power = 2.0 # 固定パワー
+        # --- 脳内シミュレーション (ここが最大の変更点！) ---
+        best_action = None
+        best_score = -float('inf')
+        
+        for action in action_candidates:
+            action_tensor = torch.FloatTensor(action).unsqueeze(0)
             
-            # FastFizのC++インターフェースに合わせる
-            # return: [cue_x, cue_y, obj0_x, obj0_y, obj1_x, obj1_y, reward, done]
-            res = env.step(target_ball, power, test_angle)
-            reward = res[6] # 報酬
+            # 【ズル廃止】env.step(action) の代わりに dyn_net を使う！
+            # 脳内で「この行動をとったら、次どうなるか？報酬は？」を予測する
+            next_latent, predicted_reward = dyn_net(latent_state, action_tensor)
             
-            if reward > best_reward:
-                best_reward = reward
-                best_action = (target_ball, power, test_angle)
+            # 【評価】Criticの代わりに pred_net の value_net を使う！
+            # 予測された「未来の脳内状態」がどれくらい有利かを評価
+            _, _, future_value = pred_net(next_latent)
+            
+            # 総合スコア ＝ 脳内予測報酬 ＋ (割引率 × 未来の脳内価値)
+            score = predicted_reward.item() + discount * future_value.item()
+            
+            # 最もスコアが高い行動を記録
+            if score > best_score:
+                best_score = score
+                best_action = action
                 
-    return best_action
-
-if __name__ == "__main__":
-    env = billiard_env_cpp.BilliardSimulator()
+    # --- 学習用の Target(正解) データを返す ---
+    # MCTSが脳内でウンウン考えた結果、「この手が一番良かった(best_action)」「価値はこれくらいだった(best_score)」
+    # という結果を、ネットワークを鍛えるための「正解ラベル」としてメインループに返す
+    target_policy = best_action  # AIの直感(mu)をこの値に近づけるように学習させる
+    target_value = best_score    # AIの価値予測(value)をこの値に近づけるように学習させる
     
-    experience_buffer_states = []
-    experience_buffer_targets = []
+    return best_action, target_policy, target_value
     
-    num_episodes = 100
-    print(f"=== FastFiz環境での自己対局開始 ===")
-    
-    for episode in range(num_episodes):
-        env.reset()
-        obs = env.get_state()
-        
-        action = hierarchical_mcts_search(env, num_simulations=30)
-        
-        if action is not None:
-            target, power, angle = action
-            # 最終結果の反映
-            res = env.step(target, power, angle)
-            reward = res[6]
-            print(f"[Episode {episode+1}] Reward: {reward}")
-            
-            if reward == 1.0:
-                experience_buffer_states.append(list(obs))
-                experience_buffer_targets.append([angle])
-    
-    # データの保存
-    if len(experience_buffer_states) > 0:
-        torch.save({"states": torch.tensor(experience_buffer_states), 
-                    "targets": torch.tensor(experience_buffer_targets)}, "mcts_experience.pt")
-        print(f"=== 保存完了: {len(experience_buffer_states)}件 ===")

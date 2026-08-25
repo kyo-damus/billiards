@@ -40,7 +40,8 @@ class MinimalBilliardEnv(gym.Env):
 
     def step(self, action):
         target = 0
-        power = (action[0] + 1.0) / 2.0  # [-1, 1] -> [0.0, 1.0]
+        # power = (action[0] + 1.0) / 2.0  # [-1, 1] -> [0.0, 1.0]
+        power = 0.4 + 0.6 * ((action[0] + 1.0) / 2.0)
         
         prev_obs = self.get_state()
         cue_x, cue_y = prev_obs[0], prev_obs[1]
@@ -58,40 +59,43 @@ class MinimalBilliardEnv(gym.Env):
         
         movement = np.linalg.norm(obj0_pos - prev_obj0_pos)
         
-        # 報酬計算のための「打つ前」と「打った後」のポケットまでの距離
         initial_dist = np.linalg.norm(self.pocket_pos - prev_obj0_pos)
         final_dist = np.linalg.norm(self.pocket_pos - obj0_pos)
         
-        reward = 0.0
-        terminated = True 
+        terminated = False 
+        
+        # ==================================================
+        # 【修正】報酬ハッキングを防ぐ、厳密な密な報酬設計
+        # ==================================================
+        # 1. ターン消費の基本ペナルティ（ダラダラするのを防ぐ）
+        reward = -1.0 
             
         if movement < 0.001:
-            # 空振りペナルティ
-            reward = -1.0 
+            # 空振りはさらにペナルティ
+            reward -= 1.0 
         else:
-            # ==================================================
-            # 【大改修】コサイン類似度による「方向（ベクトル）」の評価
-            # ==================================================
-            # 1. 的球が実際に転がったベクトル
-            move_vec = obj0_pos - prev_obj0_pos
-            # 2.打つ前の的球から、ポケットへの理想のベクトル
-            target_vec = self.pocket_pos - prev_obj0_pos
+            # 2. 距離の減少量による報酬（近づいた分だけプラス）
+            # ※最大でも初期距離分しか稼げないため、無限稼ぎが不可能
+            dist_reduction = initial_dist - final_dist
+            reward += dist_reduction * 3.0  
             
-            # コサイン類似度 [-1.0, 1.0] の計算 (内積 / (ノルムの積))
-            # 1e-8 はゼロ除算防止用
+            # 3. 方向ベースの微小ボーナス（コサイン類似度）
+            move_vec = obj0_pos - prev_obj0_pos
+            target_vec = self.pocket_pos - prev_obj0_pos
             cos_sim = np.dot(move_vec, target_vec) / (np.linalg.norm(move_vec) * np.linalg.norm(target_vec) + 1e-8)
             
-            # 角度が合っているほど報酬を高くする（最大 +2.0, 最小 -2.0）
-            reward = (np.clip(cos_sim, 0.0, 1.0) ** 3) * 5.0
-            
-            # ポケットに入ったら特大ボーナス
-            final_dist = np.linalg.norm(self.pocket_pos - obj0_pos)
+            if cos_sim > 0:
+                reward += cos_sim * 0.5  # 稼ぎ防止のため、ボーナスは小さめに設定
+
+            # 4. ポケットイン判定（ゴール）
             if final_dist < self.pocket_radius:
                 reward += 10.0
+                terminated = True 
                 
-        # スクラッチペナルティ
+        # 5. スクラッチペナルティ
         if np.linalg.norm(self.pocket_pos - cue_pos) < self.pocket_radius:
             reward -= 10.0
+            terminated = True 
 
         rel_obs = self._get_relative_obs(raw_obs)
             
