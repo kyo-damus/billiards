@@ -266,6 +266,14 @@ class MicroBilliardEnv(gym.Env):
             scratched,
         )
 
+        wrong_pocket = (
+            target_pocketed_at >= 0
+            and target_pocketed_at != self.macro_action.target_pocket
+        )
+
+        if wrong_pocket:
+            reward -= 3.0
+
         observation = self._build_observation(raw_obs)
 
         info = {
@@ -291,6 +299,7 @@ class MicroBilliardEnv(gym.Env):
             "physically_possible": (
                 result.legacy_reward >= 0.0
             ),
+            "wrong_pocket": wrong_pocket,
         }
 
         # Microは1ショットで必ずepisode終了
@@ -298,6 +307,23 @@ class MicroBilliardEnv(gym.Env):
         terminated = True
 
         return observation, reward, terminated, False, info
+
+    def get_physical_observation(self):
+        """
+        TacticalGoalに依存しない
+        現在の物理状態を返す。
+        """
+
+        from src.micro.goal_observation import (
+            build_physical_observation,
+        )
+
+        snapshot = self.sim.snapshot()
+
+        return build_physical_observation(
+            snapshot.positions,
+            snapshot.pocket_indices,
+        )
 
     # ============================================================
     # Observation

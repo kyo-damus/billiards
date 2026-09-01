@@ -14,6 +14,14 @@ from src.game.rules import (
     GameTransitionResult,
 )
 
+from src.goal.types import (
+    TacticalGoal,
+    TacticalGoalType,
+)
+
+from src.macro.candidate import (
+    MacroCandidate,
+)
 
 class DummyMicroAgent:
     """
@@ -21,12 +29,16 @@ class DummyMicroAgent:
     transitionの接続テスト専用。
     """
 
+    def __init__(self):
+        self.last_goal = None
+
     def select_action(
         self,
         observation,
-        deterministic=False,
+        goal,
+        deterministic=True,
     ):
-        assert observation.shape == (12,)
+        self.last_goal = goal
 
         return np.array(
             [0.0, 0.0],
@@ -161,3 +173,120 @@ def test_transition_uses_game_rules():
     assert result.reward == 123.0
     assert result.terminated is True
     
+def test_physics_transition_passes_tactical_goal():
+
+    micro_agent = DummyMicroAgent()
+
+    transition = PhysicsMacroTransitionModel(
+        micro_agent=micro_agent,
+        deterministic=True,
+    )
+
+    state = GameState(
+        ball_positions=np.array(
+            [
+                [0.80, 1.118],  # cue
+                [0.40, 1.118],  # object ball 0
+                [0.80, 0.40],   # object ball 1
+            ],
+            dtype=np.float32,
+        ),
+        score=np.array(
+            [0.0, 0.0],
+            dtype=np.float32,
+        ),
+        current_player=0,
+        ball_pocket_indices=np.array(
+            [-1, -1, -1],
+            dtype=np.int32,
+        ),
+    )
+
+    action = MacroAction(
+        strategy=Strategy.ATTACK,
+        target_ball=0,
+        target_pocket=1,
+    )
+
+    transition.step(
+        state,
+        action,
+    )
+
+    assert micro_agent.last_goal is not None
+
+    assert (
+        micro_agent.last_goal.goal_type
+        == TacticalGoalType.DIRECT_ATTACK
+    )
+
+    assert (
+        micro_agent.last_goal.target_ball
+        == 0
+    )
+
+    assert (
+        micro_agent.last_goal.target_pocket
+        == 1
+    )
+
+def test_transition_accepts_macro_candidate():
+
+    micro_agent = DummyMicroAgent()
+
+    transition = PhysicsMacroTransitionModel(
+        micro_agent=micro_agent,
+        deterministic=True,
+    )
+
+    state = GameState(
+        ball_positions=np.array(
+            [
+                [0.80, 1.118],
+                [0.40, 1.118],
+                [0.80, 0.40],
+            ],
+            dtype=np.float32,
+        ),
+        score=np.zeros(
+            2,
+            dtype=np.float32,
+        ),
+        current_player=0,
+        ball_pocket_indices=np.array(
+            [-1, -1, -1],
+            dtype=np.int32,
+        ),
+    )
+
+    action = MacroAction(
+        strategy=Strategy.ATTACK,
+        target_ball=0,
+        target_pocket=1,
+    )
+
+    goal = TacticalGoal(
+        goal_type=TacticalGoalType.DIRECT_ATTACK,
+        target_ball=0,
+        target_pocket=1,
+    )
+
+    candidate = MacroCandidate(
+        action=action,
+        goal=goal,
+    )
+
+    result = transition.step(
+        state,
+        candidate,
+    )
+
+    assert isinstance(
+        result.next_state,
+        GameState,
+    )
+
+    assert (
+        micro_agent.last_goal
+        == goal
+    )

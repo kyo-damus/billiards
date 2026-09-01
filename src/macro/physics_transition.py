@@ -7,6 +7,13 @@ from src.macro.transition import (
     MacroTransitionResult,
 )
 
+from src.goal.adapter import (
+    macro_action_to_tactical_goal,
+)
+
+from src.macro.candidate import (
+    MacroCandidate,
+)
 
 class PhysicsMacroTransitionModel:
     """
@@ -48,96 +55,107 @@ class PhysicsMacroTransitionModel:
     ) -> MacroTransitionResult:
 
         # --------------------------------
-        # Macro state -> Micro observation
+        # MacroCandidate / MacroAction
+        # を共通形式へ変換
         # --------------------------------
 
-        observation = (
-            self.env.reset_to_game_state(
-                game_state=state,
-                macro_action=action,
+        if isinstance(
+            action,
+            MacroCandidate,
+        ):
+            macro_action = action.action
+            tactical_goal = action.goal
+
+        else:
+            macro_action = action
+
+            tactical_goal = (
+                macro_action_to_tactical_goal(
+                    macro_action
+                )
             )
+
+        # --------------------------------
+        # Physical state restore
+        # --------------------------------
+
+        self.env.reset_to_game_state(
+            state,
+            macro_action,
+        )
+
+        observation = (
+            self.env.get_physical_observation()
         )
 
         # --------------------------------
-        # Micro SAC
+        # Goal-conditioned Micro
         # --------------------------------
 
         micro_action = (
             self.micro_agent.select_action(
                 observation,
+                tactical_goal,
                 deterministic=self.deterministic,
             )
         )
 
         # --------------------------------
-        # FastFizで1ショット
+        # FastFiz
         # --------------------------------
 
         (
             _,
-            reward,
-            _micro_terminated,
-            _truncated,
+            micro_reward,
+            _,
+            _,
             info,
         ) = self.env.step(
             micro_action
         )
 
-        # --------------------------------
-        # Physical state -> GameState
-        # --------------------------------
-
         snapshot = self.env.sim.snapshot()
 
-        next_positions = (
-            snapshot.positions.copy()
-        )
-
-        next_pocket_indices = (
-            snapshot.pocket_indices.copy()
-        )
-
         physical_state = GameState(
-            ball_positions=next_positions,
-
-            score=np.asarray(
-                state.score,
-                dtype=np.float32,
-            ).copy(),
-
+            ball_positions=(
+                snapshot.positions.copy()
+            ),
+            score=state.score.copy(),
             current_player=state.current_player,
-
             ball_pocket_indices=(
-                next_pocket_indices
+                snapshot.pocket_indices.copy()
             ),
         )
 
-        # ------------------------------------------------
-        # Game rules
-        # ------------------------------------------------
+        # --------------------------------
+        # Game Rules
+        # --------------------------------
 
         if self.game_rules is not None:
 
-            game_result = self.game_rules.apply(
-                previous_state=state,
-                physical_state=physical_state,
-                shot_info=info,
+            game_result = (
+                self.game_rules.apply(
+                    previous_state=state,
+                    physical_state=physical_state,
+                    shot_info=info,
+                )
             )
 
             return MacroTransitionResult(
-                next_state=game_result.next_state,
-                reward=game_result.reward,
-                terminated=game_result.terminated,
+                next_state=(
+                    game_result.next_state
+                ),
+                reward=float(
+                    game_result.reward
+                ),
+                terminated=bool(
+                    game_result.terminated
+                ),
             )
 
-
-        # ------------------------------------------------
-        # 後方互換:
-        # GameRules未指定時は従来のMicro rewardを使用
-        # ------------------------------------------------
-
+        # backward-compatible path
         return MacroTransitionResult(
             next_state=physical_state,
-            reward=float(reward),
+            reward=float(micro_reward),
             terminated=False,
         )

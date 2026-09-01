@@ -2,14 +2,18 @@
 __pycache__/
 *.pyc
 
-# C++ Build Artifacts (ソースコードは無視せず、生成物だけを無視)
+# Model checkpoints
+*.pt
+*.pth
+
+# C++ Build Artifacts
 *.so
 *.o
 CMakeCache.txt
 CMakeFiles/
-cmake_install.cmake*.pth
-policy_model.pth
 cmake_install.cmake
+
+# Local / generated files
 Gomi/
 build/results/
 build/results_muzero/

@@ -29,7 +29,11 @@ from src.macro.value import (
     MacroValueNetwork,
 )
 
-from src.micro.sac import SACAgent
+# from src.micro.sac import SACAgent
+
+from src.micro.goal_conditioned_sac import (
+    GoalConditionedSACAgent,
+)
 
 
 def make_initial_state():
@@ -79,12 +83,9 @@ def main():
     # Micro
     # =========================================
 
-    # 現段階では性能評価が目的ではないため、
-    # 未学習SACを使用
-    micro_agent = SACAgent(
-        state_dim=12,
+    micro_agent = GoalConditionedSACAgent(
         action_dim=2,
-        device="cpu",
+        device=device,
     )
 
     # =========================================

@@ -18,8 +18,13 @@ from src.macro.physics_transition import (
 from src.macro.policy import MacroPolicyNetwork
 from src.macro.value import MacroValueNetwork
 
-from src.micro.sac import SACAgent
+from src.micro.goal_conditioned_sac import (
+    GoalConditionedSACAgent,
+)
 
+from src.micro.goal_observation import (
+    PHYSICAL_OBSERVATION_DIM,
+)
 
 def make_initial_state():
     """
@@ -92,10 +97,8 @@ def test_full_hierarchical_agent_smoke():
     # Micro
     # --------------------------------
 
-    # 学習性能を見るテストではないので、
-    # 未学習SACを決定論的に使用する。
-    micro_agent = SACAgent(
-        state_dim=12,
+    micro_agent = GoalConditionedSACAgent(
+        observation_dim=PHYSICAL_OBSERVATION_DIM,
         action_dim=2,
         device="cpu",
     )

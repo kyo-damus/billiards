@@ -202,3 +202,29 @@ def test_reset_to_game_state_restores_pocket_state():
     )
 
     assert env.sim.get_pocket_index(1) == 0
+
+def test_wrong_pocket_flag_exists():
+    env = MicroBilliardEnv()
+
+    action = MacroAction(
+        strategy=Strategy.ATTACK,
+        target_ball=0,
+        target_pocket=1,
+    )
+
+    env.set_macro_action(action)
+
+    env.reset(seed=0)
+
+    _, _, _, _, info = env.step(
+        np.array(
+            [0.0, 0.0],
+            dtype=np.float32,
+        )
+    )
+
+    assert "wrong_pocket" in info
+    assert isinstance(
+        info["wrong_pocket"],
+        bool,
+    )

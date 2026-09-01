@@ -55,24 +55,20 @@ class FixedMacroActionGenerator:
 
         return []
 
+from src.micro.goal_observation import (
+    PHYSICAL_OBSERVATION_DIM,
+)
+
 class LowPowerMicroAgent:
-    """
-    学習済みSACは使わず、
-    決定論的な弱いショットを返す。
-
-    action[0] = -1
-        -> MIN_POWER = 0.5
-
-    action[1] = 0
-        -> ghost-ball基準角そのまま
-    """
-
     def select_action(
         self,
         observation,
+        goal,
         deterministic=True,
     ):
-        assert observation.shape == (12,)
+        assert observation.shape == (
+            PHYSICAL_OBSERVATION_DIM,
+        )
 
         return np.array(
             [-1.0, 0.0],

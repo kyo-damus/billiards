@@ -17,6 +17,17 @@ from src.macro.transition import (
     MacroTransitionModel,
 )
 
+import numpy as np
+
+from src.macro.candidate import (
+    MacroCandidate,
+)
+
+from src.macro.candidate_encoding import (
+    encode_macro_candidate,
+)
+
+MacroChoice = MacroAction | MacroCandidate
 
 @dataclass
 class MCTSNode:
@@ -38,7 +49,7 @@ class MCTSNode:
     terminated: bool = False
 
     children: dict[
-        MacroAction,
+        MacroChoice,
         "MCTSNode",
     ] = field(default_factory=dict)
 
@@ -71,6 +82,7 @@ class MCTS:
         c_puct: float = 1.5,
         gamma: float = 0.99,
         device=None,
+        candidate_mode=False,
     ):
         self.policy_network = policy_network
         self.value_network = value_network
@@ -88,6 +100,8 @@ class MCTS:
             ).device
 
         self.device = torch.device(device)
+
+        self.candidate_mode = candidate_mode
 
     # ============================================================
     # Public API
@@ -255,57 +269,39 @@ class MCTS:
         self,
         node: MCTSNode,
     ):
-        if node.state is None:
-            return
-
-        if node.terminated:
-            return
-
-        if node.expanded:
-            return
-
-        actions = self.action_generator.generate(
-            node.state
+        choices = (
+            self.action_generator.generate(
+                node.state
+            )
         )
 
-        if not actions:
+        if len(choices) == 0:
             return
 
-        state_tensor = game_state_to_tensor(
-            node.state,
-            device=self.device,
-        ).unsqueeze(0)
-
-        with torch.no_grad():
-            logits = self.policy_network(
-                state_tensor
-            ).squeeze(0)
-
-        action_indices = [
-            macro_action_to_index(action)
-            for action in actions
-        ]
-
-        valid_logits = torch.stack(
-            [
-                logits[index]
-                for index in action_indices
-            ]
-        )
-
-        priors = torch.softmax(
-            valid_logits,
-            dim=0,
-        )
-
-        for action, prior in zip(
-            actions,
-            priors,
-        ):
-            node.children[action] = MCTSNode(
-                prior=float(prior.item())
+        if self.candidate_mode:
+            priors = (
+                self._candidate_priors(
+                    node.state,
+                    choices,
+                )
             )
 
+        else:
+            priors = (
+                self._legacy_action_priors(
+                    node.state,
+                    choices,
+                )
+            )
+
+        for choice, prior in zip(
+            choices,
+            priors,
+        ):
+            node.children[choice] = MCTSNode(
+                prior=float(prior)
+            )
+            
     # ============================================================
     # Evaluation
     # ============================================================
@@ -351,3 +347,124 @@ class MCTS:
                 + self.gamma * value
             )
             
+    def _legacy_action_priors(
+        self,
+        state,
+        actions,
+    ):
+        state_tensor = (
+            game_state_to_tensor(
+                state,
+                device=self.device,
+            )
+        )
+
+        with torch.no_grad():
+            logits = self.policy_network(
+                state_tensor
+            )
+
+        # Policyの出力が
+        # (1, 12), (12,), (12, 1)
+        # などでも12要素へ統一する
+        logits = logits.reshape(-1)
+
+        valid_logits = []
+
+        for action in actions:
+            action_index = (
+                macro_action_to_index(
+                    action
+                )
+            )
+
+            valid_logits.append(
+                logits[action_index]
+            )
+
+        valid_logits = torch.stack(
+            valid_logits
+        )
+
+        priors = torch.softmax(
+            valid_logits,
+            dim=0,
+        )
+
+        return (
+            priors
+            .detach()
+            .cpu()
+            .numpy()
+            .reshape(-1)
+        )
+        
+    def _candidate_priors(
+        self,
+        state,
+        candidates,
+    ):
+        if not all(
+            isinstance(
+                candidate,
+                MacroCandidate,
+            )
+            for candidate in candidates
+        ):
+            raise TypeError(
+                "candidate_mode=True requires "
+                "MacroCandidate objects."
+            )
+
+        state_tensor = (
+            game_state_to_tensor(
+                state,
+                device=self.device,
+            )
+        )
+
+        # CandidatePolicyは
+        # state=(12,) を想定
+        if (
+            state_tensor.dim() == 2
+            and state_tensor.shape[0] == 1
+        ):
+            state_tensor = (
+                state_tensor.squeeze(0)
+            )
+
+        candidate_array = np.stack(
+            [
+                encode_macro_candidate(
+                    candidate
+                )
+                for candidate in candidates
+            ],
+            axis=0,
+        )
+
+        candidate_tensor = torch.as_tensor(
+            candidate_array,
+            dtype=torch.float32,
+            device=self.device,
+        )
+
+        with torch.no_grad():
+
+            logits = self.policy_network(
+                state_tensor,
+                candidate_tensor,
+            )
+
+            priors = torch.softmax(
+                logits,
+                dim=0,
+            )
+
+        return (
+            priors
+            .detach()
+            .cpu()
+            .numpy()
+            .reshape(-1)
+        )
