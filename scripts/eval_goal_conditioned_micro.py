@@ -331,26 +331,6 @@ def evaluate(args):
     )
 
     print(
-        f"wrong_pocket="
-        f"{result['wrong_pocket'] / n:6.3f} "
-    )
-
-    pocketed = result[
-        "any_pocket"
-    ]
-
-    goal_precision = (
-        result["success"] / pocketed
-        if pocketed > 0
-        else 0.0
-    )
-
-    print(
-        f"goal_precision="
-        f"{goal_precision:6.3f} "
-    )
-
-    print(
         f"wrong pocket: "
         f"{total_wrong_pocket / total_episodes:.3f}"
     )
