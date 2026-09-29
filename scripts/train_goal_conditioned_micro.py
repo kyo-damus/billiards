@@ -198,7 +198,24 @@ def train(args):
     goal_sampler = MixedTacticalGoalSampler(
         position_probability=(
             args.position_probability_start
-        )
+        ),
+        position_mode=(
+            args.position_mode
+        ),
+        outcome_grid_size=(
+            args.outcome_grid_size
+        ),
+        outcome_top_k=(
+            args.outcome_top_k
+        ),
+        outcome_dedup_distance=(
+            args.outcome_dedup_distance
+        ),
+    )
+
+    print(
+        "position mode:",
+        args.position_mode,
     )
 
     # ---------------------------------
@@ -828,6 +845,34 @@ def parse_args():
         "--learning-rate",
         type=float,
         default=3e-4,
+    )
+
+    parser.add_argument(
+        "--position-mode",
+        type=str,
+        default="ideal",
+        choices=[
+            "ideal",
+            "outcome",
+        ],
+    )
+
+    parser.add_argument(
+        "--outcome-grid-size",
+        type=int,
+        default=5,
+    )
+
+    parser.add_argument(
+        "--outcome-top-k",
+        type=int,
+        default=8,
+    )
+
+    parser.add_argument(
+        "--outcome-dedup-distance",
+        type=float,
+        default=0.10,
     )
 
     return parser.parse_args()
