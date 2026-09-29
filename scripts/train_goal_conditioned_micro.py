@@ -1,5 +1,6 @@
 import argparse
 import random
+from pathlib import Path
 
 import numpy as np
 import torch
@@ -123,6 +124,31 @@ def unpack_reset_result(result):
 #         "Could not sample a feasible "
 #         "goal-conditioned episode."
 #     )
+
+
+def checkpoint_path_for_step(
+    path,
+    step,
+):
+    path = Path(path)
+
+    suffix = path.suffix
+    stem = path.stem
+
+    if suffix:
+        filename = (
+            f"{stem}_step{step}{suffix}"
+        )
+    else:
+        filename = (
+            f"{path.name}_step{step}"
+        )
+
+    return str(
+        path.with_name(
+            filename
+        )
+    )
 
 
 def save_checkpoint(
@@ -611,11 +637,33 @@ def train(args):
             args.save_interval > 0
             and step % args.save_interval == 0
         ):
+            checkpoint_path = (
+                args.checkpoint
+            )
+
+            if (
+                args.keep_step_checkpoints
+            ):
+                checkpoint_path = (
+                    checkpoint_path_for_step(
+                        args.checkpoint,
+                        step,
+                    )
+                )
+
             save_checkpoint(
                 agent,
-                args.checkpoint,
+                checkpoint_path,
                 step,
             )
+
+            if (
+                args.keep_step_checkpoints
+            ):
+                print(
+                    "saved step checkpoint:",
+                    checkpoint_path,
+                )
 
     save_checkpoint(
         agent,
@@ -767,6 +815,16 @@ def parse_args():
         "--save-interval",
         type=int,
         default=2500,
+    )
+
+    parser.add_argument(
+        "--keep-step-checkpoints",
+        action="store_true",
+        help=(
+            "Keep numbered checkpoints at each "
+            "save interval instead of overwriting "
+            "the final checkpoint path."
+        ),
     )
 
     parser.add_argument(
