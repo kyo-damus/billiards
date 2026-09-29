@@ -54,7 +54,19 @@ def load_gate(path, device):
         checkpoint["gate"]
     )
     model.eval()
-    return model, lambdas
+
+    gate_threshold = float(
+        checkpoint.get(
+            "selection_threshold",
+            0.0,
+        )
+    )
+
+    return (
+        model,
+        lambdas,
+        gate_threshold,
+    )
 
 
 def build_game_state(env):
