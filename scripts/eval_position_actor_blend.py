@@ -315,6 +315,21 @@ def main(
         for blend_lambda in lambdas
     }
 
+    pot_by_lambda = {
+        blend_lambda: []
+        for blend_lambda in lambdas
+    }
+
+    scratch_by_lambda = {
+        blend_lambda: []
+        for blend_lambda in lambdas
+    }
+
+    cue_distance_by_lambda = {
+        blend_lambda: []
+        for blend_lambda in lambdas
+    }
+
     for episode in range(
         args.episodes
     ):
@@ -439,6 +454,45 @@ def main(
                 )
             )
 
+            pot_by_lambda[
+                blend_lambda
+            ].append(
+                bool(
+                    info.get(
+                        "success",
+                        False,
+                    )
+                )
+            )
+
+            scratch_by_lambda[
+                blend_lambda
+            ].append(
+                bool(
+                    info.get(
+                        "scratched",
+                        False,
+                    )
+                )
+            )
+
+            cue_distance = (
+                goal_info.get(
+                    "cue_distance_after"
+                )
+            )
+
+            cue_distance_by_lambda[
+                blend_lambda
+            ].append(
+                float(
+                    cue_distance
+                )
+                if cue_distance
+                is not None
+                else float("nan")
+            )
+
     print()
     print(
         "=== POSITION Actor Blend Evaluation ==="
@@ -516,6 +570,168 @@ def main(
                 f"lost={lost:3d} "
                 f"both={both:3d}"
             )
+
+
+    # --------------------------------------------------------
+    # Oracle diagnostic
+    # --------------------------------------------------------
+    #
+    # This does NOT define a deployable policy.
+    # It answers only:
+    # "If an ideal state-dependent selector could choose one
+    #  of the tested blend lambdas for each episode, how much
+    #  headroom would exist over the best fixed lambda?"
+    #
+    # A large oracle gap motivates learning an adaptive gate.
+
+    oracle_goal_success = 0
+    oracle_pot_success = 0
+    oracle_best_distances = []
+
+    selected_lambda_counts = {
+        blend_lambda: 0
+        for blend_lambda in lambdas
+    }
+
+    for episode_index in range(
+        args.episodes
+    ):
+        successful_lambdas = [
+            blend_lambda
+            for blend_lambda in lambdas
+            if success_by_lambda[
+                blend_lambda
+            ][episode_index]
+        ]
+
+        if successful_lambdas:
+            oracle_goal_success += 1
+
+            # If several lambdas succeed, keep the one
+            # whose final cue position is closest to target.
+            selected_lambda = min(
+                successful_lambdas,
+                key=lambda value: (
+                    cue_distance_by_lambda[
+                        value
+                    ][episode_index]
+                ),
+            )
+
+            selected_lambda_counts[
+                selected_lambda
+            ] += 1
+
+        pot_lambdas = [
+            blend_lambda
+            for blend_lambda in lambdas
+            if (
+                pot_by_lambda[
+                    blend_lambda
+                ][episode_index]
+                and not scratch_by_lambda[
+                    blend_lambda
+                ][episode_index]
+            )
+        ]
+
+        if pot_lambdas:
+            oracle_pot_success += 1
+
+            finite_distances = [
+                cue_distance_by_lambda[
+                    blend_lambda
+                ][episode_index]
+                for blend_lambda
+                in pot_lambdas
+                if np.isfinite(
+                    cue_distance_by_lambda[
+                        blend_lambda
+                    ][episode_index]
+                )
+            ]
+
+            if finite_distances:
+                oracle_best_distances.append(
+                    float(
+                        min(
+                            finite_distances
+                        )
+                    )
+                )
+
+    fixed_goal_rates = {
+        blend_lambda: (
+            np.mean(
+                success_by_lambda[
+                    blend_lambda
+                ]
+            )
+        )
+        for blend_lambda in lambdas
+    }
+
+    best_fixed_lambda = max(
+        lambdas,
+        key=lambda value: (
+            fixed_goal_rates[
+                value
+            ]
+        ),
+    )
+
+    best_fixed_rate = float(
+        fixed_goal_rates[
+            best_fixed_lambda
+        ]
+    )
+
+    oracle_goal_rate = (
+        oracle_goal_success
+        / args.episodes
+    )
+
+    print()
+    print(
+        "=== Oracle blend diagnostic ==="
+    )
+    print(
+        "best fixed lambda: "
+        f"{best_fixed_lambda:.2f}"
+    )
+    print(
+        "best fixed position goal: "
+        f"{best_fixed_rate:.3f}"
+    )
+    print(
+        "oracle any-lambda position goal: "
+        f"{oracle_goal_rate:.3f}"
+    )
+    print(
+        "oracle gain over best fixed: "
+        f"{oracle_goal_rate - best_fixed_rate:+.3f}"
+    )
+    print(
+        "oracle non-scratch pot rate: "
+        f"{oracle_pot_success / args.episodes:.3f}"
+    )
+
+    if oracle_best_distances:
+        print(
+            "oracle mean best cue distance "
+            "(non-scratch pot cases): "
+            f"{np.mean(oracle_best_distances):.3f} m"
+        )
+
+    print(
+        "successful oracle lambda counts:"
+    )
+
+    for blend_lambda in lambdas:
+        print(
+            f"  lambda={blend_lambda:.2f}: "
+            f"{selected_lambda_counts[blend_lambda]}"
+        )
 
 
 def parse_args():
