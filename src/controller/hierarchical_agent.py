@@ -9,6 +9,13 @@ from src.macro.transition import (
     MacroTransitionResult,
 )
 
+from src.macro.candidate import (
+    MacroCandidate,
+)
+
+
+MacroDecision = MacroAction | MacroCandidate
+
 
 @dataclass
 class HierarchicalStepResult:
@@ -16,7 +23,7 @@ class HierarchicalStepResult:
     階層型エージェントが1回意思決定した結果。
     """
 
-    macro_action: MacroAction
+    macro_action: MacroDecision
 
     next_state: GameState
     reward: float
@@ -59,7 +66,7 @@ class HierarchicalAgent:
     def select_macro_action(
         self,
         state: GameState,
-    ) -> MacroAction:
+    ) -> MacroDecision:
         """
         MCTSでMacroActionを決定する。
         """
@@ -73,7 +80,7 @@ class HierarchicalAgent:
     def execute_macro_action(
         self,
         state: GameState,
-        action: MacroAction,
+        action: MacroDecision,
     ) -> MacroTransitionResult:
         """
         選択されたMacroActionを
