@@ -1,11 +1,14 @@
 import argparse
 import random
+from concurrent.futures import ProcessPoolExecutor
+import multiprocessing as mp
 from pathlib import Path
 
 import numpy as np
 import torch
 
 from src.common.types import (
+    GameState,
     MacroAction,
     Strategy,
 )
@@ -57,6 +60,121 @@ def unpack_reset_result(result):
         return result[0]
 
     return result
+
+
+# ============================================================
+# Parallel goal sampling
+# ============================================================
+#
+# Outcome-guided POSITION sampling performs many FastFiz
+# simulations before one RL transition is collected.
+# These worker processes parallelize that CPU-side work while
+# keeping the SAC learner and CUDA context in the main process.
+#
+# spawn is used instead of fork so CUDA state is not inherited
+# by workers.
+
+_WORKER_ENV = None
+_WORKER_SAMPLER = None
+
+
+def _init_goal_sampler_worker(
+    position_mode,
+    outcome_grid_size,
+    outcome_top_k,
+    outcome_dedup_distance,
+):
+    global _WORKER_ENV
+    global _WORKER_SAMPLER
+
+    _WORKER_ENV = MicroBilliardEnv()
+
+    _WORKER_SAMPLER = (
+        MixedTacticalGoalSampler(
+            position_probability=0.5,
+            position_mode=position_mode,
+            outcome_grid_size=(
+                outcome_grid_size
+            ),
+            outcome_top_k=(
+                outcome_top_k
+            ),
+            outcome_dedup_distance=(
+                outcome_dedup_distance
+            ),
+        )
+    )
+
+
+def _sample_goal_worker(
+    task,
+):
+    """
+    One CPU worker job.
+
+    Returns the initial GameState and sampled goal.
+    The main process restores this state, runs the current
+    policy on CUDA, and performs the actual training shot.
+    """
+    (
+        seed,
+        position_probability,
+        target_radius,
+    ) = task
+
+    if (
+        _WORKER_ENV is None
+        or _WORKER_SAMPLER is None
+    ):
+        raise RuntimeError(
+            "Goal sampler worker is not initialized."
+        )
+
+    _WORKER_SAMPLER.position_probability = (
+        float(
+            position_probability
+        )
+    )
+
+    _WORKER_SAMPLER.position_generator.target_radius = (
+        float(
+            target_radius
+        )
+    )
+
+    rng = np.random.default_rng(
+        int(seed)
+    )
+
+    sample = _WORKER_SAMPLER.sample(
+        env=_WORKER_ENV,
+        rng=rng,
+        seed=int(seed),
+    )
+
+    snapshot = (
+        _WORKER_ENV.sim.snapshot()
+    )
+
+    state = GameState(
+        ball_positions=(
+            snapshot.positions.copy()
+        ),
+        score=np.zeros(
+            2,
+            dtype=np.float32,
+        ),
+        current_player=0,
+        ball_pocket_indices=(
+            snapshot.pocket_indices.copy()
+        ),
+    )
+
+    return (
+        state,
+        sample.goal,
+        sample.macro_action,
+    )
 
 
 # def sample_feasible_goal_episode(
@@ -266,6 +384,79 @@ def train(args):
         ),
     )
 
+
+    # ---------------------------------
+    # Optional parallel CPU sampling
+    # ---------------------------------
+
+    sampler_executor = None
+    parallel_samples = None
+
+    if args.sampler_workers > 0:
+
+        worker_tasks = []
+
+        for worker_step in range(
+            1,
+            args.steps + 1,
+        ):
+            (
+                worker_position_probability,
+                worker_target_radius,
+            ) = curriculum.values(
+                worker_step
+            )
+
+            worker_tasks.append(
+                (
+                    args.seed
+                    + worker_step * 100,
+                    worker_position_probability,
+                    worker_target_radius,
+                )
+            )
+
+        spawn_context = (
+            mp.get_context(
+                "spawn"
+            )
+        )
+
+        sampler_executor = (
+            ProcessPoolExecutor(
+                max_workers=(
+                    args.sampler_workers
+                ),
+                mp_context=(
+                    spawn_context
+                ),
+                initializer=(
+                    _init_goal_sampler_worker
+                ),
+                initargs=(
+                    args.position_mode,
+                    args.outcome_grid_size,
+                    args.outcome_top_k,
+                    args.outcome_dedup_distance,
+                ),
+            )
+        )
+
+        parallel_samples = (
+            sampler_executor.map(
+                _sample_goal_worker,
+                worker_tasks,
+                chunksize=(
+                    args.sampler_chunksize
+                ),
+            )
+        )
+
+        print(
+            "parallel goal sampling:",
+            f"{args.sampler_workers} workers",
+        )
+
     # ---------------------------------
     # Agent
     # ---------------------------------
@@ -346,23 +537,51 @@ def train(args):
         # Goal sampling
         # ---------------------------------
 
-        sample = goal_sampler.sample(
-            env=env,
-            rng=rng,
-            seed=args.seed + step * 100,
-        )
+        if parallel_samples is None:
 
-        observation = (
-            sample.observation
-        )
+            sample = goal_sampler.sample(
+                env=env,
+                rng=rng,
+                seed=(
+                    args.seed
+                    + step * 100
+                ),
+            )
 
-        tactical_goal = (
-            sample.goal
-        )
+            observation = (
+                sample.observation
+            )
 
-        macro_action = (
-            sample.macro_action
-        )
+            tactical_goal = (
+                sample.goal
+            )
+
+            macro_action = (
+                sample.macro_action
+            )
+
+        else:
+
+            (
+                sampled_state,
+                tactical_goal,
+                macro_action,
+            ) = next(
+                parallel_samples
+            )
+
+            # Workers only generate the CPU-side
+            # state/goal pair. The current policy
+            # action and training transition remain
+            # in the main process.
+            env.reset_to_game_state(
+                sampled_state,
+                macro_action,
+            )
+
+            observation = (
+                env.get_physical_observation()
+            )
 
 
         # ---------------------------------
@@ -665,6 +884,11 @@ def train(args):
                     checkpoint_path,
                 )
 
+    if sampler_executor is not None:
+        sampler_executor.shutdown(
+            wait=True
+        )
+
     save_checkpoint(
         agent,
         args.checkpoint,
@@ -933,7 +1157,40 @@ def parse_args():
         default=0.10,
     )
 
-    return parser.parse_args()
+    parser.add_argument(
+        "--sampler-workers",
+        type=int,
+        default=0,
+        help=(
+            "Number of spawned CPU processes used "
+            "to prefetch goal samples. 0 keeps the "
+            "original serial behavior."
+        ),
+    )
+
+    parser.add_argument(
+        "--sampler-chunksize",
+        type=int,
+        default=2,
+        help=(
+            "ProcessPool map chunksize for parallel "
+            "goal sampling."
+        ),
+    )
+
+    args = parser.parse_args()
+
+    if args.sampler_workers < 0:
+        parser.error(
+            "--sampler-workers must be >= 0"
+        )
+
+    if args.sampler_chunksize <= 0:
+        parser.error(
+            "--sampler-chunksize must be > 0"
+        )
+
+    return args
 
 
 if __name__ == "__main__":
