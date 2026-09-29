@@ -17,6 +17,10 @@ from src.macro.candidate_generator import (
     MacroCandidateGenerator,
 )
 
+from src.macro.outcome_guided_position_generator import (
+    OutcomeGuidedPositionCandidateGenerator,
+)
+
 from src.macro.position_candidate_generator import (
     PositionAttackCandidateGenerator,
 )
@@ -37,11 +41,25 @@ class MixedTacticalGoalSampler:
     これにより、
     POSITION_ATTACK候補数が多いことによる
     sampling biasを防ぐ。
+
+    position_mode:
+        "ideal"
+            従来の幾何的な理想位置から
+            POSITION Goalを生成する。
+
+        "outcome"
+            coarseなMicro actionをFastFizで試し、
+            実際に到達できた手球位置から
+            POSITION Goalを生成する。
     """
 
     def __init__(
         self,
         position_probability: float = 0.5,
+        position_mode: str = "ideal",
+        outcome_grid_size: int = 5,
+        outcome_top_k: int = 8,
+        outcome_dedup_distance: float = 0.10,
     ):
         if not (
             0.0
@@ -53,17 +71,49 @@ class MixedTacticalGoalSampler:
                 "be between 0 and 1."
             )
 
+        if position_mode not in (
+            "ideal",
+            "outcome",
+        ):
+            raise ValueError(
+                "position_mode must be "
+                "'ideal' or 'outcome'."
+            )
+
         self.position_probability = (
             float(position_probability)
+        )
+
+        self.position_mode = (
+            position_mode
         )
 
         self.direct_generator = (
             MacroCandidateGenerator()
         )
 
-        self.position_generator = (
-            PositionAttackCandidateGenerator()
-        )
+        if (
+            position_mode
+            == "ideal"
+        ):
+            self.position_generator = (
+                PositionAttackCandidateGenerator()
+            )
+
+        else:
+            self.position_generator = (
+                OutcomeGuidedPositionCandidateGenerator(
+                    grid_size=(
+                        outcome_grid_size
+                    ),
+                    top_k=(
+                        outcome_top_k
+                    ),
+                    dedup_distance=(
+                        outcome_dedup_distance
+                    ),
+                )
+            )
 
     def sample_goal_type(
         self,
@@ -198,4 +248,3 @@ class MixedTacticalGoalSampler:
                 snapshot.pocket_indices.copy()
             ),
         )
-        
