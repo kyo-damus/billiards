@@ -83,11 +83,17 @@ class MCTS:
         gamma: float = 0.99,
         device=None,
         candidate_mode=False,
+        root_action_generator=None,
     ):
         self.policy_network = policy_network
         self.value_network = value_network
 
         self.action_generator = action_generator
+        self.root_action_generator = (
+            root_action_generator
+            if root_action_generator is not None
+            else action_generator
+        )
         self.transition_model = transition_model
 
         self.simulations = simulations
@@ -116,7 +122,10 @@ class MCTS:
             state=root_state,
         )
 
-        self._expand(root)
+        self._expand(
+            root,
+            use_root_generator=True,
+        )
 
         if not root.children:
             raise RuntimeError(
@@ -268,9 +277,16 @@ class MCTS:
     def _expand(
         self,
         node: MCTSNode,
+        use_root_generator=False,
     ):
+        generator = (
+            self.root_action_generator
+            if use_root_generator
+            else self.action_generator
+        )
+
         choices = (
-            self.action_generator.generate(
+            generator.generate(
                 node.state
             )
         )
