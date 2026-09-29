@@ -62,6 +62,29 @@ def evaluate(args):
     print(f"checkpoint: {args.checkpoint}")
     print(f"episodes: {args.episodes}")
     print(f"position radius: {args.radius:.3f} m")
+    print(
+        f"position mode: "
+        f"{args.position_mode}"
+    )
+
+    if (
+        args.position_mode
+        == "outcome"
+    ):
+        print(
+            "outcome coarse grid: "
+            f"{args.outcome_grid_size} x "
+            f"{args.outcome_grid_size}"
+        )
+        print(
+            f"outcome top-k: "
+            f"{args.outcome_top_k}"
+        )
+        print(
+            "outcome dedup distance: "
+            f"{args.outcome_dedup_distance:.3f} m"
+        )
+
     print()
 
     agent = load_agent(
@@ -74,9 +97,21 @@ def evaluate(args):
     # POSITION_ATTACKのみを生成
     sampler = MixedTacticalGoalSampler(
         position_probability=1.0,
+        position_mode=(
+            args.position_mode
+        ),
+        outcome_grid_size=(
+            args.outcome_grid_size
+        ),
+        outcome_top_k=(
+            args.outcome_top_k
+        ),
+        outcome_dedup_distance=(
+            args.outcome_dedup_distance
+        ),
     )
 
-    # 評価時は最終カリキュラム条件
+    # 評価時は指定radiusに固定
     sampler.position_generator.target_radius = (
         args.radius
     )
@@ -305,6 +340,34 @@ def parse_args():
 
     parser.add_argument(
         "--radius",
+        type=float,
+        default=0.10,
+    )
+
+    parser.add_argument(
+        "--position-mode",
+        type=str,
+        default="ideal",
+        choices=[
+            "ideal",
+            "outcome",
+        ],
+    )
+
+    parser.add_argument(
+        "--outcome-grid-size",
+        type=int,
+        default=5,
+    )
+
+    parser.add_argument(
+        "--outcome-top-k",
+        type=int,
+        default=8,
+    )
+
+    parser.add_argument(
+        "--outcome-dedup-distance",
         type=float,
         default=0.10,
     )
