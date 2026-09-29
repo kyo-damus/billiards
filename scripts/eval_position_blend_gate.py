@@ -235,7 +235,11 @@ def main(args):
     else:
         device = args.device
 
-    gate, lambdas = load_gate(
+    (
+        gate,
+        lambdas,
+        gate_threshold,
+    ) = load_gate(
         args.gate_checkpoint,
         device,
     )
@@ -354,12 +358,34 @@ def main(args):
         ).unsqueeze(0)
 
         with torch.no_grad():
-            gate_index = int(
-                torch.argmax(
-                    gate(features_t),
-                    dim=1,
-                ).item()
+            gate_logits = gate(
+                features_t
             )
+
+            gate_probabilities = (
+                torch.sigmoid(
+                    gate_logits
+                )
+            )
+
+            gate_confidence, gate_choice = (
+                torch.max(
+                    gate_probabilities,
+                    dim=1,
+                )
+            )
+
+            gate_index = int(
+                gate_choice.item()
+            )
+
+            if (
+                float(
+                    gate_confidence.item()
+                )
+                < gate_threshold
+            ):
+                gate_index = zero_index
 
         all_results = []
 
