@@ -252,9 +252,71 @@ def evaluate_seed(
             scale
         ] = metrics
 
+    oracle_goal = 0
+    oracle_pot = 0
+
+    for index in range(
+        episodes
+    ):
+        goal_success = bool(
+            base_results[
+                index
+            ]["goal"]
+        )
+        pot_success = bool(
+            base_results[
+                index
+            ]["pot"]
+        )
+
+        for scale in residual_scales:
+            goal_success = (
+                goal_success
+                or bool(
+                    scale_results[
+                        scale
+                    ][
+                        index
+                    ][
+                        "goal"
+                    ]
+                )
+            )
+            pot_success = (
+                pot_success
+                or bool(
+                    scale_results[
+                        scale
+                    ][
+                        index
+                    ][
+                        "pot"
+                    ]
+                )
+            )
+
+        oracle_goal += int(
+            goal_success
+        )
+        oracle_pot += int(
+            pot_success
+        )
+
+    oracle_metrics = {
+        "goal": float(
+            oracle_goal
+            / episodes
+        ),
+        "pot": float(
+            oracle_pot
+            / episodes
+        ),
+    }
+
     return (
         base_metrics,
         scale_metrics,
+        oracle_metrics,
     )
 
 
@@ -300,6 +362,7 @@ def print_seed_result(
     seed,
     base_metrics,
     scale_metrics,
+    oracle_metrics,
 ):
     print()
     print(
@@ -330,6 +393,12 @@ def print_seed_result(
             f"clip="
             f"{metrics['clip_rate']:.3f}"
         )
+
+    print(
+        "oracle over base+scales: "
+        f"pot={oracle_metrics['pot']:.3f} "
+        f"goal={oracle_metrics['goal']:.3f}"
+    )
 
 
 def evaluate(args):
@@ -411,11 +480,13 @@ def evaluate(args):
         scale: []
         for scale in residual_scales
     }
+    oracle_by_seed = []
 
     for seed in args.seeds:
         (
             base_metrics,
             scale_metrics,
+            oracle_metrics,
         ) = evaluate_seed(
             base_agent=base_agent,
             residual_policy=(
@@ -451,6 +522,9 @@ def evaluate(args):
         base_by_seed.append(
             base_metrics
         )
+        oracle_by_seed.append(
+            oracle_metrics
+        )
 
         for scale in residual_scales:
             scale_by_seed[
@@ -465,6 +539,7 @@ def evaluate(args):
             seed,
             base_metrics,
             scale_metrics,
+            oracle_metrics,
         )
 
     base_aggregate = {}
@@ -549,11 +624,35 @@ def evaluate(args):
             f"{metrics['clip_rate']['mean']:.3f}"
         )
 
+    oracle_goal_values = np.asarray(
+        [
+            metrics["goal"]
+            for metrics
+            in oracle_by_seed
+        ],
+        dtype=np.float64,
+    )
+    oracle_pot_values = np.asarray(
+        [
+            metrics["pot"]
+            for metrics
+            in oracle_by_seed
+        ],
+        dtype=np.float64,
+    )
+
     print()
     print(
         "best mean Position Goal scale: "
         f"{best_scale:.2f} "
         f"(goal={best_goal:.3f})"
+    )
+    print(
+        "oracle over base+scales: "
+        f"pot={np.mean(oracle_pot_values):.3f}"
+        f"±{np.std(oracle_pot_values):.3f} "
+        f"goal={np.mean(oracle_goal_values):.3f}"
+        f"±{np.std(oracle_goal_values):.3f}"
     )
 
 
