@@ -11,6 +11,9 @@ from src.micro.position_residual_policy import (
     PositionResidualNetwork,
     compose_residual_action,
 )
+from src.micro.fixed_scale_position_residual_policy import (
+    FixedScalePositionResidualPolicy,
+)
 
 
 class DummyBaseAgent:
@@ -227,3 +230,41 @@ def test_compose_residual_action_requires_matching_shape():
         raise AssertionError(
             "Expected ValueError for mismatched shapes."
         )
+
+
+
+def test_fixed_scale_wrapper_applies_power_only_residual():
+
+    raw_policy = PositionResidualMicroPolicy(
+        base_agent=DummyBaseAgent(
+            [0.2, -0.3]
+        ),
+        residual_network=ConstantResidual(
+            [0.8, 0.4]
+        ),
+        device="cpu",
+    )
+
+    policy = FixedScalePositionResidualPolicy(
+        residual_policy=raw_policy,
+        residual_scale=0.75,
+        power_scale=1.0,
+        angle_scale=0.0,
+    )
+
+    action = policy.select_action(
+        np.zeros(
+            9,
+            dtype=np.float32,
+        ),
+        make_position_goal(),
+        deterministic=True,
+    )
+
+    np.testing.assert_allclose(
+        action,
+        np.array(
+            [0.8, -0.3],
+            dtype=np.float32,
+        ),
+    )
