@@ -60,6 +60,8 @@ class FixedScalePositionResidualPolicy:
             )
 
         self.last_selection = None
+        self.direct_call_count = 0
+        self.position_call_count = 0
 
     def select_action(
         self,
@@ -80,11 +82,14 @@ class FixedScalePositionResidualPolicy:
         )
 
         if selection is None:
+            self.direct_call_count += 1
             self.last_selection = None
             return np.asarray(
                 action,
                 dtype=np.float32,
             )
+
+        self.position_call_count += 1
 
         applied_residual = np.asarray(
             selection.residual_action,
