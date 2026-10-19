@@ -35,8 +35,15 @@ from src.macro.outcome_guided_position_generator import (
 from src.macro.physics_transition import (
     PhysicsMacroTransitionModel,
 )
-from src.micro.adaptive_position_policy import (
-    AdaptivePositionMicroPolicy,
+from scripts.eval_position_residual import (
+    load_base_agent,
+    load_residual_network,
+)
+from src.micro.fixed_scale_position_residual_policy import (
+    FixedScalePositionResidualPolicy,
+)
+from src.micro.position_residual_policy import (
+    PositionResidualMicroPolicy,
 )
 
 
@@ -160,20 +167,52 @@ def main(
         "uniform/zero integration baseline"
     )
 
-    micro_policy = (
-        AdaptivePositionMicroPolicy
-        .from_checkpoints(
-            base_checkpoint=(
-                args.base_checkpoint
-            ),
-            bc_checkpoint=(
-                args.bc_checkpoint
-            ),
-            gate_checkpoint=(
-                args.gate_checkpoint
+    base_agent = load_base_agent(
+        args.base_checkpoint,
+        micro_device,
+    )
+
+    (
+        residual_network,
+        residual_checkpoint,
+    ) = load_residual_network(
+        args.residual_checkpoint,
+        micro_device,
+    )
+
+    raw_residual_policy = (
+        PositionResidualMicroPolicy(
+            base_agent=base_agent,
+            residual_network=(
+                residual_network
             ),
             device=micro_device,
         )
+    )
+
+    micro_policy = (
+        FixedScalePositionResidualPolicy(
+            residual_policy=(
+                raw_residual_policy
+            ),
+            residual_scale=(
+                args.residual_scale
+            ),
+            power_scale=1.0,
+            angle_scale=0.0,
+        )
+    )
+
+    print(
+        "Micro policy: Base + power-only "
+        f"Position Residual x{args.residual_scale:.2f}"
+    )
+    print(
+        "Residual checkpoint mode:",
+        residual_checkpoint.get(
+            "residual_mode",
+            "n/a",
+        ),
     )
 
     transition = (
@@ -386,27 +425,23 @@ def main(
         )
 
         print(
-            "selected blend lambda:",
+            "residual scale:",
+            f"{args.residual_scale:.2f}",
+        )
+
+        print(
+            "predicted residual:",
             (
-                selection.blend_lambda
+                selection.residual_action
                 if selection is not None
                 else None
             ),
         )
 
-        print(
-            "gate confidence:",
-            (
-                f"{selection.confidence:.3f}"
-                if selection is not None
-                else "n/a"
-            ),
-        )
-
     else:
         print(
-            "selected blend lambda: "
-            "n/a (DIRECT uses base actor)"
+            "residual: n/a "
+            "(DIRECT uses Base Policy)"
         )
 
     print(
@@ -431,8 +466,8 @@ def main(
     print(
         "GameState -> Outcome-guided root candidates "
         "-> candidate-mode MCTS -> MacroCandidate "
-        "-> Adaptive Micro -> FastFiz -> GameRules "
-        "-> next GameState"
+        "-> Base + power-only Position Residual "
+        "-> FastFiz -> GameRules -> next GameState"
     )
 
 
@@ -445,14 +480,14 @@ def parse_args():
         required=True,
     )
     parser.add_argument(
-        "--bc-checkpoint",
+        "--residual-checkpoint",
         type=str,
         required=True,
     )
     parser.add_argument(
-        "--gate-checkpoint",
-        type=str,
-        required=True,
+        "--residual-scale",
+        type=float,
+        default=0.75,
     )
     parser.add_argument(
         "--simulations",
