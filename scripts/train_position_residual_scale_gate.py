@@ -451,6 +451,160 @@ def choose_threshold(
     )
 
 
+
+def multi_positive_set_loss(
+    logits,
+    success_masks,
+):
+    """
+    Put probability mass on any scale that succeeds.
+
+    Multiple scales may achieve the same POSITION goal, so
+    forcing one arbitrary class is unnecessary. This loss
+    only requires the selected probability mass to lie in
+    the set of successful scales.
+    """
+    if logits.shape != success_masks.shape:
+        raise ValueError(
+            "logits and success_masks shape mismatch."
+        )
+
+    capable = (
+        success_masks.sum(
+            dim=1
+        ) > 0
+    )
+
+    if not bool(
+        capable.any()
+    ):
+        return logits.sum() * 0.0
+
+    capable_logits = logits[
+        capable
+    ]
+    capable_mask = (
+        success_masks[
+            capable
+        ] > 0
+    )
+
+    masked_logits = (
+        capable_logits.masked_fill(
+            ~capable_mask,
+            float("-inf"),
+        )
+    )
+
+    log_success_mass = (
+        torch.logsumexp(
+            masked_logits,
+            dim=1,
+        )
+        - torch.logsumexp(
+            capable_logits,
+            dim=1,
+        )
+    )
+
+    return (
+        -log_success_mass.mean()
+    )
+
+
+def build_gate_loss(
+    logits,
+    success_masks,
+    zero_index,
+    objective,
+    pos_weight,
+    capable_weight,
+    negative_base_weight,
+):
+    if objective == "binary":
+        loss_matrix = (
+            F.binary_cross_entropy_with_logits(
+                logits,
+                success_masks,
+                pos_weight=pos_weight,
+                reduction="none",
+            )
+        )
+
+        capable_rows = (
+            success_masks.sum(
+                dim=1
+            ) > 0
+        ).float()
+
+        row_weights = (
+            1.0
+            + capable_rows
+            * (
+                capable_weight
+                - 1.0
+            )
+        )
+
+        return (
+            loss_matrix.mean(
+                dim=1
+            )
+            * row_weights
+        ).mean()
+
+    if objective == "success_set":
+        set_loss = multi_positive_set_loss(
+            logits,
+            success_masks,
+        )
+
+        incapable = (
+            success_masks.sum(
+                dim=1
+            ) == 0
+        )
+
+        fallback_loss = (
+            logits.sum() * 0.0
+        )
+
+        if (
+            negative_base_weight > 0.0
+            and bool(
+                incapable.any()
+            )
+        ):
+            targets = torch.full(
+                (
+                    int(
+                        incapable.sum().item()
+                    ),
+                ),
+                zero_index,
+                dtype=torch.long,
+                device=logits.device,
+            )
+
+            fallback_loss = (
+                F.cross_entropy(
+                    logits[
+                        incapable
+                    ],
+                    targets,
+                )
+            )
+
+        return (
+            set_loss
+            + negative_base_weight
+            * fallback_loss
+        )
+
+    raise ValueError(
+        f"Unsupported objective: {objective}"
+    )
+
 def train(
     args,
 ):
@@ -479,6 +633,9 @@ def train(
     print(
         "scales:",
         scales,
+    )
+    print(
+        f"objective: {args.objective}"
     )
     print()
     print(
@@ -685,36 +842,19 @@ def train(
                 batch_x
             )
 
-            loss_matrix = (
-                F.binary_cross_entropy_with_logits(
-                    logits,
-                    batch_y,
-                    pos_weight=pos_weight,
-                    reduction="none",
-                )
-            )
-
-            capable_rows = (
-                batch_y.sum(
-                    dim=1
-                ) > 0
-            ).float()
-
-            row_weights = (
-                1.0
-                + capable_rows
-                * (
+            loss = build_gate_loss(
+                logits=logits,
+                success_masks=batch_y,
+                zero_index=zero_index,
+                objective=args.objective,
+                pos_weight=pos_weight,
+                capable_weight=(
                     args.capable_weight
-                    - 1.0
-                )
+                ),
+                negative_base_weight=(
+                    args.negative_base_weight
+                ),
             )
-
-            loss = (
-                loss_matrix.mean(
-                    dim=1
-                )
-                * row_weights
-            ).mean()
 
             optimizer.zero_grad()
             loss.backward()
@@ -837,7 +977,10 @@ def train(
             args.seed
         ),
         "gate_objective": (
-            "per_scale_position_goal_success"
+            args.objective
+        ),
+        "negative_base_weight": float(
+            args.negative_base_weight
         ),
         "selection_threshold": (
             best_threshold
@@ -935,9 +1078,28 @@ def parse_args():
         default=1e-5,
     )
     parser.add_argument(
+        "--objective",
+        type=str,
+        default="binary",
+        choices=[
+            "binary",
+            "success_set",
+        ],
+    )
+    parser.add_argument(
         "--capable-weight",
         type=float,
         default=2.0,
+    )
+    parser.add_argument(
+        "--negative-base-weight",
+        type=float,
+        default=0.25,
+        help=(
+            "For success_set objective, weight of "
+            "fallback-to-base loss on states where "
+            "no candidate scale reaches the goal."
+        ),
     )
     parser.add_argument(
         "--max-pos-weight",
@@ -1027,6 +1189,11 @@ def parse_args():
     if args.capable_weight < 1.0:
         parser.error(
             "--capable-weight must be >= 1"
+        )
+
+    if args.negative_base_weight < 0.0:
+        parser.error(
+            "--negative-base-weight must be >= 0"
         )
 
     if args.max_pos_weight < 1.0:
