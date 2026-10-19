@@ -21,6 +21,7 @@ from src.micro.goal_sampler import (
 from src.micro.position_residual_policy import (
     PositionResidualMicroPolicy,
     PositionResidualNetwork,
+    compose_residual_action,
 )
 
 
@@ -338,6 +339,33 @@ def print_summary(
     )
 
 
+def build_scaled_residual_action(
+    selection,
+    residual_scale,
+    power_scale,
+    angle_scale,
+):
+    residual = np.asarray(
+        selection.residual_action,
+        dtype=np.float32,
+    ).copy()
+
+    residual[0] *= float(
+        power_scale
+    )
+    residual[1] *= float(
+        angle_scale
+    )
+    residual *= float(
+        residual_scale
+    )
+
+    return compose_residual_action(
+        selection.base_action,
+        residual,
+    )
+
+
 def evaluate(args):
     device = resolve_device(
         args.device
@@ -430,7 +458,7 @@ def evaluate(args):
             )
         )
 
-        residual_action = (
+        _ = (
             residual_policy.select_action(
                 observation,
                 goal,
@@ -448,17 +476,46 @@ def evaluate(args):
                 "a residual selection."
             )
 
+        scaled_residual = np.asarray(
+            selection.residual_action,
+            dtype=np.float32,
+        ).copy()
+        scaled_residual[0] *= float(
+            args.power_scale
+        )
+        scaled_residual[1] *= float(
+            args.angle_scale
+        )
+        scaled_residual *= float(
+            args.residual_scale
+        )
+
+        residual_action = (
+            build_scaled_residual_action(
+                selection,
+                residual_scale=(
+                    args.residual_scale
+                ),
+                power_scale=(
+                    args.power_scale
+                ),
+                angle_scale=(
+                    args.angle_scale
+                ),
+            )
+        )
+
         residual_norms.append(
             float(
                 np.linalg.norm(
-                    selection.residual_action
+                    scaled_residual
                 )
             )
         )
 
         unclipped = (
             selection.base_action
-            + selection.residual_action
+            + scaled_residual
         )
 
         if np.any(
@@ -519,6 +576,15 @@ def evaluate(args):
     print(
         f"position radius: "
         f"{args.radius:.3f} m"
+    )
+    print(
+        f"residual scale: "
+        f"{args.residual_scale:.3f}"
+    )
+    print(
+        f"power / angle scale: "
+        f"{args.power_scale:.3f} / "
+        f"{args.angle_scale:.3f}"
     )
     print()
 
@@ -614,6 +680,38 @@ def parse_args():
     )
 
     parser.add_argument(
+        "--residual-scale",
+        type=float,
+        default=1.0,
+        help=(
+            "Global multiplier applied to the "
+            "predicted residual before composing "
+            "the final action."
+        ),
+    )
+
+    parser.add_argument(
+        "--power-scale",
+        type=float,
+        default=1.0,
+        help=(
+            "Additional multiplier for the "
+            "power residual."
+        ),
+    )
+
+    parser.add_argument(
+        "--angle-scale",
+        type=float,
+        default=1.0,
+        help=(
+            "Additional multiplier for the "
+            "angle residual. Use 0 for "
+            "power-only correction."
+        ),
+    )
+
+    parser.add_argument(
         "--seed",
         type=int,
         default=50000,
@@ -635,6 +733,21 @@ def parse_args():
     if args.episodes < 1:
         parser.error(
             "--episodes must be >= 1"
+        )
+
+    if args.residual_scale < 0.0:
+        parser.error(
+            "--residual-scale must be >= 0"
+        )
+
+    if args.power_scale < 0.0:
+        parser.error(
+            "--power-scale must be >= 0"
+        )
+
+    if args.angle_scale < 0.0:
+        parser.error(
+            "--angle-scale must be >= 0"
         )
 
     return args
