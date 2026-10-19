@@ -445,6 +445,12 @@ def main(
         )
 
     print(
+        "Micro calls during search + execution:",
+        f"DIRECT={micro_policy.direct_call_count}",
+        f"POSITION={micro_policy.position_call_count}",
+    )
+
+    print(
         "reward:",
         result.reward,
     )
@@ -492,7 +498,7 @@ def parse_args():
     parser.add_argument(
         "--simulations",
         type=int,
-        default=8,
+        default=24,
     )
     parser.add_argument(
         "--c-puct",
