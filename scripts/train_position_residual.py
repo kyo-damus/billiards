@@ -272,12 +272,70 @@ def calculate_metrics(
     }
 
 
+def residual_loss(
+    prediction,
+    target,
+    mode,
+):
+    if mode == "full":
+        return F.mse_loss(
+            prediction,
+            target,
+        )
+
+    if mode == "power_only":
+        return F.mse_loss(
+            prediction[:, 0],
+            target[:, 0],
+        )
+
+    raise ValueError(
+        f"Unsupported residual mode: {mode}"
+    )
+
+
+def optimization_mse(
+    prediction,
+    target,
+    mode,
+):
+    prediction = np.asarray(
+        prediction,
+        dtype=np.float32,
+    )
+    target = np.asarray(
+        target,
+        dtype=np.float32,
+    )
+
+    if mode == "full":
+        error = prediction - target
+
+    elif mode == "power_only":
+        error = (
+            prediction[:, 0]
+            - target[:, 0]
+        )
+
+    else:
+        raise ValueError(
+            f"Unsupported residual mode: {mode}"
+        )
+
+    return float(
+        np.mean(
+            error ** 2
+        )
+    )
+
+
 def evaluate(
     network,
     states,
     base_actions,
     targets,
     batch_size,
+    mode,
 ):
     prediction = predict_residuals(
         network,
@@ -293,10 +351,20 @@ def evaluate(
         .numpy()
     )
 
-    return calculate_metrics(
+    metrics = calculate_metrics(
         prediction,
         target_np,
     )
+
+    metrics["optimization_mse"] = (
+        optimization_mse(
+            prediction,
+            target_np,
+            mode,
+        )
+    )
+
+    return metrics
 
 
 def train(args):
@@ -398,6 +466,7 @@ def train(args):
         val_base_actions,
         val_targets,
         args.batch_size,
+        args.residual_mode,
     )
 
     print(
@@ -417,10 +486,15 @@ def train(args):
     print(
         f"hidden dim: {args.hidden_dim}"
     )
+    print(
+        f"residual mode: "
+        f"{args.residual_mode}"
+    )
     print()
     print(
         "Initial validation "
-        f"MSE: {initial_metrics['mse']:.6f}"
+        "optimization MSE: "
+        f"{initial_metrics['optimization_mse']:.6f}"
     )
     print(
         "Initial validation mean error norm: "
@@ -482,9 +556,10 @@ def train(args):
                 batch_base,
             )
 
-            loss = F.mse_loss(
+            loss = residual_loss(
                 prediction,
                 batch_targets,
+                args.residual_mode,
             )
 
             optimizer.zero_grad()
@@ -515,6 +590,7 @@ def train(args):
             val_base_actions,
             val_targets,
             args.batch_size,
+            args.residual_mode,
         )
 
         train_mse = (
@@ -526,11 +602,11 @@ def train(args):
         )
 
         if (
-            val_metrics["mse"]
+            val_metrics["optimization_mse"]
             < best_val_mse
         ):
             best_val_mse = (
-                val_metrics["mse"]
+                val_metrics["optimization_mse"]
             )
             best_epoch = epoch
             best_state = copy.deepcopy(
@@ -549,7 +625,7 @@ def train(args):
                 f"epoch={epoch:3d} "
                 f"train_mse={train_mse:.6f} "
                 f"val_mse="
-                f"{val_metrics['mse']:.6f} "
+                f"{val_metrics['optimization_mse']:.6f} "
                 f"val_error_norm="
                 f"{val_metrics['mean_error_norm']:.4f}"
             )
@@ -600,9 +676,17 @@ def train(args):
         "seed": int(
             args.seed
         ),
+        "residual_mode": (
+            args.residual_mode
+        ),
         "initial_val_metrics": {
             "mse": float(
                 initial_metrics["mse"]
+            ),
+            "optimization_mse": float(
+                initial_metrics[
+                    "optimization_mse"
+                ]
             ),
             "mean_error_norm": float(
                 initial_metrics[
@@ -613,6 +697,11 @@ def train(args):
         "best_val_metrics": {
             "mse": float(
                 best_metrics["mse"]
+            ),
+            "optimization_mse": float(
+                best_metrics[
+                    "optimization_mse"
+                ]
             ),
             "mean_error_norm": float(
                 best_metrics[
@@ -655,7 +744,8 @@ def train(args):
         f"best epoch: {best_epoch}"
     )
     print(
-        f"MSE: {best_metrics['mse']:.6f}"
+        "optimization MSE: "
+        f"{best_metrics['optimization_mse']:.6f}"
     )
     print(
         "mean residual error norm: "
@@ -745,6 +835,22 @@ def parse_args():
         "--log-interval",
         type=int,
         default=10,
+    )
+
+    parser.add_argument(
+        "--residual-mode",
+        type=str,
+        default="full",
+        choices=[
+            "full",
+            "power_only",
+        ],
+        help=(
+            "full learns both power and angle "
+            "residuals. power_only learns only "
+            "the power residual; the angle output "
+            "remains zero from initialization."
+        ),
     )
 
     parser.add_argument(
