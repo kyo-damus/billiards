@@ -4,6 +4,8 @@ from scripts.train_position_residual import (
     calculate_metrics,
     load_residual_dataset,
     make_split,
+    optimization_mse,
+    residual_loss,
 )
 
 
@@ -150,4 +152,68 @@ def test_load_residual_dataset_checks_identity(
     np.testing.assert_allclose(
         loaded_residual,
         residual,
+    )
+
+
+
+def test_power_only_loss_ignores_angle_error():
+
+    prediction = np.array(
+        [
+            [0.5, 10.0],
+            [0.0, -10.0],
+        ],
+        dtype=np.float32,
+    )
+
+    target = np.array(
+        [
+            [1.0, 0.0],
+            [0.0, 1.0],
+        ],
+        dtype=np.float32,
+    )
+
+    value = optimization_mse(
+        prediction,
+        target,
+        "power_only",
+    )
+
+    assert np.isclose(
+        value,
+        0.125,
+    )
+
+
+def test_power_only_torch_loss_has_zero_angle_gradient():
+
+    import torch
+
+    prediction = torch.tensor(
+        [
+            [0.5, 0.2],
+            [0.0, -0.3],
+        ],
+        dtype=torch.float32,
+        requires_grad=True,
+    )
+
+    target = torch.tensor(
+        [
+            [1.0, 0.0],
+            [0.0, 1.0],
+        ],
+        dtype=torch.float32,
+    )
+
+    loss = residual_loss(
+        prediction,
+        target,
+        "power_only",
+    )
+    loss.backward()
+
+    assert torch.all(
+        prediction.grad[:, 1] == 0
     )
