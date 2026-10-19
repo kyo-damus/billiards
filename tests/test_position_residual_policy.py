@@ -268,3 +268,60 @@ def test_fixed_scale_wrapper_applies_power_only_residual():
             dtype=np.float32,
         ),
     )
+
+
+
+def test_fixed_scale_wrapper_tracks_goal_type_calls():
+
+    raw_policy = PositionResidualMicroPolicy(
+        base_agent=DummyBaseAgent(
+            [0.1, 0.0]
+        ),
+        residual_network=ConstantResidual(
+            [0.2, 0.0]
+        ),
+        device="cpu",
+    )
+
+    policy = FixedScalePositionResidualPolicy(
+        residual_policy=raw_policy,
+        residual_scale=0.75,
+        power_scale=1.0,
+        angle_scale=0.0,
+    )
+
+    policy.select_action(
+        np.zeros(
+            9,
+            dtype=np.float32,
+        ),
+        make_position_goal(),
+        deterministic=True,
+    )
+
+    direct_goal = TacticalGoal(
+        goal_type=(
+            TacticalGoalType
+            .DIRECT_ATTACK
+        ),
+        target_ball=0,
+        target_pocket=1,
+    )
+
+    policy.select_action(
+        np.zeros(
+            9,
+            dtype=np.float32,
+        ),
+        direct_goal,
+        deterministic=True,
+    )
+
+    assert (
+        policy.position_call_count
+        == 1
+    )
+    assert (
+        policy.direct_call_count
+        == 1
+    )
