@@ -278,15 +278,15 @@ def calculate_metrics(
         if len(indices) < 2:
             continue
 
-        target_best = indices[
-            int(
-                np.argmax(
-                    target[
-                        indices
-                    ]
-                )
-            )
+        group_targets = target[
+            indices
         ]
+
+        best_target = float(
+            np.max(
+                group_targets
+            )
+        )
 
         predicted_best = indices[
             int(
@@ -298,9 +298,16 @@ def calculate_metrics(
             )
         ]
 
+        # 教師Qが同点の候補は
+        # どれを選んでもtop-1正解とする。
         top1_correct += int(
-            target_best
-            == predicted_best
+            np.isclose(
+                target[
+                    predicted_best
+                ],
+                best_target,
+                atol=1e-6,
+            )
         )
         top1_total += 1
 
