@@ -375,6 +375,7 @@ def main(
         device="cpu",
         candidate_mode=True,
         force_evaluate_unvisited=True,
+        root_min_visits_before_puct=2,
     )
 
     agent = HierarchicalAgent(

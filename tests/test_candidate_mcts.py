@@ -337,3 +337,68 @@ def test_search_keeps_last_root_for_diagnostics():
     )
 
     assert mcts.last_root is root
+
+
+def test_min_visits_prefers_less_visited_child():
+
+    torch.manual_seed(0)
+
+    mcts = MCTS(
+        policy_network=(
+            MacroCandidatePolicyNetwork()
+        ),
+        value_network=(
+            MacroValueNetwork()
+        ),
+        action_generator=(
+            ExpandedMacroCandidateGenerator()
+        ),
+        transition_model=(
+            DummyCandidateTransition()
+        ),
+        simulations=1,
+        device="cpu",
+        candidate_mode=True,
+    )
+
+    candidates = (
+        ExpandedMacroCandidateGenerator()
+        .generate(
+            make_state()
+        )
+    )
+
+    assert len(candidates) >= 2
+
+    more_visited = MCTSNode(
+        prior=0.5,
+        reward=10.0,
+        state=make_state(),
+        visit_count=2,
+    )
+
+    less_visited = MCTSNode(
+        prior=0.5,
+        reward=0.0,
+        state=make_state(),
+        visit_count=1,
+    )
+
+    parent = MCTSNode(
+        state=make_state(),
+        visit_count=3,
+        children={
+            candidates[0]: more_visited,
+            candidates[1]: less_visited,
+        },
+    )
+
+    selected_action, selected_child = (
+        mcts._select_child(
+            parent,
+            min_visits=2,
+        )
+    )
+
+    assert selected_action == candidates[1]
+    assert selected_child is less_visited

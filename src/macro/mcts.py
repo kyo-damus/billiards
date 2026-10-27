@@ -85,6 +85,7 @@ class MCTS:
         candidate_mode=False,
         root_action_generator=None,
         force_evaluate_unvisited=False,
+        root_min_visits_before_puct=0,
     ):
         self.policy_network = policy_network
         self.value_network = value_network
@@ -111,6 +112,16 @@ class MCTS:
         self.candidate_mode = candidate_mode
         self.force_evaluate_unvisited = bool(
             force_evaluate_unvisited
+        )
+
+        if root_min_visits_before_puct < 0:
+            raise ValueError(
+                "root_min_visits_before_puct "
+                "must be >= 0."
+            )
+
+        self.root_min_visits_before_puct = int(
+            root_min_visits_before_puct
         )
 
         # 直近searchの診断用。
@@ -179,7 +190,12 @@ class MCTS:
             and not node.terminated
         ):
             action, child = self._select_child(
-                node
+                node,
+                min_visits=(
+                    self.root_min_visits_before_puct
+                    if node is root
+                    else 0
+                ),
             )
 
             # 初めてこの枝を通る場合、
@@ -236,7 +252,40 @@ class MCTS:
     def _select_child(
         self,
         node: MCTSNode,
+        min_visits=0,
     ):
+        # root候補を同じ深さまで最低限比較したい場合、
+        # visit数が閾値未満の候補を優先する。
+        if min_visits > 0:
+            under_sampled = [
+                (action, child)
+                for action, child
+                in node.children.items()
+                if child.visit_count < min_visits
+            ]
+
+            if under_sampled:
+                min_count = min(
+                    child.visit_count
+                    for _, child
+                    in under_sampled
+                )
+
+                least_visited = [
+                    (action, child)
+                    for action, child
+                    in under_sampled
+                    if child.visit_count
+                    == min_count
+                ]
+
+                return max(
+                    least_visited,
+                    key=lambda item: (
+                        item[1].prior
+                    ),
+                )
+
         # FastFizの局所評価を比較する場合、
         # 未評価候補を最低1回ずつ遷移させてから
         # PUCTによる再訪へ移る。
