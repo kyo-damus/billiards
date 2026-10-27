@@ -457,6 +457,94 @@ def main(
         f"POSITION={micro_policy.position_call_count}",
     )
 
+    root = mcts.last_root
+
+    if root is not None:
+        print()
+        print(
+            "=== Root MCTS candidate summary ==="
+        )
+
+        rows = []
+
+        for candidate, child in (
+            root.children.items()
+        ):
+            if not isinstance(
+                candidate,
+                MacroCandidate,
+            ):
+                continue
+
+            q_value = (
+                child.reward
+                + mcts.gamma * child.value
+            )
+
+            rows.append(
+                (
+                    child.visit_count,
+                    q_value,
+                    child.reward,
+                    child.value,
+                    candidate,
+                )
+            )
+
+        rows.sort(
+            key=lambda row: (
+                row[0],
+                row[1],
+            ),
+            reverse=True,
+        )
+
+        for (
+            visits,
+            q_value,
+            edge_reward,
+            future_value,
+            candidate,
+        ) in rows:
+
+            goal = candidate.goal
+
+            current_target = (
+                candidate.action.target_ball,
+                candidate.action.target_pocket,
+            )
+
+            next_target = (
+                (
+                    goal.next_target_ball,
+                    goal.next_target_pocket,
+                )
+                if (
+                    goal.goal_type
+                    == TacticalGoalType.POSITION_ATTACK
+                )
+                else None
+            )
+
+            selected_marker = (
+                "*"
+                if candidate == decision
+                else " "
+            )
+
+            print(
+                selected_marker,
+                goal.goal_type.value,
+                "current=",
+                current_target,
+                "next=",
+                next_target,
+                f"reward={edge_reward:.3f}",
+                f"value={future_value:.3f}",
+                f"q={q_value:.3f}",
+                f"visits={visits}",
+            )
+
     print(
         "reward:",
         result.reward,

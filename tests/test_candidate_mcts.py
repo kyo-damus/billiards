@@ -308,3 +308,32 @@ def test_force_evaluate_unvisited_prefers_unvisited_child():
 
     assert selected_action == candidates[1]
     assert selected_child is unvisited
+
+
+def test_search_keeps_last_root_for_diagnostics():
+
+    torch.manual_seed(0)
+
+    mcts = MCTS(
+        policy_network=(
+            MacroCandidatePolicyNetwork()
+        ),
+        value_network=(
+            MacroValueNetwork()
+        ),
+        action_generator=(
+            ExpandedMacroCandidateGenerator()
+        ),
+        transition_model=(
+            DummyCandidateTransition()
+        ),
+        simulations=1,
+        device="cpu",
+        candidate_mode=True,
+    )
+
+    root = mcts.search(
+        make_state()
+    )
+
+    assert mcts.last_root is root

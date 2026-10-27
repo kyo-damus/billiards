@@ -113,6 +113,10 @@ class MCTS:
             force_evaluate_unvisited
         )
 
+        # 直近searchの診断用。
+        # 探索ロジックには使用しない。
+        self.last_root = None
+
     # ============================================================
     # Public API
     # ============================================================
@@ -138,6 +142,8 @@ class MCTS:
 
         for _ in range(self.simulations):
             self._simulate(root)
+
+        self.last_root = root
 
         return root
 
