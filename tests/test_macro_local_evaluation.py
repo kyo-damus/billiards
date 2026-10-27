@@ -83,9 +83,10 @@ def test_direct_success_score_is_pot_reward():
     assert result.target_potted is True
     assert result.scratch is False
     assert result.position_quality is None
+    assert result.next_shot_feasible is True
     assert np.isclose(
         result.score,
-        1.0,
+        1.25,
     )
 
 
@@ -141,9 +142,10 @@ def test_position_center_gets_full_quality_bonus():
         result.position_quality,
         1.0,
     )
+    assert result.next_shot_feasible is True
     assert np.isclose(
         result.score,
-        1.5,
+        1.75,
     )
 
 
@@ -171,9 +173,48 @@ def test_failed_pot_does_not_receive_position_bonus():
         result.position_quality,
         1.0,
     )
+    assert result.next_shot_feasible is False
     assert np.isclose(
         result.score,
         0.0,
+    )
+
+
+def test_position_miss_does_not_receive_position_bonus():
+
+    evaluator = MacroLocalEvaluator()
+
+    result = evaluator.evaluate(
+        goal=make_position_goal(),
+        state=make_state(
+            cue=(0.80, 1.28),
+        ),
+        shot_info={
+            "success": True,
+            "scratched": False,
+            "wrong_pocket": False,
+        },
+    )
+
+    assert (
+        result.position_goal_satisfied
+        is False
+    )
+    assert (
+        result.position_quality
+        is not None
+    )
+    assert (
+        result.position_quality
+        > 0.0
+    )
+    assert result.next_shot_feasible is True
+
+    # Position Goal未達の微小qualityは
+    # scoreへ加算しない。
+    assert np.isclose(
+        result.score,
+        1.25,
     )
 
 
@@ -194,6 +235,7 @@ def test_scratch_disables_position_quality_bonus():
 
     assert result.scratch is True
     assert result.position_quality == 0.0
+    assert result.next_shot_feasible is False
     assert (
         result.position_goal_satisfied
         is False

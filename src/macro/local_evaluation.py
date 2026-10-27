@@ -4,6 +4,7 @@ import numpy as np
 
 from src.common.types import GameState
 from src.goal.types import TacticalGoal, TacticalGoalType
+from src.macro.action_generator import MacroActionGenerator
 
 
 @dataclass(frozen=True)
@@ -19,6 +20,7 @@ class MacroLocalEvaluationConfig:
     wrong_pocket_penalty: float = 0.5
     scratch_penalty: float = 1.0
     position_weight: float = 0.5
+    next_shot_weight: float = 0.25
 
 
 @dataclass(frozen=True)
@@ -34,6 +36,8 @@ class MacroLocalEvaluation:
     position_goal_satisfied: bool
     cue_distance: float | None
     position_quality: float | None
+
+    next_shot_feasible: bool
 
     score: float
 
@@ -54,11 +58,17 @@ class MacroLocalEvaluator:
     def __init__(
         self,
         config: MacroLocalEvaluationConfig | None = None,
+        action_generator=None,
     ):
         self.config = (
             config
             if config is not None
             else MacroLocalEvaluationConfig()
+        )
+        self.action_generator = (
+            action_generator
+            if action_generator is not None
+            else MacroActionGenerator()
         )
 
     def evaluate(
@@ -106,6 +116,18 @@ class MacroLocalEvaluator:
             scratch=scratch,
         )
 
+        next_shot_feasible = False
+
+        if (
+            target_potted
+            and not scratch
+        ):
+            next_shot_feasible = bool(
+                self.action_generator.generate(
+                    state
+                )
+            )
+
         score = 0.0
 
         if (
@@ -133,11 +155,21 @@ class MacroLocalEvaluator:
             == TacticalGoalType.POSITION_ATTACK
             and target_potted
             and not scratch
+            and position_goal_satisfied
             and position_quality is not None
         ):
             score += (
                 self.config.position_weight
                 * position_quality
+            )
+
+        if (
+            target_potted
+            and not scratch
+            and next_shot_feasible
+        ):
+            score += (
+                self.config.next_shot_weight
             )
 
         return MacroLocalEvaluation(
@@ -149,6 +181,9 @@ class MacroLocalEvaluator:
             ),
             cue_distance=cue_distance,
             position_quality=position_quality,
+            next_shot_feasible=(
+                next_shot_feasible
+            ),
             score=float(score),
         )
 

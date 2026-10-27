@@ -488,6 +488,9 @@ def main(
                 "position_quality": (
                     evaluation.position_quality
                 ),
+                "next_shot_feasible": (
+                    evaluation.next_shot_feasible
+                ),
                 "score": (
                     evaluation.score
                 ),
