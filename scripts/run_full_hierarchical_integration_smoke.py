@@ -374,6 +374,7 @@ def main(
         ),
         device="cpu",
         candidate_mode=True,
+        force_evaluate_unvisited=True,
     )
 
     agent = HierarchicalAgent(

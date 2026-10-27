@@ -21,7 +21,10 @@ from src.macro.candidate_policy import (
     MacroCandidatePolicyNetwork,
 )
 
-from src.macro.mcts import MCTS
+from src.macro.mcts import (
+    MCTS,
+    MCTSNode,
+)
 
 from src.macro.transition import (
     MacroTransitionResult,
@@ -244,3 +247,64 @@ def test_candidate_is_sent_to_transition():
         MacroCandidate,
     )
     
+
+def test_force_evaluate_unvisited_prefers_unvisited_child():
+
+    torch.manual_seed(0)
+
+    mcts = MCTS(
+        policy_network=(
+            MacroCandidatePolicyNetwork()
+        ),
+        value_network=(
+            MacroValueNetwork()
+        ),
+        action_generator=(
+            ExpandedMacroCandidateGenerator()
+        ),
+        transition_model=(
+            DummyCandidateTransition()
+        ),
+        simulations=1,
+        device="cpu",
+        candidate_mode=True,
+        force_evaluate_unvisited=True,
+    )
+
+    candidates = (
+        ExpandedMacroCandidateGenerator()
+        .generate(
+            make_state()
+        )
+    )
+
+    assert len(candidates) >= 2
+
+    visited = MCTSNode(
+        prior=0.5,
+        reward=10.0,
+        state=make_state(),
+        visit_count=1,
+    )
+
+    unvisited = MCTSNode(
+        prior=0.5,
+    )
+
+    parent = MCTSNode(
+        state=make_state(),
+        visit_count=1,
+        children={
+            candidates[0]: visited,
+            candidates[1]: unvisited,
+        },
+    )
+
+    selected_action, selected_child = (
+        mcts._select_child(
+            parent
+        )
+    )
+
+    assert selected_action == candidates[1]
+    assert selected_child is unvisited

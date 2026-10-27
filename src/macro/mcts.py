@@ -84,6 +84,7 @@ class MCTS:
         device=None,
         candidate_mode=False,
         root_action_generator=None,
+        force_evaluate_unvisited=False,
     ):
         self.policy_network = policy_network
         self.value_network = value_network
@@ -108,6 +109,9 @@ class MCTS:
         self.device = torch.device(device)
 
         self.candidate_mode = candidate_mode
+        self.force_evaluate_unvisited = bool(
+            force_evaluate_unvisited
+        )
 
     # ============================================================
     # Public API
@@ -227,6 +231,25 @@ class MCTS:
         self,
         node: MCTSNode,
     ):
+        # FastFizの局所評価を比較する場合、
+        # 未評価候補を最低1回ずつ遷移させてから
+        # PUCTによる再訪へ移る。
+        if self.force_evaluate_unvisited:
+            unvisited = [
+                (action, child)
+                for action, child
+                in node.children.items()
+                if child.state is None
+            ]
+
+            if unvisited:
+                return max(
+                    unvisited,
+                    key=lambda item: (
+                        item[1].prior
+                    ),
+                )
+
         best_score = -float("inf")
         best_action = None
         best_child = None
