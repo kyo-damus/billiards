@@ -1,5 +1,6 @@
 import numpy as np
 import torch
+import torch.nn as nn
 
 from src.common.types import (
     GameState,
@@ -402,3 +403,156 @@ def test_min_visits_prefers_less_visited_child():
 
     assert selected_action == candidates[1]
     assert selected_child is less_visited
+
+
+class IncreasingCandidateValue(nn.Module):
+
+    def forward(
+        self,
+        state,
+        candidates,
+    ):
+        return torch.arange(
+            candidates.shape[0],
+            dtype=torch.float32,
+            device=candidates.device,
+        )
+
+
+def test_candidate_value_predictions_are_attached_to_children():
+
+    torch.manual_seed(0)
+
+    mcts = MCTS(
+        policy_network=(
+            MacroCandidatePolicyNetwork()
+        ),
+        value_network=(
+            MacroValueNetwork()
+        ),
+        candidate_value_network=(
+            IncreasingCandidateValue()
+        ),
+        action_generator=(
+            ExpandedMacroCandidateGenerator()
+        ),
+        transition_model=(
+            DummyCandidateTransition()
+        ),
+        simulations=0,
+        device="cpu",
+        candidate_mode=True,
+    )
+
+    root = mcts.search(
+        make_state()
+    )
+
+    predicted = [
+        child.predicted_q
+        for child in root.children.values()
+    ]
+
+    assert predicted == [
+        float(index)
+        for index in range(
+            len(predicted)
+        )
+    ]
+
+
+def test_unvisited_candidate_uses_predicted_q():
+
+    torch.manual_seed(0)
+
+    mcts = MCTS(
+        policy_network=(
+            MacroCandidatePolicyNetwork()
+        ),
+        value_network=(
+            MacroValueNetwork()
+        ),
+        action_generator=(
+            ExpandedMacroCandidateGenerator()
+        ),
+        transition_model=(
+            DummyCandidateTransition()
+        ),
+        simulations=1,
+        device="cpu",
+        candidate_mode=True,
+    )
+
+    low = MCTSNode(
+        prior=0.5,
+        predicted_q=0.0,
+    )
+
+    high = MCTSNode(
+        prior=0.5,
+        predicted_q=2.0,
+    )
+
+    parent = MCTSNode(
+        state=make_state(),
+        visit_count=0,
+    )
+
+    assert (
+        mcts._puct_score(
+            parent,
+            high,
+        )
+        >
+        mcts._puct_score(
+            parent,
+            low,
+        )
+    )
+
+
+def test_visited_candidate_uses_empirical_q():
+
+    torch.manual_seed(0)
+
+    mcts = MCTS(
+        policy_network=(
+            MacroCandidatePolicyNetwork()
+        ),
+        value_network=(
+            MacroValueNetwork()
+        ),
+        action_generator=(
+            ExpandedMacroCandidateGenerator()
+        ),
+        transition_model=(
+            DummyCandidateTransition()
+        ),
+        simulations=1,
+        device="cpu",
+        candidate_mode=True,
+        gamma=0.5,
+    )
+
+    child = MCTSNode(
+        prior=0.0,
+        reward=1.0,
+        predicted_q=100.0,
+        state=make_state(),
+        visit_count=2,
+        value_sum=4.0,
+    )
+
+    parent = MCTSNode(
+        state=make_state(),
+        visit_count=2,
+    )
+
+    # empirical Q = 1.0 + 0.5 * 2.0 = 2.0
+    assert np.isclose(
+        mcts._puct_score(
+            parent,
+            child,
+        ),
+        2.0,
+    )

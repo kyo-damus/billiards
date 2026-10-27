@@ -41,6 +41,10 @@ class MCTSNode:
     prior: float = 0.0
     reward: float = 0.0
 
+    # 学習済み候補Value/Qがある場合の
+    # 未訪問候補に対する事前予測値。
+    predicted_q: float | None = None
+
     state: GameState | None = None
 
     visit_count: int = 0
@@ -86,9 +90,13 @@ class MCTS:
         root_action_generator=None,
         force_evaluate_unvisited=False,
         root_min_visits_before_puct=0,
+        candidate_value_network=None,
     ):
         self.policy_network = policy_network
         self.value_network = value_network
+        self.candidate_value_network = (
+            candidate_value_network
+        )
 
         self.action_generator = action_generator
         self.root_action_generator = (
@@ -329,11 +337,23 @@ class MCTS:
         child: MCTSNode,
     ) -> float:
 
-        # Edge reward + future value
-        q_value = (
-            child.reward
-            + self.gamma * child.value
-        )
+        # 未訪問候補には、利用可能なら
+        # 候補依存Value/Qの予測値を使う。
+        # 一度FastFizで展開した後は、
+        # 実測reward + search valueへ切り替える。
+        if (
+            child.visit_count == 0
+            and child.predicted_q is not None
+        ):
+            q_value = (
+                child.predicted_q
+            )
+
+        else:
+            q_value = (
+                child.reward
+                + self.gamma * child.value
+            )
 
         exploration = (
             self.c_puct
@@ -380,6 +400,22 @@ class MCTS:
                 )
             )
 
+            if (
+                self.candidate_value_network
+                is not None
+            ):
+                predicted_qs = (
+                    self._candidate_values(
+                        node.state,
+                        choices,
+                    )
+                )
+            else:
+                predicted_qs = [
+                    None
+                    for _ in choices
+                ]
+
         else:
             priors = (
                 self._legacy_action_priors(
@@ -388,12 +424,27 @@ class MCTS:
                 )
             )
 
-        for choice, prior in zip(
+            predicted_qs = [
+                None
+                for _ in choices
+            ]
+
+        for (
+            choice,
+            prior,
+            predicted_q,
+        ) in zip(
             choices,
             priors,
+            predicted_qs,
         ):
             node.children[choice] = MCTSNode(
-                prior=float(prior)
+                prior=float(prior),
+                predicted_q=(
+                    None
+                    if predicted_q is None
+                    else float(predicted_q)
+                ),
             )
             
     # ============================================================
@@ -557,6 +608,84 @@ class MCTS:
 
         return (
             priors
+            .detach()
+            .cpu()
+            .numpy()
+            .reshape(-1)
+        )
+
+    def _candidate_values(
+        self,
+        state,
+        candidates,
+    ):
+        """
+        候補依存Value/Qネットワークから
+        各MacroCandidateのQ(s, c)を推定する。
+        """
+
+        if (
+            self.candidate_value_network
+            is None
+        ):
+            raise RuntimeError(
+                "candidate_value_network "
+                "is not configured."
+            )
+
+        if not all(
+            isinstance(
+                candidate,
+                MacroCandidate,
+            )
+            for candidate in candidates
+        ):
+            raise TypeError(
+                "Candidate value requires "
+                "MacroCandidate objects."
+            )
+
+        state_tensor = (
+            game_state_to_tensor(
+                state,
+                device=self.device,
+            )
+        )
+
+        if (
+            state_tensor.dim() == 2
+            and state_tensor.shape[0] == 1
+        ):
+            state_tensor = (
+                state_tensor.squeeze(0)
+            )
+
+        candidate_array = np.stack(
+            [
+                encode_macro_candidate(
+                    candidate
+                )
+                for candidate in candidates
+            ],
+            axis=0,
+        )
+
+        candidate_tensor = torch.as_tensor(
+            candidate_array,
+            dtype=torch.float32,
+            device=self.device,
+        )
+
+        with torch.no_grad():
+            values = (
+                self.candidate_value_network(
+                    state_tensor,
+                    candidate_tensor,
+                )
+            )
+
+        return (
+            values
             .detach()
             .cpu()
             .numpy()
