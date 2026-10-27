@@ -108,7 +108,10 @@ class MacroLocalEvaluator:
 
         score = 0.0
 
-        if target_potted:
+        if (
+            target_potted
+            and not scratch
+        ):
             score += self.config.pot_reward
 
         if wrong_pocket:

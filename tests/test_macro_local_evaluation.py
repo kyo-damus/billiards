@@ -200,5 +200,5 @@ def test_scratch_disables_position_quality_bonus():
     )
     assert np.isclose(
         result.score,
-        0.0,
+        -1.0,
     )
