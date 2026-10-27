@@ -6,6 +6,10 @@ from src.common.types import (
     MacroAction,
 )
 
+from src.macro.local_evaluation import (
+    MacroLocalEvaluation,
+)
+
 
 @dataclass
 class MacroTransitionResult:
@@ -16,6 +20,10 @@ class MacroTransitionResult:
     next_state: GameState
     reward: float
     terminated: bool
+
+    # 局所評価を有効化した場合のみ設定する。
+    # 既存Transitionとの後方互換性のためoptional。
+    evaluation: MacroLocalEvaluation | None = None
 
 
 class MacroTransitionModel(Protocol):

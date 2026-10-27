@@ -15,6 +15,7 @@ from src.macro.candidate import (
     MacroCandidate,
 )
 
+
 class PhysicsMacroTransitionModel:
     """
     MacroActionをMicro SAC + FastFizで
@@ -27,6 +28,10 @@ class PhysicsMacroTransitionModel:
     FastFiz
       ↓
     next GameState
+
+    local_evaluatorを指定した場合は、
+    FastFizの1-shot結果からMacro用の局所rewardを計算し、
+    MCTSのedge rewardとして返す。
     """
 
     def __init__(
@@ -35,9 +40,14 @@ class PhysicsMacroTransitionModel:
         env=None,
         deterministic=True,
         game_rules=None,
+        local_evaluator=None,
     ):
         self.micro_agent = micro_agent
         self.game_rules = game_rules
+        self.local_evaluator = (
+            local_evaluator
+        )
+        self.last_evaluation = None
 
         if env is None:
             env = MicroBilliardEnv()
@@ -141,21 +151,50 @@ class PhysicsMacroTransitionModel:
                 )
             )
 
-            return MacroTransitionResult(
-                next_state=(
-                    game_result.next_state
-                ),
-                reward=float(
-                    game_result.reward
-                ),
-                terminated=bool(
-                    game_result.terminated
-                ),
+            next_state = (
+                game_result.next_state
+            )
+            reward = float(
+                game_result.reward
+            )
+            terminated = bool(
+                game_result.terminated
             )
 
-        # backward-compatible path
+        else:
+            # backward-compatible path
+            next_state = physical_state
+            reward = float(micro_reward)
+            terminated = False
+
+        # --------------------------------
+        # Macro local evaluation
+        # --------------------------------
+
+        evaluation = None
+
+        if self.local_evaluator is not None:
+            evaluation = (
+                self.local_evaluator.evaluate(
+                    goal=tactical_goal,
+                    state=physical_state,
+                    shot_info=info,
+                )
+            )
+
+            # MCTSではGameRules/Micro rewardの代わりに、
+            # 戦術候補の局所評価をedge rewardとして利用する。
+            reward = float(
+                evaluation.score
+            )
+
+        self.last_evaluation = (
+            evaluation
+        )
+
         return MacroTransitionResult(
-            next_state=physical_state,
-            reward=float(micro_reward),
-            terminated=False,
+            next_state=next_state,
+            reward=reward,
+            terminated=terminated,
+            evaluation=evaluation,
         )

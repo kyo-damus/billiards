@@ -29,6 +29,9 @@ from src.macro.candidate_generator import (
     MacroCandidateGenerator,
 )
 from src.macro.mcts import MCTS
+from src.macro.local_evaluation import (
+    MacroLocalEvaluator,
+)
 from src.macro.outcome_guided_position_generator import (
     OutcomeGuidedPositionCandidateGenerator,
 )
@@ -221,6 +224,9 @@ def main(
             deterministic=True,
             game_rules=(
                 SimplifiedGameRules()
+            ),
+            local_evaluator=(
+                MacroLocalEvaluator()
             ),
         )
     )
@@ -454,6 +460,38 @@ def main(
         "reward:",
         result.reward,
     )
+
+    evaluation = (
+        transition.last_evaluation
+    )
+
+    if evaluation is not None:
+        print(
+            "local evaluation:",
+            {
+                "target_potted": (
+                    evaluation.target_potted
+                ),
+                "wrong_pocket": (
+                    evaluation.wrong_pocket
+                ),
+                "scratch": (
+                    evaluation.scratch
+                ),
+                "position_goal": (
+                    evaluation.position_goal_satisfied
+                ),
+                "cue_distance": (
+                    evaluation.cue_distance
+                ),
+                "position_quality": (
+                    evaluation.position_quality
+                ),
+                "score": (
+                    evaluation.score
+                ),
+            },
+        )
     print(
         "terminated:",
         result.terminated,
@@ -473,7 +511,8 @@ def main(
         "GameState -> Outcome-guided root candidates "
         "-> candidate-mode MCTS -> MacroCandidate "
         "-> Base + power-only Position Residual "
-        "-> FastFiz -> GameRules -> next GameState"
+        "-> FastFiz -> Macro local evaluation "
+        "-> GameRules -> next GameState"
     )
 
 
