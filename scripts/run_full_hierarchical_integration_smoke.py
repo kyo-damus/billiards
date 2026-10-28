@@ -29,6 +29,9 @@ from src.macro.candidate_generator import (
     MacroCandidateGenerator,
 )
 from src.macro.mcts import MCTS
+from src.macro.candidate_value import (
+    load_macro_candidate_value_network,
+)
 from src.macro.local_evaluation import (
     MacroLocalEvaluator,
 )
@@ -166,8 +169,47 @@ def main(
         f"micro device: {micro_device}"
     )
     print(
-        "Macro policy/value: "
-        "uniform/zero integration baseline"
+        "Macro policy: uniform integration baseline"
+    )
+
+    candidate_value_network = None
+    candidate_value_checkpoint = None
+
+    if (
+        args.candidate_value_checkpoint
+        is not None
+    ):
+        (
+            candidate_value_network,
+            candidate_value_checkpoint,
+        ) = (
+            load_macro_candidate_value_network(
+                args.candidate_value_checkpoint,
+                device="cpu",
+            )
+        )
+
+        print(
+            "Macro candidate Q: learned"
+        )
+        print(
+            "Candidate Q checkpoint:",
+            args.candidate_value_checkpoint,
+        )
+        print(
+            "Candidate Q best val MSE:",
+            candidate_value_checkpoint.get(
+                "best_val_mse",
+                "n/a",
+            ),
+        )
+    else:
+        print(
+            "Macro candidate Q: disabled"
+        )
+
+    print(
+        "Leaf value: zero integration baseline"
     )
 
     base_agent = load_base_agent(
@@ -374,8 +416,19 @@ def main(
         ),
         device="cpu",
         candidate_mode=True,
-        force_evaluate_unvisited=True,
-        root_min_visits_before_puct=2,
+        force_evaluate_unvisited=(
+            candidate_value_network
+            is None
+        ),
+        root_min_visits_before_puct=(
+            2
+            if candidate_value_network
+            is None
+            else 0
+        ),
+        candidate_value_network=(
+            candidate_value_network
+        ),
     )
 
     agent = HierarchicalAgent(
@@ -488,6 +541,7 @@ def main(
                     q_value,
                     child.reward,
                     child.value,
+                    child.predicted_q,
                     candidate,
                 )
             )
@@ -505,6 +559,7 @@ def main(
             q_value,
             edge_reward,
             future_value,
+            predicted_q,
             candidate,
         ) in rows:
 
@@ -542,6 +597,14 @@ def main(
                 next_target,
                 f"reward={edge_reward:.3f}",
                 f"value={future_value:.3f}",
+                (
+                    "pred_q=None"
+                    if predicted_q is None
+                    else (
+                        f"pred_q="
+                        f"{predicted_q:.3f}"
+                    )
+                ),
                 f"q={q_value:.3f}",
                 f"visits={visits}",
             )
@@ -616,6 +679,11 @@ def parse_args():
         "--base-checkpoint",
         type=str,
         required=True,
+    )
+    parser.add_argument(
+        "--candidate-value-checkpoint",
+        type=str,
+        default=None,
     )
     parser.add_argument(
         "--residual-checkpoint",
