@@ -167,6 +167,7 @@ class FastFizSimulator:
         angle: float,
         tip_x_mm: float = 0.0,
         tip_y_mm: float = 0.0,
+        cue_elevation_deg: float = 10.0,
     ) -> SimulatorStepResult:
 
         offsets = np.asarray(
@@ -179,6 +180,18 @@ class FastFizSimulator:
         ):
             raise ValueError(
                 "Tip offset must be within a 12 mm radius."
+            )
+
+        # FastFiz accepts cue elevation in degrees within [0, 70].
+        # Default 10° retains the existing Attack and Defense physics.
+        # Other values are for isolated diagnostics until the action
+        # representation and trained models explicitly support theta.
+        if (
+            not np.isfinite(cue_elevation_deg)
+            or not 0.0 <= cue_elevation_deg <= 70.0
+        ):
+            raise ValueError(
+                "cue_elevation_deg must be finite and in [0, 70]."
             )
 
         # Fail loudly if the native extension was not rebuilt after
@@ -201,6 +214,7 @@ class FastFizSimulator:
             float(angle),
             float(tip_x_mm),
             float(tip_y_mm),
+            float(cue_elevation_deg),
         )
 
         if len(result) != 8:

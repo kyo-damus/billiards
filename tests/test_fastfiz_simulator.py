@@ -181,3 +181,39 @@ def test_precondition_diagnostic_is_exposed_and_decoded():
     assert "CUE_STICK_COLLISION" in (
         describe_fastfiz_precondition(128 | 8)
     )
+
+
+
+def test_explicit_ten_degree_elevation_matches_legacy_default():
+    sim = FastFizSimulator()
+    state = np.array(
+        [0.5, 0.3, 0.5, 0.8, 0.9, 1.5],
+        dtype=np.float32,
+    )
+
+    sim.set_state(state)
+    implicit = sim.step(
+        target_ball=0, power=1.0, angle=90.0,
+    )
+    sim.set_state(state)
+    explicit = sim.step(
+        target_ball=0, power=1.0, angle=90.0,
+        cue_elevation_deg=10.0,
+    )
+
+    assert implicit.precondition_code == explicit.precondition_code
+    assert implicit.first_contact_ball == explicit.first_contact_ball
+    np.testing.assert_allclose(implicit.state, explicit.state, atol=1e-6)
+
+
+def test_cue_elevation_input_validation():
+    import pytest
+
+    sim = FastFizSimulator()
+    with pytest.raises(ValueError, match="cue_elevation_deg"):
+        sim.step(
+            target_ball=0,
+            power=1.0,
+            angle=90.0,
+            cue_elevation_deg=75.0,
+        )

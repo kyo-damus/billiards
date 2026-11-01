@@ -714,3 +714,69 @@ If `CUE_STICK_COLLISION` dominates, do not expand power as
 the first remedy: check the cue-to-rail distance, other-ball
 obstruction, and the fixed cue elevation. No rule has been
 relaxed to force artificially legal shots.
+
+
+## Stage 6g: near-rail cue-stick obstruction sensitivity probe
+
+Native precondition flags on the same source states now show:
+- seed 90001: cue=(1.0040, 0.0337), all 24/24 baseline
+  and 120/120 expanded attempts rejected as
+  CUE_STICK_COLLISION (128), valid placement (0).
+- seed 90003: cue=(0.2207, 2.1985), all 24/24 baseline
+  and 116/120 expanded attempts rejected as
+  CUE_STICK_COLLISION (128), valid placement (0).
+  The remaining four shots failed target first-contact.
+
+These cue positions are approximately 33.7 mm from the
+south rail and 37.5 mm from the north rail (cue-ball radius
+about 28.6 mm), so the cue stick is near the cushion.
+In FastFiz, CUE_STICK_COLLISION includes cue-stick vs
+rail and cue-stick vs other-ball obstruction, however. The
+exact obstacle is still unknown.
+
+`scripts/probe_cue_elevation_on_hard_states.py` explores
+cue elevation only in a **separate physical diagnostic**:
+`theta=[10,20,35,50,60]` degrees, and five offsets around
+the target-ball center direction, each with fixed power 1.0
+and tip offsets (0,0). It checks native precondition,
+first contact, scratch and pocket state. It also reports
+how many of the present ATTACK root candidates actually
+passed the native shot precondition, which is different
+from counting learned Attack success. Attack transitions
+now retain their last shot's `info` for this diagnostic;
+no Attack reward or invalid-action behavior is changed.
+
+The C++ bridge and Python FastFizSimulator.step now take
+an optional trailing `cue_elevation_deg=10.0`, preserving
+the historical default *exactly*. The existing Attack Micro
+and DefenseShotExecutor do **not** expose this parameter;
+their action semantics, learned weights, datasets and
+31D candidate encoding therefore remain unchanged.
+Any future integration of elevation into learned mixed
+Strategy evaluation would require an explicit new action
+representation and retraining / new teacher datasets,
+rather than silently reusing the old 31D checkpoint.
+
+Run native rebuild first:
+
+```bash
+git pull
+cmake --build build -j4
+python -m pytest tests/test_fastfiz_simulator.py tests/test_probe_cue_elevation.py tests/test_post_safety_hard_states.py -v
+```
+
+Then try the standalone sensitivity probe:
+
+```bash
+python -m scripts.probe_cue_elevation_on_hard_states \
+  --base-checkpoint goal_conditioned_micro_mixed_curriculum_100k.pt \
+  --residual-checkpoint position_power_residual_mlp_2000.pt \
+  --source-boards 5 --source-seed 90000 \
+  --max-hard-states 2 --max-successful-direct 0 --device cuda
+```
+
+If larger elevation removes bit 128, that supports fixed
+cue elevation as a bottleneck; if not, test more directions
+or inspect other-ball/cue-stick geometry before assuming
+no legal physical shot exists. This is only a feasibility
+study, not Defense efficacy evidence.

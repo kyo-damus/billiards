@@ -190,7 +190,7 @@ public:
     int get_last_precondition_code() const { return last_precondition_code; }
     int get_ball_placement_code() const { return ts.isValidBallPlacement(); }
 
-    std::vector<float> step(int target_ball, float power, float angle, float tip_x_mm = 0.0f, float tip_y_mm = 0.0f) {
+    std::vector<float> step(int target_ball, float power, float angle, float tip_x_mm = 0.0f, float tip_y_mm = 0.0f, float cue_elevation_deg = 10.0f) {
         last_first_contact_ball = -1;
         last_precondition_code = 0;
         if (target_ball != 0 && target_ball != 1) throw std::invalid_argument("target_ball must be 0 or 1");
@@ -199,7 +199,7 @@ public:
         float done = 1.0f; 
 
         // 1. Pythonからの入力(angle, power)をFastFizのShotParamsに変換
-        ShotParams sp(tip_x_mm, tip_y_mm, 10.0, angle, power);
+        ShotParams sp(tip_x_mm, tip_y_mm, cue_elevation_deg, angle, power);
 
         // 2. ショットが物理的に可能かチェック
         last_precondition_code = ts.isPhysicallyPossible(sp);
@@ -257,5 +257,6 @@ PYBIND11_MODULE(billiard_env_cpp, m) {
         .def("get_ball_placement_code", &BilliardSimulator::get_ball_placement_code)
         .def("step", &BilliardSimulator::step,
              py::arg("target_ball"), py::arg("power"), py::arg("angle"),
-             py::arg("tip_x_mm") = 0.0f, py::arg("tip_y_mm") = 0.0f);
+             py::arg("tip_x_mm") = 0.0f, py::arg("tip_y_mm") = 0.0f,
+             py::arg("cue_elevation_deg") = 10.0f);
 }

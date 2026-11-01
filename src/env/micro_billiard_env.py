@@ -299,6 +299,8 @@ class MicroBilliardEnv(gym.Env):
             "physically_possible": (
                 result.legacy_reward >= 0.0
             ),
+            "precondition_code": int(result.precondition_code),
+            "placement_code": int(result.placement_code),
             "wrong_pocket": wrong_pocket,
         }
 

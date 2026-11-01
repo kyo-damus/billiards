@@ -48,6 +48,8 @@ class PhysicsMacroTransitionModel:
             local_evaluator
         )
         self.last_evaluation = None
+        # Diagnostic only: last ATTACK physics result, not a reward.
+        self.last_shot_info = None
 
         if env is None:
             env = MicroBilliardEnv()
@@ -124,6 +126,9 @@ class PhysicsMacroTransitionModel:
             micro_action
         )
 
+        # Preserve native precondition/placement codes for
+        # non-invasive diagnostics of failed Attack shots.
+        self.last_shot_info = dict(info)
         snapshot = self.env.sim.snapshot()
 
         physical_state = GameState(
