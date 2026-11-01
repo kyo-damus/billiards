@@ -46,3 +46,42 @@ def test_summarize_search_records():
         ],
         0.5,
     )
+
+
+
+def test_resolve_simulation_budgets_uses_multi_budget_list():
+    from scripts.eval_macro_search import (
+        resolve_simulation_budgets,
+    )
+
+    budgets = resolve_simulation_budgets(
+        simulations=50,
+        simulation_budgets=[
+            5,
+            10,
+            20,
+            50,
+            20,
+        ],
+    )
+
+    assert budgets == [
+        5,
+        10,
+        20,
+        50,
+    ]
+
+
+def test_resolve_simulation_budgets_falls_back_to_single_budget():
+    from scripts.eval_macro_search import (
+        resolve_simulation_budgets,
+    )
+
+    assert (
+        resolve_simulation_budgets(
+            simulations=25,
+            simulation_budgets=None,
+        )
+        == [25]
+    )

@@ -188,6 +188,7 @@ def build_mcts(
     tree_generator,
     transition,
     args,
+    simulations,
 ):
     return MCTS(
         policy_network=policy_network,
@@ -199,7 +200,7 @@ def build_mcts(
             )
         ),
         transition_model=transition,
-        simulations=args.simulations,
+        simulations=simulations,
         c_puct=args.c_puct,
         gamma=args.gamma,
         device="cpu",
@@ -212,6 +213,37 @@ def build_mcts(
         candidate_q_prior_visits=(
             args.candidate_q_prior_visits
         ),
+    )
+
+
+def resolve_simulation_budgets(
+    simulations,
+    simulation_budgets,
+):
+    if simulation_budgets:
+        budgets = [
+            int(value)
+            for value
+            in simulation_budgets
+        ]
+    else:
+        budgets = [
+            int(simulations)
+        ]
+
+    if any(
+        value < 1
+        for value in budgets
+    ):
+        raise ValueError(
+            "simulation budgets must be >= 1."
+        )
+
+    # Preserve user order while removing duplicates.
+    return list(
+        dict.fromkeys(
+            budgets
+        )
     )
 
 
@@ -253,8 +285,23 @@ def main(
 
     sample_env = MicroBilliardEnv()
 
-    uniform_records = []
-    learned_records = []
+    simulation_budgets = (
+        resolve_simulation_budgets(
+            args.simulations,
+            args.simulation_budgets,
+        )
+    )
+
+    uniform_records = {
+        budget: []
+        for budget
+        in simulation_budgets
+    }
+    learned_records = {
+        budget: []
+        for budget
+        in simulation_budgets
+    }
 
     evaluated_states = 0
 
@@ -300,85 +347,92 @@ def main(
             dtype=np.float32,
         )
 
-        uniform_mcts = build_mcts(
-            policy_network=(
-                UniformCandidatePolicy()
-            ),
-            candidate_value_network=(
-                candidate_value
-            ),
-            root_candidates=(
-                root_candidates
-            ),
-            tree_generator=(
-                tree_generator
-            ),
-            transition=transition,
-            args=args,
-        )
-
-        learned_mcts = build_mcts(
-            policy_network=(
-                candidate_policy
-            ),
-            candidate_value_network=(
-                candidate_value
-            ),
-            root_candidates=(
-                root_candidates
-            ),
-            tree_generator=(
-                tree_generator
-            ),
-            transition=transition,
-            args=args,
-        )
-
-        uniform_selected = (
-            uniform_mcts.select_action(
-                state
-            )
-        )
-
-        learned_selected = (
-            learned_mcts.select_action(
-                state
-            )
-        )
-
-        if not isinstance(
-            uniform_selected,
-            MacroCandidate,
-        ):
-            raise RuntimeError(
-                "Uniform MCTS did not select "
-                "a MacroCandidate."
+        for budget in simulation_budgets:
+            uniform_mcts = build_mcts(
+                policy_network=(
+                    UniformCandidatePolicy()
+                ),
+                candidate_value_network=(
+                    candidate_value
+                ),
+                root_candidates=(
+                    root_candidates
+                ),
+                tree_generator=(
+                    tree_generator
+                ),
+                transition=transition,
+                args=args,
+                simulations=budget,
             )
 
-        if not isinstance(
-            learned_selected,
-            MacroCandidate,
-        ):
-            raise RuntimeError(
-                "Learned-policy MCTS did not select "
-                "a MacroCandidate."
+            learned_mcts = build_mcts(
+                policy_network=(
+                    candidate_policy
+                ),
+                candidate_value_network=(
+                    candidate_value
+                ),
+                root_candidates=(
+                    root_candidates
+                ),
+                tree_generator=(
+                    tree_generator
+                ),
+                transition=transition,
+                args=args,
+                simulations=budget,
             )
 
-        uniform_records.append(
-            evaluate_selection(
+            uniform_selected = (
+                uniform_mcts.select_action(
+                    state
+                )
+            )
+
+            learned_selected = (
+                learned_mcts.select_action(
+                    state
+                )
+            )
+
+            if not isinstance(
                 uniform_selected,
-                root_candidates,
-                target_q,
-            )
-        )
+                MacroCandidate,
+            ):
+                raise RuntimeError(
+                    "Uniform MCTS did not select "
+                    "a MacroCandidate."
+                )
 
-        learned_records.append(
-            evaluate_selection(
+            if not isinstance(
                 learned_selected,
-                root_candidates,
-                target_q,
+                MacroCandidate,
+            ):
+                raise RuntimeError(
+                    "Learned-policy MCTS did not select "
+                    "a MacroCandidate."
+                )
+
+            uniform_records[
+                budget
+            ].append(
+                evaluate_selection(
+                    uniform_selected,
+                    root_candidates,
+                    target_q,
+                )
             )
-        )
+
+            learned_records[
+                budget
+            ].append(
+                evaluate_selection(
+                    learned_selected,
+                    root_candidates,
+                    target_q,
+                )
+            )
 
         evaluated_states += 1
 
@@ -400,13 +454,6 @@ def main(
             "were evaluated."
         )
 
-    uniform = summarize(
-        uniform_records
-    )
-    learned = summarize(
-        learned_records
-    )
-
     print()
     print(
         "=== Macro search unseen comparison ==="
@@ -419,8 +466,8 @@ def main(
         f"{evaluated_states}"
     )
     print(
-        f"simulations per search: "
-        f"{args.simulations}"
+        "simulation budgets:",
+        simulation_budgets,
     )
     print(
         "Candidate Q checkpoint best val MSE:",
@@ -440,64 +487,77 @@ def main(
         ),
     )
 
-    print()
-    print(
-        "uniform Policy + learned Q"
-    )
-    print(
-        f"  optimal selection rate: "
-        f"{uniform['optimal_rate']:.3f}"
-    )
-    print(
-        f"  mean selected-Q regret: "
-        f"{uniform['mean_regret']:.4f}"
-    )
-    print(
-        f"  mean selected target Q: "
-        f"{uniform['mean_selected_q']:.4f}"
-    )
-    print(
-        f"  POSITION selection rate: "
-        f"{uniform['position_selection_rate']:.3f}"
-    )
+    for budget in simulation_budgets:
+        uniform = summarize(
+            uniform_records[
+                budget
+            ]
+        )
+        learned = summarize(
+            learned_records[
+                budget
+            ]
+        )
 
-    print()
-    print(
-        "learned Policy + learned Q"
-    )
-    print(
-        f"  optimal selection rate: "
-        f"{learned['optimal_rate']:.3f}"
-    )
-    print(
-        f"  mean selected-Q regret: "
-        f"{learned['mean_regret']:.4f}"
-    )
-    print(
-        f"  mean selected target Q: "
-        f"{learned['mean_selected_q']:.4f}"
-    )
-    print(
-        f"  POSITION selection rate: "
-        f"{learned['position_selection_rate']:.3f}"
-    )
+        print()
+        print(
+            f"--- simulations={budget} ---"
+        )
+        print(
+            "uniform Policy + learned Q"
+        )
+        print(
+            f"  optimal selection rate: "
+            f"{uniform['optimal_rate']:.3f}"
+        )
+        print(
+            f"  mean selected-Q regret: "
+            f"{uniform['mean_regret']:.4f}"
+        )
+        print(
+            f"  mean selected target Q: "
+            f"{uniform['mean_selected_q']:.4f}"
+        )
+        print(
+            f"  POSITION selection rate: "
+            f"{uniform['position_selection_rate']:.3f}"
+        )
 
-    print()
-    print(
-        "learned - uniform"
-    )
-    print(
-        "  optimal selection rate: "
-        f"{learned['optimal_rate'] - uniform['optimal_rate']:+.3f}"
-    )
-    print(
-        "  mean regret: "
-        f"{learned['mean_regret'] - uniform['mean_regret']:+.4f}"
-    )
-    print(
-        "  mean selected target Q: "
-        f"{learned['mean_selected_q'] - uniform['mean_selected_q']:+.4f}"
-    )
+        print(
+            "learned Policy + learned Q"
+        )
+        print(
+            f"  optimal selection rate: "
+            f"{learned['optimal_rate']:.3f}"
+        )
+        print(
+            f"  mean selected-Q regret: "
+            f"{learned['mean_regret']:.4f}"
+        )
+        print(
+            f"  mean selected target Q: "
+            f"{learned['mean_selected_q']:.4f}"
+        )
+        print(
+            f"  POSITION selection rate: "
+            f"{learned['position_selection_rate']:.3f}"
+        )
+
+        print(
+            "learned - uniform"
+        )
+        print(
+            "  optimal selection rate: "
+            f"{learned['optimal_rate'] - uniform['optimal_rate']:+.3f}"
+        )
+        print(
+            "  mean regret: "
+            f"{learned['mean_regret'] - uniform['mean_regret']:+.4f}"
+        )
+        print(
+            "  mean selected target Q: "
+            f"{learned['mean_selected_q'] - uniform['mean_selected_q']:+.4f}"
+        )
 
 
 def parse_args():
@@ -538,6 +598,20 @@ def parse_args():
         "--simulations",
         type=int,
         default=50,
+        help=(
+            "Single search budget used when "
+            "--simulation-budgets is omitted."
+        ),
+    )
+    parser.add_argument(
+        "--simulation-budgets",
+        type=int,
+        nargs="+",
+        default=None,
+        help=(
+            "Evaluate multiple MCTS budgets "
+            "on the same unseen states."
+        ),
     )
     parser.add_argument(
         "--c-puct",
@@ -607,6 +681,20 @@ def parse_args():
     if args.simulations < 1:
         parser.error(
             "--simulations must be >= 1"
+        )
+
+    if (
+        args.simulation_budgets
+        is not None
+        and any(
+            value < 1
+            for value
+            in args.simulation_budgets
+        )
+    ):
+        parser.error(
+            "--simulation-budgets values "
+            "must be >= 1"
         )
 
     if args.candidate_q_prior_visits < 0.0:
