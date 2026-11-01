@@ -133,6 +133,7 @@ def test_mixed_dataset_has_31_dim_and_both_strategies(
         states=2,
         seed=0,
         gamma=0.99,
+        residual_scale=0.75,
         output=str(output),
         log_interval=0,
     )
@@ -153,6 +154,7 @@ def test_mixed_dataset_has_31_dim_and_both_strategies(
         assert int(data["candidate_dim"]) == 31
         assert int(data["candidate_encoding_version"]) == 2
         assert bool(data["turn_aware"])
+        assert np.isclose(float(data["residual_scale"]), 0.75)
         assert str(data["next_action_set"]) == "DIRECT_ONLY"
 
         # Terminal first step prevents second-step lookahead.
