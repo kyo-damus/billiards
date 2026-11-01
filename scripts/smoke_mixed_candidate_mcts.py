@@ -11,9 +11,6 @@ experiment, not a win-rate or trained mixed-policy evaluation.
 
 import argparse
 
-import torch
-import torch.nn as nn
-
 from scripts.build_macro_candidate_value_dataset import (
     random_state,
     resolve_device,
@@ -27,43 +24,10 @@ from src.macro.candidate_value import (
     load_macro_candidate_value_network,
 )
 from src.macro.mcts import MCTS
-
-
-class ZeroValue(nn.Module):
-    def forward(self, state):
-        return torch.zeros(
-            state.shape[0],
-            device=state.device,
-            dtype=state.dtype,
-        )
-
-
-class MixedRootGenerator:
-    """ATTACK plus outcome-guided executable SAFETY, root only."""
-
-    def __init__(
-        self,
-        attack_generator,
-        safety_shots,
-        safety_adapter,
-    ):
-        self.attack_generator = attack_generator
-        self.safety_shots = safety_shots
-        self.safety_adapter = safety_adapter
-        self.last_attack_count = 0
-        self.last_safety_count = 0
-
-    def generate(self, state):
-        attacks = list(
-            self.attack_generator.generate(state)
-        )
-        proposals = self.safety_shots.generate(state)
-        safeties = self.safety_adapter.from_proposals(
-            proposals
-        )
-        self.last_attack_count = len(attacks)
-        self.last_safety_count = len(safeties)
-        return attacks + safeties
+from src.macro.mixed_search import (
+    MixedRootGenerator,
+    ZeroValue,
+)
 
 
 def main(args):

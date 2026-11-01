@@ -462,3 +462,52 @@ The existing v1 defaults, networks and code path remain unchanged.
 `macro_candidate_value_mixed_v2.pt` checkpoint and leaves the
 Attack-only run code untouched. Candidate Policy v2 training and
 fair paired board-level strategy comparisons remain separate work.
+
+
+## Attack-difficult board paired MCTS diagnostic (stage 6b)
+
+The two-board mixed-MCTS smoke (seed 94000,30 simulations)
+reported 20 Attack and 4 Safety candidates per board.
+Root visits were 26 Attack / 4 Safety in each case; MCTS
+selected POSITION_ATTACK with rewards 1.25 and 1.60.
+This confirms that both strategies can be expanded and
+executed, but **30 simulations for 24 root candidates** means
+most budget only gives each branch one visit. It does not
+prove deep strategic search quality or the superiority of Attack.
+
+`src/macro/mixed_search.py` centralizes ZeroValue, fixed root
+candidate snapshots and the small mixed root generator. These
+helpers avoid copying identical setup between smoke/evaluation
+scripts, without altering legacy Attack behavior.
+
+`scripts/eval_mixed_mcts_difficult_boards.py` provides a
+*controlled in-model* board-difficulty evaluation:
+
+1. Sample new random boards from a separate seed range.
+2. Execute **all** ATTACK root candidates under deterministic
+   Micro+FastFiz (not just geometry) and count non-scratch
+   successfully pocketed targeted balls.
+3. Select boards where no more than K Attack candidates
+   actually succeeded (K is configurable; K=0 is the strict
+   no-success case).
+4. On these boards only, generate physical Safety proposals.
+5. Compare Attack-only root MCTS vs Attack+Safety root MCTS,
+   using the **exact same Attack choices**, 31-D Q checkpoint,
+   uniform priors, zero state-V, simulations, discount and
+   DIRECT-only continuations.
+6. Compare chosen candidates' turn-aware two-step teacher Q
+   from the same board, their root visits, and Defense choice
+   frequency. Report no qualifying boards explicitly.
+
+This evaluates the *integration and short-horizon teacher*,
+not a win-rate or an unbiased proof of Defense effectiveness.
+Safety shot proposals themselves are selected with in-model
+opponent lookahead. Also, including Safety increases the
+mixed root's candidate count, so equal simulation budgets
+leave fewer visits per candidate; the output includes visit
+counts for interpretation.
+
+A reasonable small first run is up to 20 sampled boards,
+at most three selected hard cases, 60 simulations each,
+with success threshold K=2. If too few cases qualify, widen
+the threshold or seed scan. For a strict hard case, use K=0.
