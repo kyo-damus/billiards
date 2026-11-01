@@ -651,3 +651,122 @@ def test_candidate_q_prior_fades_with_more_visits():
         / 22.0,
     )
     assert blended < 1.3
+
+
+def test_turn_aware_candidate_q_negates_opponent_continuation():
+    mcts = MCTS(
+        policy_network=MacroCandidatePolicyNetwork(),
+        value_network=MacroValueNetwork(),
+        action_generator=ExpandedMacroCandidateGenerator(),
+        transition_model=DummyCandidateTransition(),
+        simulations=0,
+        device="cpu",
+        candidate_mode=True,
+        gamma=0.9,
+        turn_aware=True,
+    )
+
+    parent = MCTSNode(
+        state=make_state(),
+    )
+    opponent_state = make_state()
+    opponent_state.current_player = 1
+
+    child = MCTSNode(
+        state=opponent_state,
+        reward=0.0,
+        visit_count=2,
+        value_sum=4.0,
+    )
+
+    assert np.isclose(
+        mcts._candidate_q_value(
+            child,
+            parent=parent,
+        ),
+        -1.8,
+    )
+
+
+def test_turn_aware_backup_negates_opponent_reward():
+    mcts = MCTS(
+        policy_network=MacroCandidatePolicyNetwork(),
+        value_network=MacroValueNetwork(),
+        action_generator=ExpandedMacroCandidateGenerator(),
+        transition_model=DummyCandidateTransition(),
+        simulations=0,
+        device="cpu",
+        candidate_mode=True,
+        gamma=1.0,
+        turn_aware=True,
+    )
+
+    root = MCTSNode(
+        state=make_state(),
+    )
+
+    opponent_state = make_state()
+    opponent_state.current_player = 1
+
+    opponent = MCTSNode(
+        state=opponent_state,
+        reward=0.0,
+    )
+    opponent_next = MCTSNode(
+        state=opponent_state,
+        reward=1.0,
+    )
+
+    mcts._backup(
+        [root, opponent, opponent_next],
+        leaf_value=0.0,
+    )
+
+    assert np.isclose(
+        root.value,
+        -1.0,
+    )
+    assert np.isclose(
+        opponent.value,
+        1.0,
+    )
+
+
+def test_legacy_backup_keeps_previous_behavior():
+    mcts = MCTS(
+        policy_network=MacroCandidatePolicyNetwork(),
+        value_network=MacroValueNetwork(),
+        action_generator=ExpandedMacroCandidateGenerator(),
+        transition_model=DummyCandidateTransition(),
+        simulations=0,
+        device="cpu",
+        candidate_mode=True,
+        gamma=1.0,
+        turn_aware=False,
+    )
+
+    root = MCTSNode(
+        state=make_state(),
+    )
+
+    opponent_state = make_state()
+    opponent_state.current_player = 1
+
+    opponent = MCTSNode(
+        state=opponent_state,
+        reward=0.0,
+    )
+    opponent_next = MCTSNode(
+        state=opponent_state,
+        reward=1.0,
+    )
+
+    mcts._backup(
+        [root, opponent, opponent_next],
+        leaf_value=0.0,
+    )
+
+    assert np.isclose(
+        root.value,
+        1.0,
+    )

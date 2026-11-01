@@ -256,6 +256,7 @@ def build_dataset(
                         next_generator
                     ),
                     gamma=args.gamma,
+                    turn_aware=args.turn_aware,
                 )
             )
 
@@ -368,6 +369,10 @@ def build_dataset(
             args.residual_scale,
             dtype=np.float32,
         ),
+        turn_aware=np.asarray(
+            args.turn_aware,
+            dtype=np.bool_,
+        ),
     )
 
     q_array = np.asarray(
@@ -390,6 +395,9 @@ def build_dataset(
     )
     print(
         f"samples: {len(q_array)}"
+    )
+    print(
+        f"turn-aware targets: {args.turn_aware}"
     )
     print(
         "Q target mean / std: "
@@ -443,6 +451,14 @@ def parse_args():
         "--gamma",
         type=float,
         default=0.99,
+    )
+    parser.add_argument(
+        "--turn-aware",
+        action="store_true",
+        help=(
+            "Use opponent-aware two-step Q targets. "
+            "Legacy mode remains the default."
+        ),
     )
 
     parser.add_argument(

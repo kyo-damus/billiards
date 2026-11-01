@@ -375,6 +375,13 @@ def train(
         args.dataset
     )
 
+    # New datasets record whether opponent continuations
+    # were negated. Old Attack v0 datasets have no flag.
+    with np.load(args.dataset) as dataset_metadata:
+        turn_aware_targets = bool(
+            dataset_metadata["turn_aware"].item()
+        ) if "turn_aware" in dataset_metadata else False
+
     (
         train_indices,
         val_indices,
@@ -463,6 +470,9 @@ def train(
     )
     print(
         f"dataset: {args.dataset}"
+    )
+    print(
+        f"turn-aware targets: {turn_aware_targets}"
     )
     print(
         f"samples: {len(states_np)} "
@@ -626,6 +636,9 @@ def train(
         ),
         "dataset": str(
             args.dataset
+        ),
+        "turn_aware": bool(
+            turn_aware_targets
         ),
         "best_epoch": int(
             best_epoch

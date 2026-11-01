@@ -246,6 +246,37 @@ def main(
             "Macro candidate Q: disabled"
         )
 
+    if (
+        candidate_value_checkpoint is not None
+        and bool(
+            candidate_value_checkpoint.get(
+                "turn_aware",
+                False,
+            )
+        )
+        != bool(args.turn_aware)
+    ):
+        raise ValueError(
+            "Candidate Q checkpoint turn_aware mode "
+            "does not match --turn-aware. "
+            "Retrain Candidate Q with the matching "
+            "two-step targets."
+        )
+
+    if (
+        args.turn_aware
+        and candidate_policy_network is not None
+    ):
+        raise ValueError(
+            "Learned Candidate Policy was trained "
+            "using Attack v0 targets. "
+            "Use uniform Policy for turn-aware search "
+            "until Policy training is updated."
+        )
+
+    print(
+        f"MCTS turn-aware: {args.turn_aware}"
+    )
     print(
         "Leaf value: zero integration baseline"
     )
@@ -476,6 +507,7 @@ def main(
             is not None
             else 0.0
         ),
+        turn_aware=args.turn_aware,
     )
 
     agent = HierarchicalAgent(
@@ -579,7 +611,8 @@ def main(
 
             q_value = (
                 mcts._candidate_q_value(
-                    child
+                    child,
+                    parent=root,
                 )
             )
 
@@ -745,6 +778,14 @@ def parse_args():
         "--candidate-q-prior-visits",
         type=float,
         default=2.0,
+    )
+    parser.add_argument(
+        "--turn-aware",
+        action="store_true",
+        help=(
+            "Evaluate continuations from the player "
+            "to move. Requires matching learned Q."
+        ),
     )
     parser.add_argument(
         "--residual-checkpoint",

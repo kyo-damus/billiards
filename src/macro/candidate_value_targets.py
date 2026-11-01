@@ -29,6 +29,7 @@ def evaluate_two_step_candidate_target(
     transition_model,
     next_candidate_generator,
     gamma=0.99,
+    turn_aware=False,
 ) -> MacroCandidateValueTarget:
     """
     current candidateを1手実行し、
@@ -107,9 +108,24 @@ def evaluate_two_step_candidate_target(
         next_rewards
     )
 
+    # The second shot is selected for the player who now
+    # acts. Its reward is a cost if the turn passed to the
+    # opponent. Default False preserves the Attack v0 data.
+    next_player_is_opponent = (
+        first.next_state.current_player
+        != state.current_player
+    )
+    future_sign = (
+        -1.0
+        if turn_aware
+        and next_player_is_opponent
+        else 1.0
+    )
+
     target = (
         immediate_reward
         + gamma
+        * future_sign
         * next_best_reward
     )
 

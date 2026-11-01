@@ -24,6 +24,7 @@ from src.macro.transition import (
 
 def make_state(
     marker=0.0,
+    player=0,
 ):
     return GameState(
         ball_positions=np.array(
@@ -38,7 +39,7 @@ def make_state(
             2,
             dtype=np.float32,
         ),
-        current_player=0,
+        current_player=player,
     )
 
 
@@ -91,7 +92,11 @@ class DummyTransition:
         first_reward=1.0,
         next_rewards=None,
         terminated=False,
+        switch_turn=False,
     ):
+        self.switch_turn = bool(
+            switch_turn
+        )
         self.first_reward = float(
             first_reward
         )
@@ -124,7 +129,10 @@ class DummyTransition:
         if is_root:
             reward = self.first_reward
             next_state = make_state(
-                marker=1.0
+                marker=1.0,
+                player=(
+                    1 if self.switch_turn else 0
+                ),
             )
             terminated = (
                 self.terminated
@@ -248,3 +256,67 @@ def test_no_next_candidate_falls_back_to_immediate_reward():
     assert result.next_candidate_count == 0
     assert result.next_best_reward == 0.0
     assert result.target == 0.5
+
+
+def test_two_step_target_penalizes_opponent_success_when_turn_changes():
+    transition = DummyTransition(
+        first_reward=0.0,
+        next_rewards={
+            0: 0.25,
+            1: 1.25,
+        },
+        switch_turn=True,
+    )
+
+    result = evaluate_two_step_candidate_target(
+        state=make_state(),
+        candidate=make_candidate(3),
+        transition_model=transition,
+        next_candidate_generator=StaticGenerator(
+            [
+                make_candidate(0),
+                make_candidate(1),
+            ]
+        ),
+        gamma=0.9,
+        turn_aware=True,
+    )
+
+    assert np.isclose(
+        result.next_best_reward,
+        1.25,
+    )
+    assert np.isclose(
+        result.target,
+        -1.125,
+    )
+
+
+def test_two_step_target_preserves_same_player_success():
+    transition = DummyTransition(
+        first_reward=1.0,
+        next_rewards={
+            0: 0.25,
+            1: 1.25,
+        },
+        switch_turn=False,
+    )
+
+    result = evaluate_two_step_candidate_target(
+        state=make_state(),
+        candidate=make_candidate(3),
+        transition_model=transition,
+        next_candidate_generator=StaticGenerator(
+            [
+                make_candidate(0),
+                make_candidate(1),
+            ]
+        ),
+        gamma=0.9,
+        turn_aware=True,
+    )
+
+    assert np.isclose(
+        result.target,
+        2.125,
+    )

@@ -284,6 +284,15 @@ def main(
         )
     )
 
+    if (
+        bool(checkpoint.get("turn_aware", False))
+        != bool(args.turn_aware)
+    ):
+        raise ValueError(
+            "Candidate Q checkpoint turn_aware mode "
+            "does not match --turn-aware."
+        )
+
     (
         transition,
         root_generator,
@@ -342,6 +351,7 @@ def main(
                         next_generator
                     ),
                     gamma=args.gamma,
+                    turn_aware=args.turn_aware,
                 )
             )
 
@@ -415,6 +425,9 @@ def main(
     )
     print(
         f"device: {device}"
+    )
+    print(
+        f"turn-aware targets: {args.turn_aware}"
     )
     print(
         "checkpoint:",
@@ -518,6 +531,10 @@ def parse_args():
         "--gamma",
         type=float,
         default=0.99,
+    )
+    parser.add_argument(
+        "--turn-aware",
+        action="store_true",
     )
 
     parser.add_argument(

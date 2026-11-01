@@ -92,6 +92,7 @@ class MCTS:
         root_min_visits_before_puct=0,
         candidate_value_network=None,
         candidate_q_prior_visits=0.0,
+        turn_aware=False,
     ):
         self.policy_network = policy_network
         self.value_network = value_network
@@ -107,6 +108,12 @@ class MCTS:
 
         self.candidate_q_prior_visits = float(
             candidate_q_prior_visits
+        )
+
+        # False: legacy Attack v0 (keeps existing Q semantics).
+        # True: player-to-move perspective for multi-player play.
+        self.turn_aware = bool(
+            turn_aware
         )
 
         self.action_generator = action_generator
@@ -350,7 +357,8 @@ class MCTS:
 
         q_value = (
             self._candidate_q_value(
-                child
+                child,
+                parent=parent,
             )
         )
 
@@ -370,6 +378,7 @@ class MCTS:
     def _candidate_q_value(
         self,
         child: MCTSNode,
+        parent: MCTSNode | None = None,
     ) -> float:
         """
         候補依存QをMCTSの事前評価として利用する。
@@ -379,9 +388,16 @@ class MCTS:
         visit数が増えるほど実測Qが支配的になる。
         """
 
+        future_sign = self._turn_sign(
+            parent.state if parent is not None else None,
+            child.state,
+        )
+
         empirical_q = (
             child.reward
-            + self.gamma * child.value
+            + self.gamma
+            * future_sign
+            * child.value
         )
 
         if child.predicted_q is None:
@@ -410,6 +426,32 @@ class MCTS:
                 child.visit_count
                 + prior_visits
             )
+        )
+
+    def _turn_sign(
+        self,
+        parent_state: GameState | None,
+        child_state: GameState | None,
+    ) -> float:
+        """
+        Returns the sign of the child's continuation value
+        from the previous player's perspective.
+
+        Child values are defined for the player to move in
+        child_state. A turn change therefore negates them.
+        """
+        if (
+            not self.turn_aware
+            or parent_state is None
+            or child_state is None
+        ):
+            return 1.0
+
+        return (
+            1.0
+            if parent_state.current_player
+            == child_state.current_player
+            else -1.0
         )
 
     # ============================================================
@@ -525,16 +567,30 @@ class MCTS:
     ):
         value = leaf_value
 
-        for node in reversed(
-            search_path
+        # value always uses the player-to-move perspective
+        # of the node that is about to be updated. For a
+        # parent, a continuation by the opponent is negative.
+        for index in range(
+            len(search_path) - 1,
+            -1,
+            -1,
         ):
+            node = search_path[index]
             node.value_sum += value
             node.visit_count += 1
 
-            value = (
-                node.reward
-                + self.gamma * value
-            )
+            if index > 0:
+                parent = search_path[index - 1]
+                sign = self._turn_sign(
+                    parent.state,
+                    node.state,
+                )
+                value = (
+                    node.reward
+                    + self.gamma
+                    * sign
+                    * value
+                )
             
     def _legacy_action_priors(
         self,
