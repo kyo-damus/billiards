@@ -195,3 +195,47 @@ first-contact proxy.
 **The C++ extension must be rebuilt after updating this wrapper.**
 This stage does not yet connect DEFENSE to MacroCandidate or MCTS,
 and does not claim spin-aware Micro policy learning.
+
+
+## Outcome-guided Safety shot search (stage 4a)
+
+Before joining the MacroCandidate / MCTS graph, explore a small,
+explicit grid of physical DEFENSE shot commands using
+`OutcomeGuidedSafetyShotGenerator`:
+
+1. Select each on-table object as an intended first-contact ball.
+2. Generate physical `ShotAction`s with center-line angle offsets,
+   speeds and optional tip-y offsets (0 and +5 mm by default).
+3. FastFiz-execute from the **same original GameState** for every
+   candidate.
+4. Screen for **first contact on intended object**, **no scratch**,
+   **no newly pocketed object**, **nonterminal**, and **turn change**.
+5. For surviving post-shot states, run the deterministic opponent
+   DIRECT threat evaluator. Rank by the fewest actually successful
+   opponent DIRECT shots, then geometrically feasible shots.
+
+This is **not** the earlier arbitrary cue-region-anchor generator and
+not a trainable MacroCandidate. It is an outcome-guided *physical shot
+proposal* that will later help define Safety TacticalGoals and
+candidate encodings. Do not mix its results into the existing
+Attack-trained Candidate Q or Policy before new action/goal feature
+encoding and retraining are implemented.
+
+`scripts/eval_safety_shot_proposals.py` also compares the best
+searched Safety action with the first failed DIRECT baseline from
+the **same initial board**. This is an optimistic *in-model*
+counterfactual (because Safety candidates are scored using the same
+lookahead model), not an unbiased gameplay evaluation or proof of
+improvement over Attack.
+
+Known remaining limitations:
+
+- `SimplifiedGameRules` does not apply official foul rules.
+  The candidate screen checks contact, no scratch and turn change,
+  but not rail-after-contact requirements.
+- For now opponent shot quality is measured as a deterministic count
+  of successful DIRECT candidates, not a probability.
+- Only a few powers, angles and cue-tip offsets are enumerated.
+  It is possible to have no eligible Safety shot in the grid.
+- Learned Defense Micro, candidate-dependent Policy/Q and mixed
+  Attack/Defense MCTS are still pending.
