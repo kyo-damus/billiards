@@ -138,3 +138,29 @@ Important limitations:
 The next Defense step is to define an executable physical shot
 interface, after comparing geometric versus executable opponent shot
 counts in this diagnostic.
+
+
+## Defense shot execution v0 (stage 3)
+
+A separate `DefenseShotExecutor` uses existing `ShotAction(angle, power)`
+as a *physical* shot command. The pure `plan_defense_shot` routine
+computes an absolute angle toward the center of a designated on-table
+object ball, optionally with a bounded offset, and a physical power.
+
+- No ghost-ball/pocket-target geometry is required.
+- The unchanged FastFiz `step(target_ball, power, angle)` computes
+  the physical outcome. In the current C++ wrapper `target_ball`
+  chiefly selects the ball checked for its **legacy reward**;
+  the physical ShotParams depend on power and angle.
+- `SimplifiedGameRules` updates score/turn/terminal status.
+- This is explicitly separate from ATTACK Micro SAC and from the
+  currently unexecutable SAFETY MacroCandidates.
+- Scratches and newly pocketed object balls are observable.
+  Observed object-ball displacement is **not verified first contact**.
+  Full legality needs C++ first-contact event exposure and a foul rule.
+- No learned Defense Micro and no MCTS integration is claimed.
+- A small deterministic physical probe and scoped tests are included.
+
+Only after this executor is verified should SAFETY candidates be
+augmented with feasible *shot proposals* and compared by their
+opponent DIRECT threat on the resulting state.
