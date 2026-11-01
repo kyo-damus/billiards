@@ -277,3 +277,44 @@ The next implementation boundary is to execute `physical_shot`
 inside a dedicated Defense transition branch, define a compatible
 local reward, and build/train mixed-strategy Candidate Q before
 enabling MCTS to choose Defense actions.
+
+
+## Separate mixed-strategy transition dispatcher (stage 4c)
+
+`DefenseMacroTransitionModel` accepts only an **executable**
+`MacroCandidate(action=DEFENSE, goal=SAFETY, physical_shot=...)`.
+It reconstructs a physical `ShotAction`, re-executes it from the
+supplied state with `DefenseShotExecutor`, then returns
+`MacroTransitionResult` with updated score/turn and an optional
+`DefenseLocalEvaluation`.
+
+- **Attack path unchanged.** `MixedStrategyMacroTransitionModel`
+  dispatches ATTACK to the existing `PhysicsMacroTransitionModel`
+  and DEFENSE to the new Defense transition. No shared Micro policy
+  or action reinterpretation is introduced.
+- Immediate Defense reward is the simplified-game reward
+  (including pot and scratch consequences) minus a configurable
+  penalty if the intended first object was not contacted (but avoid
+  double-penalizing scratches).
+- The Defense reward deliberately does **not** include the
+  opponent's next-shot threat. With turn-aware MCTS or two-step
+  Q targets, the opponent's continuation is negative for the
+  defending player; including it in local reward would duplicate it.
+- Eligibility still requires intended first contact, no scratch,
+  no newly pocketed balls, nonterminal result and turn change.
+  A shot that pockets an object ball can receive the ordinary game
+  score but is NOT recorded as successful SAFETY.
+- `goal_achieved` on deterministic replay only verifies that the
+  shot reached the predicted cue region; the region was generated
+  using the same FastFiz shot, so this is **not an independent
+  measure of defensive effectiveness**.
+- Anchor-only DEFENSE candidates without `physical_shot` are
+  rejected; untrained 25-dimensional Candidate Q/Policy is still
+  NOT used for mixed-strategy selection.
+- `scripts/smoke_mixed_strategy_transition.py` runs a small
+  physical smoke (Attack and replayed Safety) without invoking MCTS.
+
+The next step is a new **31-dimensional mixed-candidate data/target
+pipeline**, with turn-aware Q targets and a paired ATTACK/DEFENSE
+benchmark. Mixed MCTS integration must wait for the compatible
+candidate prior/Q networks or an explicit v2 uniform-prior baseline.

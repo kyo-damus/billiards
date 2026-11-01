@@ -10,6 +10,10 @@ from src.macro.local_evaluation import (
     MacroLocalEvaluation,
 )
 
+from src.macro.defense_local_evaluation import (
+    DefenseLocalEvaluation,
+)
+
 
 @dataclass
 class MacroTransitionResult:
@@ -23,7 +27,7 @@ class MacroTransitionResult:
 
     # 局所評価を有効化した場合のみ設定する。
     # 既存Transitionとの後方互換性のためoptional。
-    evaluation: MacroLocalEvaluation | None = None
+    evaluation: MacroLocalEvaluation | DefenseLocalEvaluation | None = None
 
 
 class MacroTransitionModel(Protocol):
