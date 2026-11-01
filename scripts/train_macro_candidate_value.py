@@ -9,6 +9,7 @@ from torch.optim import Adam
 
 from src.macro.candidate_encoding import (
     MACRO_CANDIDATE_DIM,
+    MACRO_CANDIDATE_V2_DIM,
 )
 from src.macro.candidate_value import (
     MacroCandidateValueNetwork,
@@ -91,15 +92,38 @@ def load_dataset(
             f"{MACRO_STATE_DIM})."
         )
 
-    if candidates.shape != (
-        sample_count,
-        MACRO_CANDIDATE_DIM,
+    if (
+        candidates.ndim != 2
+        or candidates.shape[0] != sample_count
+        or candidates.shape[1] not in (
+            MACRO_CANDIDATE_DIM,
+            MACRO_CANDIDATE_V2_DIM,
+        )
     ):
         raise ValueError(
             "candidate must have shape "
-            f"({sample_count}, "
-            f"{MACRO_CANDIDATE_DIM})."
+            f"({sample_count}, 25) or ({sample_count}, 31)."
         )
+
+    # In the new scheme, a 31-d candidate vector requires
+    # explicit version metadata. Do not silently load a
+    # malformed or accidentally concatenated dataset.
+    if candidates.shape[1] == MACRO_CANDIDATE_V2_DIM:
+        version = int(
+            data["candidate_encoding_version"].item()
+        ) if "candidate_encoding_version" in data else -1
+        if version != 2:
+            raise ValueError(
+                "31-D candidate dataset requires "
+                "candidate_encoding_version=2."
+            )
+        if not (
+            "turn_aware" in data
+            and bool(data["turn_aware"].item())
+        ):
+            raise ValueError(
+                "Mixed v2 targets must be turn-aware."
+            )
 
     if state_ids.shape != (
         sample_count,
@@ -382,6 +406,10 @@ def train(
             dataset_metadata["turn_aware"].item()
         ) if "turn_aware" in dataset_metadata else False
 
+    candidate_dim = int(
+        candidates_np.shape[1]
+    )
+
     (
         train_indices,
         val_indices,
@@ -393,6 +421,7 @@ def train(
 
     network = (
         MacroCandidateValueNetwork(
+            candidate_dim=candidate_dim,
             hidden_dim=args.hidden_dim,
         )
         .to(
@@ -473,6 +502,9 @@ def train(
     )
     print(
         f"turn-aware targets: {turn_aware_targets}"
+    )
+    print(
+        f"candidate dimension: {candidate_dim}"
     )
     print(
         f"samples: {len(states_np)} "
@@ -629,7 +661,10 @@ def train(
             MACRO_STATE_DIM
         ),
         "candidate_dim": int(
-            MACRO_CANDIDATE_DIM
+            candidate_dim
+        ),
+        "candidate_encoding_version": int(
+            2 if candidate_dim == MACRO_CANDIDATE_V2_DIM else 1
         ),
         "hidden_dim": int(
             args.hidden_dim

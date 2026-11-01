@@ -156,3 +156,51 @@ def test_candidate_value_checkpoint_roundtrip(
         checkpoint["hidden_dim"]
         == 32
     )
+
+
+
+def test_mixed_candidate_value_checkpoint_requires_explicit_dimension(tmp_path):
+    import pytest
+    from src.macro.candidate_value import (
+        load_macro_candidate_value_network,
+    )
+
+    network = MacroCandidateValueNetwork(
+        candidate_dim=31,
+        hidden_dim=32,
+    )
+    output = tmp_path / "mixed_q_v2.pt"
+    torch.save(
+        {
+            "candidate_value_network": network.state_dict(),
+            "state_dim": MACRO_STATE_DIM,
+            "candidate_dim": 31,
+            "hidden_dim": 32,
+            "turn_aware": True,
+            "candidate_encoding_version": 2,
+        },
+        output,
+    )
+
+    # Legacy 25-D evaluation must reject this checkpoint.
+    with pytest.raises(ValueError, match="expected 25"):
+        load_macro_candidate_value_network(output)
+
+    restored, _ = load_macro_candidate_value_network(
+        output,
+        expected_candidate_dim=31,
+    )
+
+    features = torch.zeros(
+        2, 31,
+        dtype=torch.float32,
+    )
+    state = torch.zeros(
+        MACRO_STATE_DIM,
+        dtype=torch.float32,
+    )
+    with torch.no_grad():
+        torch.testing.assert_close(
+            restored(state, features),
+            network(state, features),
+        )

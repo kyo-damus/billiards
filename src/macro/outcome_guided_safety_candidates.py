@@ -24,7 +24,12 @@ class OutcomeGuidedSafetyMacroCandidateGenerator:
             )
 
     def generate(self, state) -> list[MacroCandidate]:
-        shot_proposals = self.shot_generator.generate(state)
+        return self.from_proposals(
+            self.shot_generator.generate(state)
+        )
+
+    def from_proposals(self, shot_proposals) -> list[MacroCandidate]:
+        """Convert an already evaluated list without resimulating shots."""
         candidates = []
 
         for proposal in shot_proposals:

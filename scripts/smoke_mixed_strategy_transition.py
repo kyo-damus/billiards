@@ -51,16 +51,10 @@ def main(args):
         top_k=args.top_k,
     )
 
-    class CachedShotGenerator:
-        def __init__(self):
-            self.proposals = []
-
-        def generate(self, state):
-            return list(self.proposals)
-
-    cached_proposals = CachedShotGenerator()
+    # Reuse the already evaluated proposals; don't repeat
+    # expensive FastFiz opponent lookahead for representation.
     defense_generator = OutcomeGuidedSafetyMacroCandidateGenerator(
-        shot_generator=cached_proposals,
+        shot_generator=physical_generator,
     )
     mixed = MixedStrategyMacroTransitionModel(
         attack_transition_model=attack_transition,
@@ -105,9 +99,8 @@ def main(args):
         physical_proposals = physical_generator.generate(
             current
         )
-        cached_proposals.proposals = physical_proposals
-        defense_candidates = defense_generator.generate(
-            current
+        defense_candidates = defense_generator.from_proposals(
+            physical_proposals
         )
 
         if not defense_candidates:
@@ -127,11 +120,8 @@ def main(args):
         result = mixed.step(current, candidate)
         total_defense += 1
 
-        # Replayed command should match deterministic proposal
-        # from the same board. The generator is re-run above,
-        # so select matching physical-shot parameters, rather
-        # than assuming proposals and candidates are aligned
-        # only because of list order.
+        # Replay the command independently from the same board
+        # and match it to the previously evaluated proposal.
         original = next(
             (
                 proposal

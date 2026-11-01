@@ -318,3 +318,49 @@ The next step is a new **31-dimensional mixed-candidate data/target
 pipeline**, with turn-aware Q targets and a paired ATTACK/DEFENSE
 benchmark. Mixed MCTS integration must wait for the compatible
 candidate prior/Q networks or an explicit v2 uniform-prior baseline.
+
+
+## Small refactor + 31-D mixed Candidate Q dataset (stage 5a)
+
+After the 2/2 deterministic mixed-transition smoke, the Safety
+adapter gained a `from_proposals(proposals)` method. This allows
+shot search, candidate encoding and testing to reuse **one** expensive
+set of evaluated physical proposals instead of repeating all FastFiz
+opponent-response searches. The attack transition API was unchanged.
+
+`scripts/build_mixed_candidate_value_dataset.py` now generates
+**31-D**, **turn-aware**, combined ATTACK/DEFENSE supervision.
+
+- Attack roots: existing DIRECT and POSITION candidates.
+- Defense roots: top-K eligible outcome-guided physical Safety
+  proposals, encoded as executable Safety MacroCandidates.
+- Transition: mixed Attack/Defense dispatcher, with each strategy's
+  own existing one-shot execution and local reward.
+- Shared two-step teacher (acting-player perspective):
+  `r1 + gamma * (+1 for same player, -1 for opponent) *
+   max(next DIRECT immediate reward)`.
+- Next-step choices deliberately use **DIRECT only** for both
+  strategies as a cheap, controlled first baseline. Thus the
+  teacher is **not** a full mixed-strategy minimax value.
+- The Safety root action generator uses deterministic opponent
+  lookahead to *select* the top-K Safety shots, while labels are
+  subsequently computed from the same physics model. These
+  training samples are selection-biased. Don't claim out-of-sample
+  Strategy improvement from training-set targets.
+- The dataset stores `candidate_encoding_version=2`,
+  `candidate_dim=31`, `turn_aware=True`,
+  `next_action_set=DIRECT_ONLY`, `strategy`, goal type, board
+  grouping and target diagnostics.
+- Existing Q training accepts 25 or 31 dimensions. It preserves
+  old 25-D dataset behavior; 31-D data **must** identify version 2
+  and turn-aware labels. The checkpoint records dimensionality.
+- The old `load_macro_candidate_value_network` defaults to 25-D
+  and refuses 31-D models unless the caller explicitly sets
+  `expected_candidate_dim=31`. Old Attack-MCTS therefore
+  cannot silently mix incompatible feature formats.
+- Store mixed data/checkpoints under **new filenames**, never
+  overwrite `macro_candidate_value.pt` or the old dataset.
+
+This stage builds the learning-data pipeline only. Mixed Q inference
+in a new MCTS path, Candidate Policy retraining, and an unbiased
+paired multi-board evaluation remain future work.

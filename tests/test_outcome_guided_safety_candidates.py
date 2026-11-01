@@ -157,3 +157,42 @@ def test_v2_rejects_unexecutable_safety_anchor():
 
     with pytest.raises(ValueError, match="physical_shot"):
         encode_macro_candidate_v2(candidate)
+
+
+
+def test_adapter_reuses_evaluated_proposals_without_second_generation():
+    state = make_state()
+
+    class CountingGenerator(FakeShotGenerator):
+        def __init__(self, shots):
+            super().__init__(shots)
+            self.calls = 0
+
+        def generate(self, state):
+            self.calls += 1
+            return super().generate(state)
+
+    generator = CountingGenerator(
+        [
+            ShotAction(
+                angle=45.0,
+                power=0.65,
+                tip_y_mm=5.0,
+            )
+        ]
+    )
+
+    adapter = OutcomeGuidedSafetyMacroCandidateGenerator(
+        shot_generator=generator,
+    )
+
+    proposals = generator.generate(state)
+    assert generator.calls == 1
+
+    result = adapter.from_proposals(proposals)
+    assert generator.calls == 1
+    assert len(result) == 1
+    assert np.isclose(
+        result[0].physical_shot.tip_y_mm,
+        5.0,
+    )

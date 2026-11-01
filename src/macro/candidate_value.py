@@ -124,6 +124,7 @@ class MacroCandidateValueNetwork(
 def load_macro_candidate_value_network(
     checkpoint_path,
     device="cpu",
+    expected_candidate_dim=MACRO_CANDIDATE_DIM,
 ):
     """
     train_macro_candidate_value.py が保存したcheckpointから
@@ -169,11 +170,14 @@ def load_macro_candidate_value_network(
             f"expected {MACRO_STATE_DIM}."
         )
 
-    if candidate_dim != MACRO_CANDIDATE_DIM:
+    # Defaults to 25-D Attack-v0 loading. The 31-D mixed model
+    # needs an EXPLICIT opt-in so legacy MCTS doesn't receive a
+    # network trained for physically parameterized Safety actions.
+    if candidate_dim != int(expected_candidate_dim):
         raise ValueError(
             "Candidate value checkpoint "
             f"candidate_dim={candidate_dim}, "
-            f"expected {MACRO_CANDIDATE_DIM}."
+            f"expected {expected_candidate_dim}."
         )
 
     network = MacroCandidateValueNetwork(
