@@ -164,3 +164,74 @@ def test_candidate_policy_variable_count():
 
     assert logits_7.shape == (7,)
     
+
+
+def test_candidate_policy_checkpoint_roundtrip(
+    tmp_path,
+):
+    from src.macro.candidate_policy import (
+        load_macro_candidate_policy_network,
+    )
+
+    original = (
+        MacroCandidatePolicyNetwork(
+            hidden_dim=32,
+        )
+    )
+
+    checkpoint_path = (
+        tmp_path
+        / "candidate_policy.pt"
+    )
+
+    torch.save(
+        {
+            "candidate_policy_network": (
+                original.state_dict()
+            ),
+            "state_dim": (
+                MACRO_STATE_DIM
+            ),
+            "candidate_dim": (
+                MACRO_CANDIDATE_DIM
+            ),
+            "hidden_dim": 32,
+        },
+        checkpoint_path,
+    )
+
+    restored, checkpoint = (
+        load_macro_candidate_policy_network(
+            checkpoint_path,
+            device="cpu",
+        )
+    )
+
+    state = torch.zeros(
+        MACRO_STATE_DIM,
+        dtype=torch.float32,
+    )
+    candidates = torch.zeros(
+        3,
+        MACRO_CANDIDATE_DIM,
+        dtype=torch.float32,
+    )
+
+    with torch.no_grad():
+        expected = original(
+            state,
+            candidates,
+        )
+        actual = restored(
+            state,
+            candidates,
+        )
+
+    assert torch.allclose(
+        expected,
+        actual,
+    )
+    assert (
+        checkpoint["hidden_dim"]
+        == 32
+    )

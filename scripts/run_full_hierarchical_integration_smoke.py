@@ -29,6 +29,9 @@ from src.macro.candidate_generator import (
     MacroCandidateGenerator,
 )
 from src.macro.mcts import MCTS
+from src.macro.candidate_policy import (
+    load_macro_candidate_policy_network,
+)
 from src.macro.candidate_value import (
     load_macro_candidate_value_network,
 )
@@ -168,9 +171,44 @@ def main(
     print(
         f"micro device: {micro_device}"
     )
-    print(
-        "Macro policy: uniform integration baseline"
-    )
+    candidate_policy_network = None
+    candidate_policy_checkpoint = None
+
+    if (
+        args.candidate_policy_checkpoint
+        is not None
+    ):
+        (
+            candidate_policy_network,
+            candidate_policy_checkpoint,
+        ) = (
+            load_macro_candidate_policy_network(
+                args.candidate_policy_checkpoint,
+                device="cpu",
+            )
+        )
+
+        print(
+            "Macro policy: learned candidate policy"
+        )
+        print(
+            "Candidate Policy checkpoint:",
+            args.candidate_policy_checkpoint,
+        )
+        print(
+            "Candidate Policy best val top-1:",
+            candidate_policy_checkpoint.get(
+                "best_val_metrics",
+                {},
+            ).get(
+                "top1_accuracy",
+                "n/a",
+            ),
+        )
+    else:
+        print(
+            "Macro policy: uniform integration baseline"
+        )
 
     candidate_value_network = None
     candidate_value_checkpoint = None
@@ -394,7 +432,10 @@ def main(
 
     mcts = MCTS(
         policy_network=(
-            UniformCandidatePolicy()
+            candidate_policy_network
+            if candidate_policy_network
+            is not None
+            else UniformCandidatePolicy()
         ),
         value_network=(
             ZeroValue()
@@ -546,6 +587,7 @@ def main(
                 (
                     child.visit_count,
                     q_value,
+                    child.prior,
                     child.reward,
                     child.value,
                     child.predicted_q,
@@ -564,6 +606,7 @@ def main(
         for (
             visits,
             q_value,
+            prior,
             edge_reward,
             future_value,
             predicted_q,
@@ -602,6 +645,7 @@ def main(
                 current_target,
                 "next=",
                 next_target,
+                f"prior={prior:.3f}",
                 f"reward={edge_reward:.3f}",
                 f"value={future_value:.3f}",
                 (
@@ -686,6 +730,11 @@ def parse_args():
         "--base-checkpoint",
         type=str,
         required=True,
+    )
+    parser.add_argument(
+        "--candidate-policy-checkpoint",
+        type=str,
+        default=None,
     )
     parser.add_argument(
         "--candidate-value-checkpoint",

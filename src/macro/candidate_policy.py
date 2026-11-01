@@ -117,3 +117,81 @@ class MacroCandidatePolicyNetwork(
 
         return logits.squeeze(-1)
         
+
+
+def load_macro_candidate_policy_network(
+    checkpoint_path,
+    device="cpu",
+):
+    """
+    train_macro_candidate_policy.py が保存したcheckpointから
+    Candidate Policyを復元する。
+    """
+
+    checkpoint = torch.load(
+        checkpoint_path,
+        map_location=device,
+    )
+
+    required = (
+        "candidate_policy_network",
+        "state_dim",
+        "candidate_dim",
+        "hidden_dim",
+    )
+
+    missing = [
+        key
+        for key in required
+        if key not in checkpoint
+    ]
+
+    if missing:
+        raise ValueError(
+            "Candidate policy checkpoint "
+            "is missing keys: "
+            + ", ".join(missing)
+        )
+
+    state_dim = int(
+        checkpoint["state_dim"]
+    )
+    candidate_dim = int(
+        checkpoint["candidate_dim"]
+    )
+
+    if state_dim != MACRO_STATE_DIM:
+        raise ValueError(
+            "Candidate policy checkpoint "
+            f"state_dim={state_dim}, "
+            f"expected {MACRO_STATE_DIM}."
+        )
+
+    if candidate_dim != MACRO_CANDIDATE_DIM:
+        raise ValueError(
+            "Candidate policy checkpoint "
+            f"candidate_dim={candidate_dim}, "
+            f"expected {MACRO_CANDIDATE_DIM}."
+        )
+
+    network = MacroCandidatePolicyNetwork(
+        state_dim=state_dim,
+        candidate_dim=candidate_dim,
+        hidden_dim=int(
+            checkpoint["hidden_dim"]
+        ),
+    ).to(
+        device
+    )
+
+    network.load_state_dict(
+        checkpoint[
+            "candidate_policy_network"
+        ]
+    )
+    network.eval()
+
+    return (
+        network,
+        checkpoint,
+    )
