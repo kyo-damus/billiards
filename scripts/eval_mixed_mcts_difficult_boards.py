@@ -24,6 +24,7 @@ from scripts.build_mixed_candidate_value_dataset import (
     make_mixed_components,
 )
 from src.common.types import Strategy
+from src.goal.types import TacticalGoalType
 from src.env.micro_billiard_env import MicroBilliardEnv
 from src.macro.candidate_value import (
     load_macro_candidate_value_network,
@@ -43,6 +44,8 @@ class AttackFeasibility:
     candidate_count: int
     successful_pot_count: int
     best_immediate_reward: float
+    successful_direct_count: int = 0
+    distinct_successful_routes: int = 0
 
 
 def assess_attack_feasibility(
@@ -53,6 +56,8 @@ def assess_attack_feasibility(
     """Evaluate every Attack candidate on the exact same root board."""
     best_reward = -float("inf")
     potted = 0
+    direct_potted = 0
+    successful_routes = set()
     total = 0
 
     for candidate in attack_candidates:
@@ -70,6 +75,20 @@ def assess_attack_feasibility(
             and not bool(evaluation.scratch)
         ):
             potted += 1
+            if (
+                candidate.goal.goal_type
+                == TacticalGoalType.DIRECT_ATTACK
+            ):
+                direct_potted += 1
+            # The same target/pocket can be represented by both
+            # DIRECT and POSITION goals. This counts successful
+            # tactical routes, NOT unique physical stroke outcomes.
+            successful_routes.add(
+                (
+                    candidate.action.target_ball,
+                    candidate.action.target_pocket,
+                )
+            )
 
     return AttackFeasibility(
         candidate_count=total,
@@ -77,6 +96,8 @@ def assess_attack_feasibility(
         best_immediate_reward=(
             best_reward if total > 0 else float("nan")
         ),
+        successful_direct_count=direct_potted,
+        distinct_successful_routes=len(successful_routes),
     )
 
 
@@ -135,6 +156,66 @@ def teacher_value(
     ).target
 
 
+
+@dataclass(frozen=True)
+class TeacherOracleComparison:
+    """Per-board best two-step teacher Q, irrespective of the MCTS ranking."""
+
+    best_attack: float
+    best_safety: float
+
+    @property
+    def safety_advantage(self) -> float:
+        return self.best_safety - self.best_attack
+
+
+def compare_teacher_oracles(
+    state,
+    attack_candidates,
+    safety_candidates,
+    transition,
+    direct_generator,
+    gamma,
+) -> TeacherOracleComparison:
+    """
+    Evaluate the same target used to train Candidate Q for every
+    root candidate. This is expensive and is therefore optional.
+
+    If Safety's oracle Q is below Attack's, Safety is not optimal
+    under the current teacher on this board, independent of MCTS.
+    """
+    if not attack_candidates or not safety_candidates:
+        raise ValueError(
+            "Oracle comparison requires both Attack and Safety choices."
+        )
+    if any(
+        candidate.action.strategy != Strategy.ATTACK
+        for candidate in attack_candidates
+    ) or any(
+        candidate.action.strategy != Strategy.DEFENSE
+        for candidate in safety_candidates
+    ):
+        raise ValueError(
+            "Oracle candidates have mismatched strategies."
+        )
+
+    best_attack = max(
+        teacher_value(
+            state, candidate, transition, direct_generator, gamma
+        )
+        for candidate in attack_candidates
+    )
+    best_safety = max(
+        teacher_value(
+            state, candidate, transition, direct_generator, gamma
+        )
+        for candidate in safety_candidates
+    )
+    return TeacherOracleComparison(
+        best_attack=float(best_attack),
+        best_safety=float(best_safety),
+    )
+
 def main(args):
     device = resolve_device(args.device)
     q_net, checkpoint = load_macro_candidate_value_network(
@@ -168,6 +249,8 @@ def main(args):
     teacher_deltas = []
     root_attack_visit_counts = []
     root_safety_visit_counts = []
+    hardness_histogram = {"0": 0, "1": 0, "2": 0, "3+": 0}
+    oracle_advantages = []
 
     print("=== Paired MCTS on Attack-difficult boards ===")
     print(f"device: {device}")
@@ -203,6 +286,9 @@ def main(args):
             attacks,
             transition,
         )
+        successes = screen.successful_pot_count
+        bucket = str(successes) if successes <= 2 else "3+"
+        hardness_histogram[bucket] += 1
 
         if (
             screen.successful_pot_count
@@ -224,6 +310,8 @@ def main(args):
             print(
                 f"board={board} attack_success="
                 f"{screen.successful_pot_count}/{screen.candidate_count} "
+                f"direct_success={screen.successful_direct_count} "
+                f"distinct_routes={screen.distinct_successful_routes} "
                 "Safety not found in current physical grid"
             )
             continue
@@ -268,6 +356,23 @@ def main(args):
         delta = mixed_teacher - attack_teacher
         teacher_deltas.append(delta)
 
+        oracle_text = ""
+        if args.oracle_diagnostic:
+            oracle = compare_teacher_oracles(
+                state=state,
+                attack_candidates=attacks,
+                safety_candidates=safeties,
+                transition=transition,
+                direct_generator=direct_generator,
+                gamma=args.gamma,
+            )
+            oracle_advantages.append(oracle.safety_advantage)
+            oracle_text = (
+                f" oracle_best_attack={oracle.best_attack:+.3f}"
+                f" oracle_best_safety={oracle.best_safety:+.3f}"
+                f" oracle_safety_advantage={oracle.safety_advantage:+.3f}"
+            )
+
         attack_visits = sum(
             node.visit_count for candidate, node
             in mixed_root.children.items()
@@ -284,6 +389,8 @@ def main(args):
         print(
             f"board={board} attack_success="
             f"{screen.successful_pot_count}/{screen.candidate_count} "
+            f"direct_success={screen.successful_direct_count} "
+            f"distinct_routes={screen.distinct_successful_routes} "
             f"best_attack_immediate={screen.best_immediate_reward:+.3f} "
             f"root_choices={len(attacks)}/{len(safeties)} "
             f"mixed_visits={attack_visits}/{safety_visits} "
@@ -294,6 +401,7 @@ def main(args):
             f"delta={delta:+.3f} "
             f"selected_visits={attack_child.visit_count}/"
             f"{mixed_child.visit_count}"
+            f"{oracle_text}"
         )
 
         if args.simulations < len(attacks) + len(safeties):
@@ -311,6 +419,12 @@ def main(args):
         f"{examined} / {qualified} / {compared}"
     )
     print(f"hard boards with no Safety proposals: {no_safety}")
+    print(
+        "Attack success counts among boards with candidates "
+        "(0/1/2/3+): "
+        f"{hardness_histogram['0']}/{hardness_histogram['1']}/"
+        f"{hardness_histogram['2']}/{hardness_histogram['3+']}"
+    )
 
     if not compared:
         print(
@@ -337,6 +451,18 @@ def main(args):
         f"{np.mean(root_attack_visit_counts):.2f}/"
         f"{np.mean(root_safety_visit_counts):.2f}"
     )
+    if oracle_advantages:
+        d = np.asarray(oracle_advantages, dtype=np.float64)
+        print(
+            "Oracle SAFETY beats/ties/loses to best ATTACK: "
+            f"{int((d > 1e-6).sum())}/"
+            f"{int((np.abs(d) <= 1e-6).sum())}/"
+            f"{int((d < -1e-6).sum())}"
+        )
+        print(
+            "Mean oracle SAFETY-minus-ATTACK two-step Q: "
+            f"{d.mean():+.4f}"
+        )
     print(
         "Caution: screens use the same deterministic Micro and "
         "FastFiz as the Q teacher, and Safety proposals are "
@@ -355,6 +481,14 @@ def parse_args():
     parser.add_argument("--max-compared", type=int, default=3)
     parser.add_argument("--max-successful-attacks", type=int, default=2)
     parser.add_argument("--simulations", type=int, default=60)
+    parser.add_argument(
+        "--oracle-diagnostic",
+        action="store_true",
+        help=(
+            "Evaluate EVERY ATTACK/SAFETY root candidate's "
+            "two-step teacher Q on paired boards (extra FastFiz cost)."
+        ),
+    )
     parser.add_argument("--root-min-visits", type=int, default=1)
     parser.add_argument(
         "--candidate-q-prior-visits",

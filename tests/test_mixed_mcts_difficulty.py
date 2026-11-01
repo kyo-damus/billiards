@@ -7,6 +7,7 @@ import pytest
 
 from scripts.eval_mixed_mcts_difficult_boards import (
     assess_attack_feasibility,
+    compare_teacher_oracles,
 )
 from src.common.types import (
     GameState,
@@ -133,3 +134,84 @@ def test_mixed_root_generator_reuses_evaluated_shots():
     assert generator.last_attack_count == 1
     assert generator.last_safety_count == 1
     assert calls == {"attack": 1, "safety": 1, "adapter": 1}
+
+
+
+def test_attack_success_counts_distinct_target_pocket_routes():
+    direct = attack(0)
+    position = MacroCandidate(
+        action=direct.action,
+        goal=TacticalGoal(
+            goal_type=TacticalGoalType.POSITION_ATTACK,
+            target_ball=0,
+            target_pocket=0,
+            cue_target_position=(0.5, 0.3),
+            cue_target_radius=0.1,
+            next_target_ball=1,
+            next_target_pocket=1,
+        ),
+    )
+    result = assess_attack_feasibility(
+        state(), [direct, position], FakeTransition()
+    )
+    assert result.successful_pot_count == 2
+    assert result.successful_direct_count == 1
+    assert result.distinct_successful_routes == 1
+
+
+def test_oracle_compares_all_root_candidates_not_mcts_winners():
+    from src.macro.transition import MacroTransitionResult
+
+    good_attack = attack(0)
+    weak_attack = attack(1)
+    safety = MacroCandidate(
+        action=MacroAction(
+            strategy=Strategy.DEFENSE,
+            target_ball=0,
+            target_pocket=None,
+        ),
+        goal=TacticalGoal(
+            goal_type=TacticalGoalType.SAFETY,
+            target_ball=0,
+            cue_target_position=(0.4, 0.4),
+            cue_target_radius=0.1,
+        ),
+    )
+
+    class TerminalTransition:
+        def step(self, current, candidate):
+            reward = (
+                1.0 if candidate is good_attack
+                else -0.2 if candidate is weak_attack
+                else 0.5
+            )
+            return MacroTransitionResult(
+                next_state=state(),
+                reward=reward,
+                terminated=True,
+            )
+
+    summary = compare_teacher_oracles(
+        state=state(),
+        attack_candidates=[weak_attack, good_attack],
+        safety_candidates=[safety],
+        transition=TerminalTransition(),
+        direct_generator=FixedCandidateGenerator([]),
+        gamma=0.99,
+    )
+
+    assert np.isclose(summary.best_attack, 1.0)
+    assert np.isclose(summary.best_safety, 0.5)
+    assert np.isclose(summary.safety_advantage, -0.5)
+
+
+def test_oracle_rejects_missing_strategy():
+    with pytest.raises(ValueError, match="both Attack and Safety"):
+        compare_teacher_oracles(
+            state=state(),
+            attack_candidates=[attack(0)],
+            safety_candidates=[],
+            transition=FakeTransition(),
+            direct_generator=FixedCandidateGenerator([]),
+            gamma=0.99,
+        )

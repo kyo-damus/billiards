@@ -511,3 +511,45 @@ A reasonable small first run is up to 20 sampled boards,
 at most three selected hard cases, 60 simulations each,
 with success threshold K=2. If too few cases qualify, widen
 the threshold or seed scan. For a strict hard case, use K=0.
+
+
+## Attack-difficulty screening and teacher-oracle diagnostics (stage 6c)
+
+On seeds 95000..95019, the earlier threshold of at most two
+successful ATTACK candidates selected only one board (board 12).
+Its best immediate ATTACK reward was +1.250 and the selected
+DIRECT_ATTACK 2-step teacher Q was +2.240 for both compared MCTS
+variants. Their Safety alternatives each received only one root
+visit. This is not evidence that Defense is ineffective.
+
+`eval_mixed_mcts_difficult_boards.py` now reports, in addition
+to the previous all-goal success count:
+
+- successful DIRECT candidate count;
+- number of distinct successful (target ball, target pocket)
+  routes, collapsing DIRECT and POSITION representations
+  that refer to the same route (not necessarily the same shot);
+- histogram of total successful ATTACK candidates on scanned
+  boards: 0, 1, 2, or 3+.
+
+Optional `--oracle-diagnostic` also replays all Attack and Safety
+root candidates to calculate the BEST two-step teacher Q for
+each strategy, independent of the MCTS-selected action. It
+reports `oracle_best_attack`, `oracle_best_safety`, their
+difference and aggregate comparisons.
+
+This diagnostic distinguishes:
+1. **Teacher prefers Attack**: Defense selection would not be
+   justified by the current two-step objective, even with
+   perfect ranking.
+2. **Teacher prefers Safety, MCTS still selects Attack**:
+   investigate 31D Q predictions, priors, and search budget.
+3. **Teacher and MCTS both prefer Safety**: a promising
+   *within-model* Defense case to test under broader seeds,
+   rules, and an independent gameplay evaluation.
+
+Costs: `--oracle-diagnostic` executes all paired-board
+root candidates plus DIRECT one-shot continuations and can
+be substantially slower. Use only a few paired boards.
+As before, the Safety proposal generator uses the same physics
+lookahead as evaluation, and the game rules remain simplified.
