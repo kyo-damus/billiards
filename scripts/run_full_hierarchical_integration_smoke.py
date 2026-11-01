@@ -429,6 +429,12 @@ def main(
         candidate_value_network=(
             candidate_value_network
         ),
+        candidate_q_prior_visits=(
+            args.candidate_q_prior_visits
+            if candidate_value_network
+            is not None
+            else 0.0
+        ),
     )
 
     agent = HierarchicalAgent(
@@ -531,8 +537,9 @@ def main(
                 continue
 
             q_value = (
-                child.reward
-                + mcts.gamma * child.value
+                mcts._candidate_q_value(
+                    child
+                )
             )
 
             rows.append(
@@ -684,6 +691,11 @@ def parse_args():
         "--candidate-value-checkpoint",
         type=str,
         default=None,
+    )
+    parser.add_argument(
+        "--candidate-q-prior-visits",
+        type=float,
+        default=2.0,
     )
     parser.add_argument(
         "--residual-checkpoint",

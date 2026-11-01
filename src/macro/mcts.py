@@ -91,11 +91,22 @@ class MCTS:
         force_evaluate_unvisited=False,
         root_min_visits_before_puct=0,
         candidate_value_network=None,
+        candidate_q_prior_visits=0.0,
     ):
         self.policy_network = policy_network
         self.value_network = value_network
         self.candidate_value_network = (
             candidate_value_network
+        )
+
+        if candidate_q_prior_visits < 0.0:
+            raise ValueError(
+                "candidate_q_prior_visits "
+                "must be >= 0."
+            )
+
+        self.candidate_q_prior_visits = float(
+            candidate_q_prior_visits
         )
 
         self.action_generator = action_generator
@@ -337,23 +348,11 @@ class MCTS:
         child: MCTSNode,
     ) -> float:
 
-        # 未訪問候補には、利用可能なら
-        # 候補依存Value/Qの予測値を使う。
-        # 一度FastFizで展開した後は、
-        # 実測reward + search valueへ切り替える。
-        if (
-            child.visit_count == 0
-            and child.predicted_q is not None
-        ):
-            q_value = (
-                child.predicted_q
+        q_value = (
+            self._candidate_q_value(
+                child
             )
-
-        else:
-            q_value = (
-                child.reward
-                + self.gamma * child.value
-            )
+        )
 
         exploration = (
             self.c_puct
@@ -367,6 +366,51 @@ class MCTS:
         )
 
         return q_value + exploration
+
+    def _candidate_q_value(
+        self,
+        child: MCTSNode,
+    ) -> float:
+        """
+        候補依存QをMCTSの事前評価として利用する。
+
+        未訪問時はpredicted_qをそのまま使い、
+        訪問後は実測Qと予測Qをpseudo visitとして混合する。
+        visit数が増えるほど実測Qが支配的になる。
+        """
+
+        empirical_q = (
+            child.reward
+            + self.gamma * child.value
+        )
+
+        if child.predicted_q is None:
+            return empirical_q
+
+        if child.visit_count == 0:
+            return float(
+                child.predicted_q
+            )
+
+        prior_visits = (
+            self.candidate_q_prior_visits
+        )
+
+        if prior_visits <= 0.0:
+            return empirical_q
+
+        return float(
+            (
+                child.visit_count
+                * empirical_q
+                + prior_visits
+                * child.predicted_q
+            )
+            / (
+                child.visit_count
+                + prior_visits
+            )
+        )
 
     # ============================================================
     # Expansion

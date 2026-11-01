@@ -556,3 +556,98 @@ def test_visited_candidate_uses_empirical_q():
         ),
         2.0,
     )
+
+
+
+def test_candidate_q_prior_blends_with_empirical_q():
+
+    torch.manual_seed(0)
+
+    mcts = MCTS(
+        policy_network=(
+            MacroCandidatePolicyNetwork()
+        ),
+        value_network=(
+            MacroValueNetwork()
+        ),
+        action_generator=(
+            ExpandedMacroCandidateGenerator()
+        ),
+        transition_model=(
+            DummyCandidateTransition()
+        ),
+        simulations=1,
+        device="cpu",
+        candidate_mode=True,
+        gamma=0.5,
+        candidate_q_prior_visits=2.0,
+    )
+
+    child = MCTSNode(
+        prior=0.0,
+        reward=1.0,
+        predicted_q=4.0,
+        state=make_state(),
+        visit_count=2,
+        value_sum=4.0,
+    )
+
+    # empirical Q = 1 + 0.5 * 2 = 2
+    # prior 2 visits at Q=4, empirical 2 visits at Q=2
+    # blended Q = 3
+    assert np.isclose(
+        mcts._candidate_q_value(
+            child
+        ),
+        3.0,
+    )
+
+
+def test_candidate_q_prior_fades_with_more_visits():
+
+    torch.manual_seed(0)
+
+    mcts = MCTS(
+        policy_network=(
+            MacroCandidatePolicyNetwork()
+        ),
+        value_network=(
+            MacroValueNetwork()
+        ),
+        action_generator=(
+            ExpandedMacroCandidateGenerator()
+        ),
+        transition_model=(
+            DummyCandidateTransition()
+        ),
+        simulations=1,
+        device="cpu",
+        candidate_mode=True,
+        gamma=0.0,
+        candidate_q_prior_visits=2.0,
+    )
+
+    child = MCTSNode(
+        prior=0.0,
+        reward=1.0,
+        predicted_q=4.0,
+        state=make_state(),
+        visit_count=20,
+        value_sum=0.0,
+    )
+
+    blended = (
+        mcts._candidate_q_value(
+            child
+        )
+    )
+
+    assert np.isclose(
+        blended,
+        (
+            20.0 * 1.0
+            + 2.0 * 4.0
+        )
+        / 22.0,
+    )
+    assert blended < 1.3
