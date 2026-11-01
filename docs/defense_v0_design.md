@@ -553,3 +553,75 @@ root candidates plus DIRECT one-shot continuations and can
 be substantially slower. Use only a few paired boards.
 As before, the Safety proposal generator uses the same physics
 lookahead as evaluation, and the game rules remain simplified.
+
+
+## Post-SAFETY hard-state oracle diagnostic (stage 6d)
+
+On the earlier random-board diagnostic (20 scanned boards,
+threshold <=2 successful Attack candidates), only 1 board
+qualified, with 2/20 successful ATTACK Micro outcomes.
+The per-strategy **best** two-step teacher Q on that board was
+
+- ATTACK: +2.240
+- SAFETY: -1.238
+- SAFETY minus ATTACK: -3.478
+
+The mixed MCTS selected the same DIRECT_ATTACK as the
+Attack-only MCTS and assigned only 4 of its 60 root visits
+to the 4 SAFETY candidates. This is **not** a failure of
+MCTS to discover a better SAFETY under the current teacher.
+
+More fundamentally, random initial boards in the simple
+3-ball setting rarely have no executable attack; 19/20 had
+3+ successful ATTACK root candidates. Also the SAFETY shot
+generator ranks by the NUMBER of opponent DIRECT candidates
+which pot successfully, while the two-step Q teacher uses
+the MAXIMUM next DIRECT local reward. If the next player
+has any successful DIRECT candidate with reward 1.25,
+then 1 versus 10 such candidates can yield the SAME teacher
+continuation. This is an objective-alignment limitation,
+not a reason to change reward weights merely to force SAFETY
+choices. We need to measure it before revising objectives.
+
+`scripts/eval_post_safety_hard_states.py` constructs a
+**targeted stress-test**, not an unbiased board sample:
+
+1. Sample a few ordinary seeded initial boards.
+2. Use physical SAFETY search to produce valid post-shot
+   opponent-turn GameStates. These use FastFiz outcomes, not
+   manually invented geometric layouts.
+3. Retain poststates with at most K successful DIRECT shots
+   for the new player (usually K=0); deduplicate nearby
+   states to limit repeated evaluation.
+4. Reevaluate **all** Attack candidates using the existing
+   Micro+FastFiz and retain states with at most a configurable
+   number of successful Attack outcomes including POSITION.
+5. Generate executable SAFETY moves for the new player,
+   compare best two-step teacher Q over all Attack and Safety
+   root candidates. Optional `--run-mcts` compares the MCTS
+   choices using the same 31D checkpoint and fixed simulation
+   budget.
+
+Note that these root positions are selected *because* Safety
+earlier made DIRECT attacks difficult. They are useful to
+test whether the model can handle such positions, but
+cannot establish broad generalization or win rate. The
+two-step teacher's DIRECT-only continuation and the
+simplified foul rules are unchanged.
+
+Small first run (oracle only, no new model training):
+
+```bash
+python -m scripts.eval_post_safety_hard_states \
+  --base-checkpoint goal_conditioned_micro_mixed_curriculum_100k.pt \
+  --residual-checkpoint position_power_residual_mlp_2000.pt \
+  --source-boards 5 --source-seed 90000 \
+  --max-successful-direct 0 \
+  --max-successful-attacks 2 \
+  --max-compared 2 --device cuda
+```
+
+If it finds no paired states, report how many post-Safety
+DIRECT-hard states were found and how many failed the
+full Attack filter. Only then consider relaxing that filter
+or broadening the physical search grid.
