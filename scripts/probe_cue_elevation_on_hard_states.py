@@ -48,12 +48,29 @@ def rail_distances(positions):
     }
 
 
-def probe_elevation_grid(state, elevations, angle_offsets, power=1.0):
-    """Return per-elevation preconditions and cue-contact outcomes.
+def probe_elevation_grid(
+    state,
+    elevations,
+    angle_offsets,
+    power=1.0,
+    powers=None,
+    tip_y_mm=(0.0,),
+):
+    """Return per-elevation FastFiz feasibility and first-contact counts.
 
-    Identical shot directions, power and tip positions are used for
-    all elevations. No opponent-threat lookahead is performed.
+    Use the same angle/power/tip grid at EVERY elevation.
+    The single-power argument remains for backwards compatibility.
+    No opponent lookahead or learned Policy is involved.
     """
+    powers = (power,) if powers is None else tuple(powers)
+    tips = tuple(tip_y_mm)
+    if (
+        not powers
+        or not tips
+        or any(not np.isfinite(v) or not 0.5 <= v <= 3.0 for v in powers)
+        or any(not np.isfinite(v) or abs(v) > 12.0 for v in tips)
+    ):
+        raise ValueError("Invalid power/tip diagnostic grid.")
     sim = FastFizSimulator()
     rows = []
 
@@ -68,60 +85,78 @@ def probe_elevation_grid(state, elevations, angle_offsets, power=1.0):
         attempted = 0
         valid = 0
         correct_first = 0
+        any_first = 0
         safety_like = 0
+        first_contact_example = None
 
         for target in target_balls:
             for offset in angle_offsets:
-                shot = plan_defense_shot(
-                    state,
-                    target_ball=target,
-                    power=power,
-                    angle_offset_deg=offset,
-                    tip_x_mm=0.0,
-                    tip_y_mm=0.0,
-                )
-                sim.restore(
-                    SimulatorSnapshot(
-                        positions=np.asarray(
-                            state.ball_positions, dtype=np.float32
-                        ).copy(),
-                        pocket_indices=np.asarray(
-                            state.ball_pocket_indices, dtype=np.int32
-                        ).copy(),
-                    )
-                )
-                result = sim.step(
-                    target_ball=target,
-                    power=shot.power,
-                    angle=shot.angle,
-                    cue_elevation_deg=elevation,
-                )
-                attempted += 1
-                codes[result.precondition_code] += 1
-                placement_codes[result.placement_code] += 1
-                if result.precondition_code != 0:
-                    continue
+                for current_power in powers:
+                    for current_tip_y in tips:
+                        shot = plan_defense_shot(
+                            state,
+                            target_ball=target,
+                            power=current_power,
+                            angle_offset_deg=offset,
+                            tip_x_mm=0.0,
+                            tip_y_mm=current_tip_y,
+                        )
+                        sim.restore(
+                            SimulatorSnapshot(
+                                positions=np.asarray(
+                                    state.ball_positions, dtype=np.float32
+                                ).copy(),
+                                pocket_indices=np.asarray(
+                                    state.ball_pocket_indices, dtype=np.int32
+                                ).copy(),
+                            )
+                        )
+                        result = sim.step(
+                            target_ball=target,
+                            power=shot.power,
+                            angle=shot.angle,
+                            tip_x_mm=shot.tip_x_mm,
+                            tip_y_mm=shot.tip_y_mm,
+                            cue_elevation_deg=elevation,
+                        )
+                        attempted += 1
+                        codes[result.precondition_code] += 1
+                        placement_codes[result.placement_code] += 1
+                        if result.precondition_code != 0:
+                            continue
 
-                valid += 1
-                if result.first_contact_ball != target:
-                    continue
-                correct_first += 1
+                        valid += 1
+                        if result.first_contact_ball >= 0:
+                            any_first += 1
+                        if result.first_contact_ball != target:
+                            continue
+                        correct_first += 1
+                        if first_contact_example is None:
+                            first_contact_example = {
+                                "target": target,
+                                "angle_offset": float(offset),
+                                "power": float(current_power),
+                                "tip_y_mm": float(current_tip_y),
+                                "elevation": float(elevation),
+                            }
 
-                snapshot = sim.snapshot()
-                scratched = snapshot.pocket_indices[0] >= 0
-                new_pots = np.any(
-                    (state.ball_pocket_indices[1:] < 0)
-                    & (snapshot.pocket_indices[1:] >= 0)
-                )
-                if not scratched and not new_pots:
-                    safety_like += 1
+                        snapshot = sim.snapshot()
+                        scratched = snapshot.pocket_indices[0] >= 0
+                        new_pots = np.any(
+                            (state.ball_pocket_indices[1:] < 0)
+                            & (snapshot.pocket_indices[1:] >= 0)
+                        )
+                        if not scratched and not new_pots:
+                            safety_like += 1
 
         rows.append({
             "elevation": float(elevation),
             "attempted": attempted,
             "valid": valid,
             "correct_first": correct_first,
+            "any_first": any_first,
             "safety_like": safety_like,
+            "first_contact_example": first_contact_example,
             "codes": codes,
             "placements": placement_codes,
         })
@@ -184,6 +219,8 @@ def main(args):
     print(f"source boards: {args.source_boards}")
     print(f"elevations: {args.elevations}")
     print(f"angles: {args.angle_offsets}")
+    print(f"powers: {args.powers if args.powers is not None else [args.power]}")
+    print(f"tip_y_mm: {args.tip_y_mm}")
 
     for board in range(args.source_boards):
         initial = random_state(env, args.source_seed + board)
@@ -229,14 +266,22 @@ def main(args):
                 elevations=args.elevations,
                 angle_offsets=args.angle_offsets,
                 power=args.power,
+                powers=args.powers,
+                tip_y_mm=args.tip_y_mm,
             ):
                 print(
                     f"  theta={row['elevation']:4.0f} deg "
                     f"valid={row['valid']}/{row['attempted']} "
+                    f"any_first={row['any_first']} "
                     f"correct_first={row['correct_first']} "
                     f"no_pot_no_scratch_after_contact={row['safety_like']} "
                     f"codes=[{summarize_code_counts(row['codes'])}]"
                 )
+                if row["first_contact_example"] is not None:
+                    print(
+                        "    first_correct_contact_example="
+                        f"{row['first_contact_example']}"
+                    )
 
             examined_states += 1
             if examined_states >= args.max_hard_states:
@@ -272,6 +317,13 @@ def parse_args():
         default=[-20.0, -10.0, 0.0, 10.0, 20.0],
     )
     parser.add_argument("--power", type=float, default=1.0)
+    parser.add_argument(
+        "--powers", type=float, nargs="+",
+        help="Optional power grid; overrides --power.",
+    )
+    parser.add_argument(
+        "--tip-y-mm", type=float, nargs="+", default=[0.0],
+    )
     parser.add_argument(
         "--device", choices=("auto", "cpu", "cuda"), default="auto"
     )
@@ -310,6 +362,21 @@ def parse_args():
         )
         or not np.isfinite(args.power)
         or not 0.5 <= args.power <= 3.0
+        or (
+            args.powers is not None
+            and (
+                not args.powers
+                or any(
+                    not np.isfinite(v) or not 0.5 <= v <= 3.0
+                    for v in args.powers
+                )
+            )
+        )
+        or not args.tip_y_mm
+        or any(
+            not np.isfinite(v) or abs(v) > 12.0
+            for v in args.tip_y_mm
+        )
     ):
         parser.error("Invalid elevation/shot grid configuration.")
     return args

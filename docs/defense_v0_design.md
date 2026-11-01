@@ -780,3 +780,57 @@ cue elevation as a bottleneck; if not, test more directions
 or inspect other-ball/cue-stick geometry before assuming
 no legal physical shot exists. This is only a feasibility
 study, not Defense efficacy evidence.
+
+
+## Stage 6h: cue elevation / first-contact sweep on hard post-Safety states
+
+On the same two hard poststates (source boards 1, 3; nearest
+rails 0.0337m and 0.0375m away), all 21 tested Attack
+candidates with the trained fixed 10-degree action format
+failed the FastFiz precondition with code 128
+(`CUE_STICK_COLLISION`). Both also had no successful
+DIRECT reply, by construction.
+
+A controlled elevation probe showed the number of
+physically permitted shot attempts (10 attempts per theta):
+- board 1: 10/20/35/50/60 degrees -> 0/0/1/2/5 valid
+- board 3: 10/20/35/50/60 degrees -> 0/2/5/10/10 valid
+
+NONE of these passed the desired first-object-contact test.
+This separates native precondition feasibility from making a
+legitimate shot. Higher theta mitigates rail/cue obstruction,
+but may also change the ball's initial trajectory (including
+jumping) and cannot simply be assumed a valid Safety move.
+
+The standalone `probe_cue_elevation_on_hard_states.py`
+now optionally tries `--powers` and `--tip-y-mm` grids,
+while preserving the old single `--power` diagnostic.
+It reports any first object contact, correct first contact,
+and non-pot/non-scratch outcomes after correct contact,
+plus an example shot if a correct contact occurs.
+This is NOT a new Defense MacroCandidate, trained Micro
+action, learned Q representation, or official-rule validator.
+
+Important interpretation: zero Attack successes on these
+states may primarily reflect the **10-degree actuator
+restriction**, rather than a strategically difficult board.
+Do not train/relabel the 31D mixed Candidate Q on
+high-elevation shots without updating executable shot
+parameters, encoding, teacher generation, and downstream
+evaluation consistently. Analyze the feasibility/contact
+limits first.
+
+Small controlled parameter sweep:
+
+```bash
+python -m scripts.probe_cue_elevation_on_hard_states \
+  --base-checkpoint goal_conditioned_micro_mixed_curriculum_100k.pt \
+  --residual-checkpoint position_power_residual_mlp_2000.pt \
+  --source-boards 5 --source-seed 90000 \
+  --max-hard-states 2 --max-successful-direct 0 \
+  --elevations 20 35 50 60 \
+  --angle-offsets -10 -5 0 5 10 \
+  --powers 0.65 1.0 1.5 \
+  --tip-y-mm 0 5 \
+  --device cuda
+```

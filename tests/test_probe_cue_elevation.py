@@ -8,6 +8,7 @@ from scripts.probe_cue_elevation_on_hard_states import (
     attack_precondition_summary,
     rail_distances,
     summarize_code_counts,
+    probe_elevation_grid,
 )
 from src.common.table import TABLE_LENGTH, TABLE_WIDTH
 from src.common.types import GameState
@@ -80,3 +81,70 @@ def test_attack_physics_rejections_not_counted_as_real_misses():
     assert result["precondition_128"] == 1
     assert result["valid_no_pot"] == 1
     assert result["valid_pot"] == 1
+
+
+
+def test_probe_power_tip_grid_tracks_first_contact(monkeypatch):
+    from types import SimpleNamespace
+    import scripts.probe_cue_elevation_on_hard_states as module
+
+    observed = []
+
+    class FakeSimulator:
+        def restore(self, snapshot):
+            self.current = snapshot
+
+        def step(self, target_ball, power, angle, tip_x_mm=0.0,
+                 tip_y_mm=0.0, cue_elevation_deg=10.0):
+            observed.append((power, tip_y_mm, cue_elevation_deg))
+            return SimpleNamespace(
+                precondition_code=0,
+                placement_code=0,
+                first_contact_ball=(target_ball if power > 1.0 else -1),
+            )
+
+        def snapshot(self):
+            return self.current
+
+    monkeypatch.setattr(module, "FastFizSimulator", FakeSimulator)
+    rows = probe_elevation_grid(
+        make_state(),
+        elevations=[20.0, 35.0],
+        angle_offsets=[0.0],
+        powers=[0.8, 1.2],
+        tip_y_mm=[0.0, 5.0],
+    )
+
+    assert len(rows) == 2
+    for row in rows:
+        assert row["attempted"] == 8
+        assert row["valid"] == 8
+        assert row["any_first"] == 4
+        assert row["correct_first"] == 4
+        assert row["safety_like"] == 4
+        assert row["first_contact_example"]["power"] == 1.2
+        assert row["first_contact_example"]["tip_y_mm"] == 0.0
+
+    assert {v[0] for v in observed} == {0.8, 1.2}
+    assert {v[1] for v in observed} == {0.0, 5.0}
+    assert {v[2] for v in observed} == {20.0, 35.0}
+
+
+def test_probe_rejects_out_of_range_power_and_tip():
+    import pytest
+
+    with pytest.raises(ValueError, match="power/tip"):
+        probe_elevation_grid(
+            make_state(),
+            elevations=[20.0],
+            angle_offsets=[0.0],
+            powers=[-1.0],
+        )
+    with pytest.raises(ValueError, match="power/tip"):
+        probe_elevation_grid(
+            make_state(),
+            elevations=[20.0],
+            angle_offsets=[0.0],
+            powers=[1.0],
+            tip_y_mm=[13.0],
+        )
