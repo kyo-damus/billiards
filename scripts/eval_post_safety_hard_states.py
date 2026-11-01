@@ -33,6 +33,9 @@ from src.env.micro_billiard_env import MicroBilliardEnv
 from src.macro.candidate_value import (
     load_macro_candidate_value_network,
 )
+from src.macro.outcome_guided_safety_shots import (
+    OutcomeGuidedSafetyShotGenerator,
+)
 
 
 @dataclass(frozen=True)
@@ -108,6 +111,52 @@ def select_hard_states_from_safety(
     return selected
 
 
+
+def generate_safety_with_diagnostics(
+    state,
+    base_generator,
+    adapter,
+    retry_generator=None,
+):
+    """
+    Use the baseline Safety grid, optionally retry once with a
+    broader physical grid ONLY when it has no eligible shots.
+
+    Returns (candidates, baseline_stats, retry_stats).
+    Statistics are copied before the generator's next call.
+    All choices remain physically executable and contact-screened.
+    """
+    proposals = base_generator.generate(state)
+    base_stats = dict(base_generator.last_stats)
+    retry_stats = None
+
+    if not proposals and retry_generator is not None:
+        proposals = retry_generator.generate(state)
+        retry_stats = dict(retry_generator.last_stats)
+
+    return (
+        adapter.from_proposals(proposals),
+        base_stats,
+        retry_stats,
+    )
+
+
+def format_safety_stats(stats):
+    """Disjoint first-failure counts for a physical shot grid."""
+    keys = (
+        "attempted",
+        "invalid_physics",
+        "wrong_or_no_first_contact",
+        "scratch",
+        "pocketed",
+        "other_ineligible",
+        "eligible",
+    )
+    return " ".join(
+        f"{key}={stats.get(key, 0)}" for key in keys
+    )
+
+
 def main(args):
     device = resolve_device(args.device)
     (
@@ -135,6 +184,25 @@ def main(args):
         ):
             raise ValueError("Expected 31D turn-aware mixed Q v2.")
 
+    # Wider search is a diagnostic fallback, never silently
+    # substituted into trained data generation or normal MCTS.
+    # Each expanded-grid candidate is still checked by FastFiz.
+    retry_generator = None
+    if args.retry_expanded_safety:
+        retry_generator = OutcomeGuidedSafetyShotGenerator(
+            defense_executor=safety_shots.defense_executor,
+            opponent_threat_evaluator=(
+                safety_shots.opponent_threat_evaluator
+            ),
+            powers=args.expanded_powers,
+            angle_offsets_deg=args.expanded_angles,
+            tip_offsets_mm=[
+                (0.0, tip_y)
+                for tip_y in args.expanded_tip_y_mm
+            ],
+            top_k=args.safety_top_k,
+        )
+
     initial_env = MicroBilliardEnv()
     seen = set()
     source_boards = 0
@@ -143,6 +211,7 @@ def main(args):
     no_attack = 0
     filtered_attack = 0
     no_safety = 0
+    recovered_by_expanded = 0
     oracle_deltas = []
     mcts_safety_chosen = 0
     mcts_deltas = []
@@ -166,6 +235,10 @@ def main(args):
         f"{args.max_successful_attacks}"
     )
     print("second-step teacher action set: DIRECT_ONLY")
+    print(
+        "expanded Safety fallback on empty: "
+        f"{args.retry_expanded_safety}"
+    )
 
     for board in range(args.source_boards):
         initial = random_state(
@@ -201,12 +274,41 @@ def main(args):
                 filtered_attack += 1
                 continue
 
-            new_safety_proposals = safety_shots.generate(hard)
-            safety_choices = safety_adapter.from_proposals(
-                new_safety_proposals
+            (
+                safety_choices,
+                narrow_stats,
+                expanded_stats,
+            ) = generate_safety_with_diagnostics(
+                state=hard,
+                base_generator=safety_shots,
+                adapter=safety_adapter,
+                retry_generator=retry_generator,
             )
+            if expanded_stats is not None and safety_choices:
+                recovered_by_expanded += 1
+
+            # Always show the physical rejection breakdown for the
+            # hard states, even when there are NO Safety candidates.
+            print(
+                f"source_board={board} "
+                f"poststate_direct_success="
+                f"{sample.source_direct_successes} "
+                f"attack_success="
+                f"{feasibility.successful_pot_count}/"
+                f"{feasibility.candidate_count} "
+                f"baseline_safety: {format_safety_stats(narrow_stats)}"
+            )
+            if expanded_stats is not None:
+                print(
+                    "  expanded_safety: "
+                    + format_safety_stats(expanded_stats)
+                )
             if not safety_choices:
                 no_safety += 1
+                print(
+                    f"  no physically eligible Safety continuation "
+                    "in tested shot grids"
+                )
                 continue
 
             oracle = compare_teacher_oracles(
@@ -282,7 +384,8 @@ def main(args):
     print(
         f"no Attack candidates: {no_attack}; "
         f"filtered by all-Attack success: {filtered_attack}; "
-        f"no Safety continuation: {no_safety}"
+        f"no Safety continuation: {no_safety}; "
+        f"recovered by expanded grid: {recovered_by_expanded}"
     )
 
     if oracle_deltas:
@@ -327,6 +430,29 @@ def parse_args():
     parser.add_argument("--max-successful-direct", type=int, default=0)
     parser.add_argument("--max-successful-attacks", type=int, default=2)
     parser.add_argument("--run-mcts", action="store_true")
+    parser.add_argument(
+        "--retry-expanded-safety",
+        action="store_true",
+        help=(
+            "On zero Safety candidates in a hard post-state, "
+            "retry a wider physical shot grid."
+        ),
+    )
+    parser.add_argument(
+        "--expanded-powers",
+        type=float, nargs="+",
+        default=[0.55, 0.8, 1.3, 1.8],
+    )
+    parser.add_argument(
+        "--expanded-angles",
+        type=float, nargs="+",
+        default=[-20.0, -10.0, 0.0, 10.0, 20.0],
+    )
+    parser.add_argument(
+        "--expanded-tip-y-mm",
+        type=float, nargs="+",
+        default=[-5.0, 0.0, 5.0],
+    )
     parser.add_argument("--simulations", type=int, default=40)
     parser.add_argument("--root-min-visits", type=int, default=1)
     parser.add_argument(
@@ -368,6 +494,27 @@ def parse_args():
         or not 0.0 <= args.gamma <= 1.0
     ):
         parser.error("Invalid board/sample/MCTS configuration.")
+
+    if (
+        not args.expanded_powers
+        or any(
+            not np.isfinite(v) or not 0.5 <= v <= 3.0
+            for v in args.expanded_powers
+        )
+        or not args.expanded_angles
+        or any(
+            not np.isfinite(v) or abs(v) > 35.0
+            for v in args.expanded_angles
+        )
+        or not args.expanded_tip_y_mm
+        or any(
+            not np.isfinite(v) or abs(v) > 12.0
+            for v in args.expanded_tip_y_mm
+        )
+    ):
+        parser.error(
+            "Invalid expanded Safety power/angle/tip grid."
+        )
 
     return args
 

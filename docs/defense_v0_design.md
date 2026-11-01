@@ -625,3 +625,46 @@ If it finds no paired states, report how many post-Safety
 DIRECT-hard states were found and how many failed the
 full Attack filter. Only then consider relaxing that filter
 or broadening the physical search grid.
+
+
+## Stage 6e: no Safety continuation in post-Safety stress test
+
+The first 5-source-board stress test (seed 90000) produced 2
+unique post-Safety states with 0 successful opponent DIRECT shots.
+Both states passed the max-two successful ALL-ATTACK filter,
+but **neither had an eligible subsequent Safety proposal** from
+the fixed grid (powers 0.65/1.10, offsets -12/0/+12 degrees,
+tip Y=0/+5 mm). Therefore 0 paired teacher comparisons were
+possible. This is a candidate coverage issue, not a finding
+about the relative strategy quality.
+
+The stress-test script now prints full per-grid physical rejection
+counts for every hard poststate: attempted, invalid physics,
+no/wrong first contact, scratch, pot, other ineligible,
+and eligible. They distinguish no geometric/physical contact
+from foul/shot outcome filters.
+
+An opt-in `--retry-expanded-safety` retries ONLY hard states
+whose baseline Safety candidate list was empty. The wider
+grid uses powers 0.55/0.8/1.3/1.8, angle offsets
+-20/-10/0/+10/+20 degrees, tip Y -5/0/+5 mm
+(max 120 shots with two balls). This does NOT change
+the training dataset generator, the learned Micro, Macro
+local rewards or standard MCTS. It only measures whether
+a larger grid recovers physically valid Safety continuations.
+
+Even an expanded grid with no valid candidates does not
+establish that no safe shot exists: it only tests the
+enumerated physical shot parameters and simplified first
+contact/no-pot/no-scratch/turn-change conditions.
+
+Small opt-in probe:
+
+```bash
+python -m scripts.eval_post_safety_hard_states \
+  --base-checkpoint goal_conditioned_micro_mixed_curriculum_100k.pt \
+  --residual-checkpoint position_power_residual_mlp_2000.pt \
+  --source-boards 5 --source-seed 90000 \
+  --max-successful-direct 0 --max-successful-attacks 2 \
+  --max-compared 2 --retry-expanded-safety --device cuda
+```

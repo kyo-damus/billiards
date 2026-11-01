@@ -6,6 +6,8 @@ import pytest
 from scripts.eval_post_safety_hard_states import (
     board_fingerprint,
     select_hard_states_from_safety,
+    generate_safety_with_diagnostics,
+    format_safety_stats,
 )
 from src.common.types import GameState, ShotAction
 
@@ -107,3 +109,85 @@ def test_bad_threshold_or_bin_size_is_rejected():
         )
     with pytest.raises(ValueError, match="bin_size"):
         board_fingerprint(make_state(), bin_size=0.0)
+
+
+
+class FakeSafetyGrid:
+    def __init__(self, proposals, attempted, eligible):
+        self.proposals = proposals
+        self.last_stats = {}
+        self.calls = 0
+        self.attempted = attempted
+        self.eligible = eligible
+
+    def generate(self, state):
+        self.calls += 1
+        self.last_stats = {
+            "attempted": self.attempted,
+            "invalid_physics": 0,
+            "wrong_or_no_first_contact": (
+                self.attempted - self.eligible
+            ),
+            "scratch": 0,
+            "pocketed": 0,
+            "other_ineligible": 0,
+            "eligible": self.eligible,
+        }
+        return list(self.proposals)
+
+
+class FakeAdapter:
+    def from_proposals(self, proposals):
+        return ["candidate:" + value for value in proposals]
+
+
+def test_safety_grid_retries_only_when_baseline_is_empty():
+    root = make_state()
+    first = FakeSafetyGrid(["normal"], 24, 1)
+    expanded = FakeSafetyGrid(["expanded"], 120, 3)
+    candidates, narrow_stats, retry_stats = (
+        generate_safety_with_diagnostics(
+            root, first, FakeAdapter(), expanded,
+        )
+    )
+
+    assert candidates == ["candidate:normal"]
+    assert narrow_stats["attempted"] == 24
+    assert narrow_stats["eligible"] == 1
+    assert retry_stats is None
+    assert first.calls == 1
+    assert expanded.calls == 0
+
+
+def test_safety_grid_reports_empty_and_recovers_with_broad_grid():
+    root = make_state()
+    first = FakeSafetyGrid([], 24, 0)
+    expanded = FakeSafetyGrid(["expanded"], 120, 1)
+    candidates, narrow_stats, retry_stats = (
+        generate_safety_with_diagnostics(
+            root, first, FakeAdapter(), expanded,
+        )
+    )
+
+    assert candidates == ["candidate:expanded"]
+    assert narrow_stats["attempted"] == 24
+    assert retry_stats["attempted"] == 120
+    assert retry_stats["eligible"] == 1
+    assert "wrong_or_no_first_contact=24" in (
+        format_safety_stats(narrow_stats)
+    )
+    assert first.calls == expanded.calls == 1
+    # The fallback must not overwrite the baseline diagnostic.
+    assert narrow_stats["eligible"] == 0
+
+
+def test_safety_grid_can_report_both_grids_empty():
+    first = FakeSafetyGrid([], 24, 0)
+    expanded = FakeSafetyGrid([], 120, 0)
+
+    candidates, a, b = generate_safety_with_diagnostics(
+        make_state(), first, FakeAdapter(), expanded
+    )
+    assert candidates == []
+    assert a["eligible"] == 0
+    assert b["eligible"] == 0
