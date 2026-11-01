@@ -14,6 +14,10 @@ from src.macro.position_candidate_generator import (
     PositionAttackCandidateGenerator,
 )
 
+from src.macro.safety_candidate_generator import (
+    SafetyCandidateGenerator,
+)
+
 
 class MacroCandidateGenerator:
     """
@@ -80,6 +84,8 @@ class ExpandedMacroCandidateGenerator:
         self,
         direct_generator=None,
         position_generator=None,
+        safety_generator=None,
+        include_safety=False,
     ):
         self.direct_generator = (
             direct_generator
@@ -91,6 +97,16 @@ class ExpandedMacroCandidateGenerator:
             position_generator
             if position_generator is not None
             else PositionAttackCandidateGenerator()
+        )
+
+        self.include_safety = bool(
+            include_safety
+        )
+
+        self.safety_generator = (
+            safety_generator
+            if safety_generator is not None
+            else SafetyCandidateGenerator()
         )
 
     def generate(
@@ -110,5 +126,12 @@ class ExpandedMacroCandidateGenerator:
                 state
             )
         )
+
+        if self.include_safety:
+            candidates.extend(
+                self.safety_generator.generate(
+                    state
+                )
+            )
 
         return candidates

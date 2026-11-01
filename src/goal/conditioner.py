@@ -252,13 +252,27 @@ def encode_micro_goal(
     # --------------------------------
 
     # target ball one-hot
-    features[
-        17 + goal.target_ball
-    ] = 1.0
+    # SAFETYなど対象球を持たないGoalでは0のまま。
+    if goal.target_ball is not None:
+        if goal.target_ball not in (0, 1):
+            raise ValueError(
+                "target_ball must be 0 or 1"
+            )
+
+        features[
+            17 + goal.target_ball
+        ] = 1.0
 
     # target pocket one-hot
-    features[
-        19 + goal.target_pocket
-    ] = 1.0
+    # SAFETYなど対象ポケットを持たないGoalでは0のまま。
+    if goal.target_pocket is not None:
+        if goal.target_pocket not in range(6):
+            raise ValueError(
+                "target_pocket must be 0..5"
+            )
+
+        features[
+            19 + goal.target_pocket
+        ] = 1.0
 
     return features

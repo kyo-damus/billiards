@@ -116,3 +116,49 @@ def test_goal_identity_is_explicitly_encoded():
     assert np.sum(
         encoded[19:25]
     ) == 1.0
+
+
+def test_safety_goal_without_attack_target_is_encoded():
+
+    positions = np.array(
+        [
+            [0.8, 1.118],
+            [0.4, 1.118],
+            [0.8, 0.4],
+        ],
+        dtype=np.float32,
+    )
+
+    pockets = np.array(
+        [-1, -1, -1],
+        dtype=np.int32,
+    )
+
+    observation = build_physical_observation(
+        positions,
+        pockets,
+    )
+
+    goal = TacticalGoal(
+        goal_type=TacticalGoalType.SAFETY,
+        cue_target_position=(
+            0.20,
+            1.10,
+        ),
+        cue_target_radius=0.12,
+    )
+
+    encoded = encode_micro_goal(
+        observation,
+        goal,
+    )
+
+    assert encoded.shape == (25,)
+    assert encoded[2] == 1.0
+    assert encoded[13] == 1.0
+    assert np.sum(
+        encoded[17:19]
+    ) == 0.0
+    assert np.sum(
+        encoded[19:25]
+    ) == 0.0

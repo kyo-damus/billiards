@@ -34,6 +34,15 @@ class TacticalGoalEvaluator:
                 state,
             )
 
+        if (
+            goal.goal_type
+            == TacticalGoalType.SAFETY
+        ):
+            return self._safety_achieved(
+                goal,
+                state,
+            )
+
         raise NotImplementedError(
             f"Goal evaluation is not implemented "
             f"for {goal.goal_type}"
@@ -98,6 +107,54 @@ class TacticalGoalEvaluator:
 
         # cue ballがscratch
         if state.is_pocketed(0):
+            return False
+
+        cue_position = np.asarray(
+            state.ball_positions[0],
+            dtype=np.float32,
+        )
+
+        target_position = np.asarray(
+            goal.cue_target_position,
+            dtype=np.float32,
+        )
+
+        distance = float(
+            np.linalg.norm(
+                cue_position
+                - target_position
+            )
+        )
+
+        return bool(
+            distance
+            <= goal.cue_target_radius
+        )
+
+    def _safety_achieved(
+        self,
+        goal: TacticalGoal,
+        state: GameState,
+    ) -> bool:
+        """
+        SAFETY v0の達成条件:
+
+        - cue ballがscratchしていない
+        - 指定した安全領域内へcue ballが停止
+
+        相手の次ショット難易度はまだ評価しない。
+        """
+
+        if state.is_pocketed(0):
+            return False
+
+        if (
+            goal.cue_target_position
+            is None
+            or goal.cue_target_radius
+            is None
+            or goal.cue_target_radius <= 0.0
+        ):
             return False
 
         cue_position = np.asarray(

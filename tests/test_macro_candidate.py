@@ -2,6 +2,7 @@ import numpy as np
 
 from src.common.types import (
     GameState,
+    Strategy,
 )
 
 from src.goal.types import (
@@ -15,6 +16,10 @@ from src.macro.candidate import (
 from src.macro.candidate_generator import (
     MacroCandidateGenerator,
     ExpandedMacroCandidateGenerator,
+)
+
+from src.macro.safety_candidate_generator import (
+    SafetyCandidateGenerator,
 )
 
 
@@ -115,5 +120,69 @@ def test_expanded_generator_has_multiple_goal_types():
 
     assert (
         TacticalGoalType.POSITION_ATTACK
+        in goal_types
+    )
+
+
+def test_safety_candidate_generation():
+
+    generator = (
+        SafetyCandidateGenerator()
+    )
+
+    candidates = generator.generate(
+        make_state()
+    )
+
+    assert len(candidates) > 0
+
+    assert all(
+        candidate.action.strategy
+        == Strategy.DEFENSE
+        for candidate in candidates
+    )
+
+    assert all(
+        candidate.action.target_ball
+        is None
+        and candidate.action.target_pocket
+        is None
+        for candidate in candidates
+    )
+
+    assert all(
+        candidate.goal.goal_type
+        == TacticalGoalType.SAFETY
+        for candidate in candidates
+    )
+
+    assert all(
+        candidate.goal.cue_target_position
+        is not None
+        and candidate.goal.cue_target_radius
+        is not None
+        for candidate in candidates
+    )
+
+
+def test_expanded_generator_can_include_safety():
+
+    generator = (
+        ExpandedMacroCandidateGenerator(
+            include_safety=True,
+        )
+    )
+
+    candidates = generator.generate(
+        make_state()
+    )
+
+    goal_types = {
+        candidate.goal.goal_type
+        for candidate in candidates
+    }
+
+    assert (
+        TacticalGoalType.SAFETY
         in goal_types
     )
