@@ -25,6 +25,9 @@ from src.macro.candidate import (
 
 from src.macro.candidate_encoding import (
     encode_macro_candidate,
+    encode_macro_candidate_v2,
+    MACRO_CANDIDATE_DIM,
+    MACRO_CANDIDATE_V2_DIM,
 )
 
 MacroChoice = MacroAction | MacroCandidate
@@ -93,9 +96,40 @@ class MCTS:
         candidate_value_network=None,
         candidate_q_prior_visits=0.0,
         turn_aware=False,
+        candidate_encoding_version=1,
+        uniform_candidate_priors=False,
     ):
         self.policy_network = policy_network
         self.value_network = value_network
+
+        # Explicit opt-in to physical shot-aware 31D features.
+        # Existing 25D Attack checkpoints retain their semantics.
+        if candidate_encoding_version not in (1, 2):
+            raise ValueError(
+                "candidate_encoding_version must be 1 or 2."
+            )
+        self.candidate_encoding_version = int(
+            candidate_encoding_version
+        )
+        self.uniform_candidate_priors = bool(
+            uniform_candidate_priors
+        )
+        self.candidate_encoder = (
+            encode_macro_candidate_v2
+            if self.candidate_encoding_version == 2
+            else encode_macro_candidate
+        )
+        if self.candidate_encoding_version == 2:
+            if not candidate_mode or not turn_aware:
+                raise ValueError(
+                    "31D mixed MCTS needs candidate_mode=True "
+                    "and turn_aware=True."
+                )
+            if not self.uniform_candidate_priors:
+                raise ValueError(
+                    "31D mixed MCTS has no trained Candidate "
+                    "Policy v2; set uniform_candidate_priors=True."
+                )
         self.candidate_value_network = (
             candidate_value_network
         )
@@ -109,6 +143,26 @@ class MCTS:
         self.candidate_q_prior_visits = float(
             candidate_q_prior_visits
         )
+
+        if self.candidate_value_network is not None:
+            actual_dim = getattr(
+                self.candidate_value_network,
+                "candidate_dim",
+                None,
+            )
+            expected_dim = (
+                MACRO_CANDIDATE_V2_DIM
+                if self.candidate_encoding_version == 2
+                else MACRO_CANDIDATE_DIM
+            )
+            if (
+                actual_dim is not None
+                and int(actual_dim) != expected_dim
+            ):
+                raise ValueError(
+                    "Candidate Q feature dimension mismatch: "
+                    f"expected {expected_dim}, got {actual_dim}."
+                )
 
         # False: legacy Attack v0 (keeps existing Q semantics).
         # True: player-to-move perspective for multi-player play.
@@ -129,9 +183,18 @@ class MCTS:
         self.gamma = gamma
 
         if device is None:
-            device = next(
-                policy_network.parameters()
-            ).device
+            if policy_network is not None:
+                device = next(
+                    policy_network.parameters()
+                ).device
+            elif self.candidate_value_network is not None:
+                device = next(
+                    self.candidate_value_network.parameters()
+                ).device
+            else:
+                raise ValueError(
+                    "device required without a Policy or Q network."
+                )
 
         self.device = torch.device(device)
 
@@ -649,6 +712,20 @@ class MCTS:
         state,
         candidates,
     ):
+        if self.uniform_candidate_priors:
+            if not candidates:
+                return np.array([], dtype=np.float32)
+            return np.full(
+                len(candidates),
+                1.0 / len(candidates),
+                dtype=np.float32,
+            )
+        if self.policy_network is None:
+            raise ValueError(
+                "Candidate Policy is missing; enable "
+                "uniform_candidate_priors explicitly."
+            )
+
         if not all(
             isinstance(
                 candidate,
@@ -680,7 +757,7 @@ class MCTS:
 
         candidate_array = np.stack(
             [
-                encode_macro_candidate(
+                self.candidate_encoder(
                     candidate
                 )
                 for candidate in candidates
@@ -762,7 +839,7 @@ class MCTS:
 
         candidate_array = np.stack(
             [
-                encode_macro_candidate(
+                self.candidate_encoder(
                     candidate
                 )
                 for candidate in candidates

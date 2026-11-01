@@ -419,3 +419,46 @@ python -m scripts.eval_mixed_candidate_value \
 
 The old Attack 25-D dataset and checkpoint remain untouched.
 Candidate Policy v2 and mixed MCTS still have not been integrated.
+
+
+## Mixed turn-aware MCTS integration smoke (stage 6a)
+
+Held-out mixed Candidate Q v2 (20 train boards, 8 held-out boards)
+reported: overall MSE 1.0842, top1 0.500 and 0/8 Safety
+choices; the teacher oracle also preferred Attack for all 8 boards.
+Mean teacher Q was Attack +0.607 and Safety -1.160. A well-
+executed successful Attack should generally dominate a Safety shot
+under this teacher, so 0/8 Safety does not prove a software bug
+or that a Defense policy cannot exist. Importantly, there is
+not yet evidence that the new Q selects Defense in difficult
+Attack states. Validation 100% was based on very few boards.
+
+`MCTS` now offers an **explicit opt-in** for mixed 31-D candidates:
+`candidate_encoding_version=2`, `uniform_candidate_priors=True`,
+`candidate_mode=True`, `turn_aware=True`.
+The existing v1 defaults, networks and code path remain unchanged.
+
+- Root: existing DIRECT+POSITION Attack plus a small set of
+  outcome-guided, physically executable SAFETY candidates.
+- Tree continuation: DIRECT-only on subsequent states (the
+  teacher's cheap next-action baseline).
+- Policy prior: uniform over available candidates; no untrained
+  Candidate Policy v2 is invented or loaded.
+- Value: learned **31D** mixed Candidate Q for unvisited edge
+  predictions, combined with empirical returns as MCTS visits
+  accumulate.
+- Leaf state value: zero baseline, **not** an independently trained
+  long-horizon state V.
+- Opponent continuation: negated across real player changes
+  by `turn_aware=True`.
+- At root, `root_min_visits_before_puct=1` can ensure each
+  candidate receives at least one physical transition **if**
+  simulations exceed the number of root candidates.
+- The smoke reports root candidate counts, visits allocated to
+  each strategy, selected strategy, predicted Q, executed reward
+  and next player. It is a wiring test, not a win-rate claim.
+
+`scripts/smoke_mixed_candidate_mcts.py` uses the user's trained
+`macro_candidate_value_mixed_v2.pt` checkpoint and leaves the
+Attack-only run code untouched. Candidate Policy v2 training and
+fair paired board-level strategy comparisons remain separate work.
