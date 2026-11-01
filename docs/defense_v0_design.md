@@ -101,3 +101,40 @@ over a complete match.
 
 The rule of thumb is to refactor at stable interface boundaries, not to
 postpone all cleanup nor to reorganize the entire codebase mid-feature.
+
+
+## Opponent DIRECT threat diagnostic (stage 2)
+
+`OpponentDirectThreatEvaluator` accepts an opponent-to-move,
+nonterminal post-shot `GameState`. It generates the opponent's
+feasible DIRECT candidates and executes each candidate through the
+existing deterministic Micro + FastFiz + game rules + local evaluation
+transition.
+
+It separately reports:
+
+- `geometric_candidate_count`: geometry-filtered DIRECT candidates;
+- `successful_pot_count`: actually potted target, without scratch;
+- `best_success_reward`: best local score among successful outcomes;
+- `best_candidate`: corresponding candidate, if any.
+
+Important limitations:
+
+- These are deterministic outcomes under the current Micro policy,
+  **not probabilities** of winning or of the opponent succeeding.
+- No opponent model, strategic probability estimate, or other-player
+  training is introduced.
+- The diagnostic does not modify MCTS reward or candidate-Q targets.
+- The implementation assumes a nonterminal state; scratch is terminal
+  under the current `SimplifiedGameRules`.
+- A state where the defending player retains the turn is not an
+  opponent-turn state and is rejected explicitly.
+- `scripts/eval_opponent_direct_threat.py` finds a nonterminal
+  turn-changing DIRECT shot on each sampled board and examines the
+  resulting opponent's DIRECT opportunities. This is a diagnostic
+  board selection, **not an unbiased sample of play under a trained
+  Macro strategy**.
+
+The next Defense step is to define an executable physical shot
+interface, after comparing geometric versus executable opponent shot
+counts in this diagnostic.
