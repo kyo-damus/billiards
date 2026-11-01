@@ -364,3 +364,58 @@ opponent-response searches. The attack transition API was unchanged.
 This stage builds the learning-data pipeline only. Mixed Q inference
 in a new MCTS path, Candidate Policy retraining, and an unbiased
 paired multi-board evaluation remain future work.
+
+
+## Mixed Candidate Q held-out evaluation (stage 5b)
+
+The 3-board/70-sample smoke demonstrated the generator contract:
+58 ATTACK and 12 SAFETY candidates, physical Safety proposals
+39/72 eligible, 31-dimensional inputs and turn-aware teacher labels.
+It is **not** enough data to claim learned generalization.
+
+The mixed data generator now stores `seed_start` and
+`requested_states` for reproducible, disjoint board ranges.
+`scripts/eval_mixed_candidate_value.py` evaluates a trained
+31-D checkpoint on a **separately generated dataset**:
+
+- overall MSE / MAE / top1 against the two-step teacher;
+- per-strategy target mean, prediction mean, MSE and counts;
+- mean two-step ranking regret within each board;
+- number of boards where predicted top choice is SAFETY;
+- number of boards where SAFETY ties/beats the best teacher
+  candidate (among boards that have SAFETY proposals).
+
+It explicitly rejects the training dataset and overlapping
+training/evaluation seed ranges when both datasets have the new
+metadata. If metadata is unavailable, it prints that disjointness
+could not be verified. These are **held-out teacher agreement
+metrics**, not real-world Defense quality or game win-rate.
+
+Suggested separate experiments (from repository root):
+
+```bash
+python -m scripts.build_mixed_candidate_value_dataset \
+  --base-checkpoint goal_conditioned_micro_mixed_curriculum_100k.pt \
+  --residual-checkpoint position_power_residual_mlp_2000.pt \
+  --states 20 --seed 93000 --device cuda \
+  --output macro_candidate_value_mixed_v2_train.npz
+
+python -m scripts.train_macro_candidate_value \
+  --dataset macro_candidate_value_mixed_v2_train.npz \
+  --checkpoint macro_candidate_value_mixed_v2.pt \
+  --epochs 80 --batch-size 128 --device cuda
+
+python -m scripts.build_mixed_candidate_value_dataset \
+  --base-checkpoint goal_conditioned_micro_mixed_curriculum_100k.pt \
+  --residual-checkpoint position_power_residual_mlp_2000.pt \
+  --states 8 --seed 94000 --device cuda \
+  --output macro_candidate_value_mixed_v2_heldout.npz
+
+python -m scripts.eval_mixed_candidate_value \
+  --checkpoint macro_candidate_value_mixed_v2.pt \
+  --dataset macro_candidate_value_mixed_v2_heldout.npz \
+  --device cuda
+```
+
+The old Attack 25-D dataset and checkpoint remain untouched.
+Candidate Policy v2 and mixed MCTS still have not been integrated.

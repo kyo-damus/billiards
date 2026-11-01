@@ -153,6 +153,8 @@ def test_mixed_dataset_has_31_dim_and_both_strategies(
         )
         assert int(data["candidate_dim"]) == 31
         assert int(data["candidate_encoding_version"]) == 2
+        assert int(data["seed_start"]) == 0
+        assert int(data["requested_states"]) == 2
         assert bool(data["turn_aware"])
         assert np.isclose(float(data["residual_scale"]), 0.75)
         assert str(data["next_action_set"]) == "DIRECT_ONLY"

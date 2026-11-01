@@ -230,6 +230,8 @@ def build_dataset(args):
         turn_aware=np.asarray(True, dtype=np.bool_),
         next_action_set=np.asarray("DIRECT_ONLY"),
         safety_selection=np.asarray("OUTCOME_GUIDED"),
+        seed_start=np.asarray(args.seed, dtype=np.int64),
+        requested_states=np.asarray(args.states, dtype=np.int32),
     )
 
     q = np.asarray(q_targets, dtype=np.float32)
