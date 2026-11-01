@@ -239,3 +239,41 @@ Known remaining limitations:
   It is possible to have no eligible Safety shot in the grid.
 - Learned Defense Micro, candidate-dependent Policy/Q and mixed
   Attack/Defense MCTS are still pending.
+
+
+## MacroCandidate representation for executable Safety proposals (stage 4b)
+
+The physical safety search is useful, but its proposal cannot be fed to
+Attack-v0 Candidate Policy/Q without a new candidate encoding. Both
+the candidate goal AND the physical shot matter.
+
+- `PhysicalShotSpec(angle,power,tip_x_mm,tip_y_mm)` is immutable and
+  hashable. `MacroCandidate.physical_shot` is optional and defaults to
+  None for all existing Attack candidates.
+- `OutcomeGuidedSafetyMacroCandidateGenerator` converts selected,
+  physically executed Safety proposals into
+  `MacroCandidate(action=DEFENSE,target_ball=...,target_pocket=None,
+  goal=SAFETY,physical_shot=...)`. It uses the model-predicted
+  cue resting location as a provisional goal.
+- Existing `encode_macro_candidate` remains **25-dimensional** and
+  now explicitly rejects DEFENSE candidates to avoid silently dropping
+  shot parameters into Attack-only pretrained Policy/Q models.
+- `encode_macro_candidate_v2` is **31-dimensional**, using 25
+  goal-level features plus six physical-shot features:
+  present, power/3, sin(angle), cos(angle), tip_x/12, tip_y/12.
+  Attack without an explicit physical shot has six appended zeros.
+- The changed dimensionality means that **new mixed-strategy
+  datasets and Q/Policy checkpoints must be trained** before combining
+  Attack and Defense in the learned MCTS. Old weights/checkpoints
+  remain valid for Attack-only v0.
+- The current adapter is **representation-only**; it does not connect
+  executable SAFETY to `PhysicsMacroTransitionModel` or MCTS and
+  does not imply learned spin control.
+- The legacy anchor-based `SafetyCandidateGenerator` is still an
+  unexecutable placeholder and must not be used as a substitute for
+  model-based physical shot proposals in a final mixed-strategy run.
+
+The next implementation boundary is to execute `physical_shot`
+inside a dedicated Defense transition branch, define a compatible
+local reward, and build/train mixed-strategy Candidate Q before
+enabling MCTS to choose Defense actions.

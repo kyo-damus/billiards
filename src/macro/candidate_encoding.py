@@ -57,12 +57,25 @@ def encode_macro_candidate(
     candidate: MacroCandidate,
 ) -> np.ndarray:
     """
-    MacroCandidateをPolicy入力用の
-    固定長ベクトルへ変換する。
+    Legacy Attack-v0 encoder (25 dimensions).
 
-    候補数は可変だが、
-    各候補の表現次元は固定。
+    Explicit Defense shots MUST use encode_macro_candidate_v2,
+    because their heading/power/tip would be lost here.
     """
+    if candidate.action.strategy == Strategy.DEFENSE:
+        raise ValueError(
+            "Defense candidates require "
+            "encode_macro_candidate_v2. The learned "
+            "Attack Q/Policy checkpoint cannot rank them."
+        )
+
+    return _encode_base_candidate(candidate)
+
+
+def _encode_base_candidate(
+    candidate: MacroCandidate,
+) -> np.ndarray:
+    """Common 25-dimension goal part, shared by v1 and v2."""
 
     vector = np.zeros(
         MACRO_CANDIDATE_DIM,
@@ -214,3 +227,87 @@ def encode_macro_candidate(
 
     return vector
     
+
+# 25 common goal features + 6 explicit-shot features.
+# Explicit shot features:
+#   present, power/3, sin(angle), cos(angle), tip_x/12, tip_y/12
+MACRO_CANDIDATE_V2_DIM = MACRO_CANDIDATE_DIM + 6
+
+
+def encode_macro_candidate_v2(
+    candidate: MacroCandidate,
+) -> np.ndarray:
+    """
+    Attack and physically executable Defense candidate representation.
+
+    Attack has physical_shot=None -> six zero features.
+    Defense needs a PhysicalShotSpec so the model can distinguish
+    physically different shots, even for identical TacticalGoals.
+
+    Note that a 31-dimensional encoding requires NEW model
+    training/checkpoints; the existing 25-dimensional models
+    are intentionally NOT used with this encoder.
+    """
+    action = candidate.action
+    shot = candidate.physical_shot
+
+    if (
+        action.strategy == Strategy.DEFENSE
+        and shot is None
+    ):
+        raise ValueError(
+            "Executable Defense candidate needs physical_shot."
+        )
+
+    vector = np.zeros(
+        MACRO_CANDIDATE_V2_DIM,
+        dtype=np.float32,
+    )
+    vector[:MACRO_CANDIDATE_DIM] = (
+        _encode_base_candidate(candidate)
+    )
+
+    if shot is None:
+        return vector
+
+    values = (
+        shot.angle,
+        shot.power,
+        shot.tip_x_mm,
+        shot.tip_y_mm,
+    )
+
+    if not all(
+        math.isfinite(value)
+        for value in values
+    ):
+        raise ValueError(
+            "Physical shot parameters must be finite."
+        )
+
+    if (
+        shot.power < 0.5
+        or shot.power > 3.0
+        or (
+            shot.tip_x_mm ** 2
+            + shot.tip_y_mm ** 2
+        ) > 144.0
+    ):
+        raise ValueError(
+            "Physical shot power/tip is outside supported range."
+        )
+
+    radians = math.radians(
+        shot.angle
+    )
+
+    vector[MACRO_CANDIDATE_DIM:] = (
+        1.0,
+        shot.power / 3.0,
+        math.sin(radians),
+        math.cos(radians),
+        shot.tip_x_mm / 12.0,
+        shot.tip_y_mm / 12.0,
+    )
+
+    return vector
