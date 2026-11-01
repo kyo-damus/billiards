@@ -28,6 +28,9 @@ class SimulatorStepResult:
     legacy_reward: float
     legacy_done: bool
 
+    # -1=no cue/object collision, 0/1=first contacted object ball.
+    first_contact_ball: int = -1
+
 
 class FastFizSimulator:
     """
@@ -114,12 +117,28 @@ class FastFizSimulator:
         target_ball: int,
         power: float,
         angle: float,
+        tip_x_mm: float = 0.0,
+        tip_y_mm: float = 0.0,
     ) -> SimulatorStepResult:
+
+        offsets = np.asarray(
+            [tip_x_mm, tip_y_mm],
+            dtype=np.float64,
+        )
+        if (
+            not np.all(np.isfinite(offsets))
+            or float(np.dot(offsets, offsets)) > 144.0
+        ):
+            raise ValueError(
+                "Tip offset must be within a 12 mm radius."
+            )
 
         result = self._sim.step(
             int(target_ball),
             float(power),
             float(angle),
+            float(tip_x_mm),
+            float(tip_y_mm),
         )
 
         if len(result) != 8:
@@ -131,4 +150,7 @@ class FastFizSimulator:
             state=np.asarray(result[:6], dtype=np.float32),
             legacy_reward=float(result[6]),
             legacy_done=bool(result[7]),
+            first_contact_ball=int(
+                self._sim.get_last_first_contact_ball()
+            ),
         )

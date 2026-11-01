@@ -28,6 +28,8 @@ def main(args):
     scratched = 0
     object_moved = 0
     new_pots = 0
+    first_contacts = 0
+    intended_first_contacts = 0
     examples = []
 
     for offset in range(args.boards):
@@ -45,6 +47,8 @@ def main(args):
                         target_ball=ball,
                         power=power,
                         angle_offset_deg=angle_offset,
+                        tip_x_mm=args.tip_x_mm,
+                        tip_y_mm=args.tip_y_mm,
                     )
 
                     try:
@@ -77,6 +81,12 @@ def main(args):
                     new_pots += (
                         result.newly_pocketed_object_count
                     )
+                    first_contacts += int(
+                        result.first_contact_ball >= 0
+                    )
+                    intended_first_contacts += int(
+                        result.first_contact_verified
+                    )
 
                     if len(examples) < 3:
                         examples.append(
@@ -85,7 +95,8 @@ def main(args):
                             f"angle={shot.angle:.1f} "
                             f"turn_changed={result.turn_changed} "
                             f"scratch={result.scratched} "
-                            f"object_moved={result.object_ball_moved}"
+                            f"object_moved={result.object_ball_moved} "
+                            f"first_contact={result.first_contact_ball}"
                         )
 
     print("=== Defense physical shot probe ===")
@@ -97,9 +108,11 @@ def main(args):
     print(f"scratches: {scratched}")
     print(f"shots moving an object ball: {object_moved}")
     print(f"new object ball pockets: {new_pots}")
+    print(f"shots contacting any object ball first: {first_contacts}")
+    print(f"shots contacting intended object first: {intended_first_contacts}")
     print(
-        "First contact is not verified; object movement "
-        "does not prove a legal shot."
+        "First cue/object collision is observed. "
+        "Full foul legality is not checked."
     )
 
     for item in examples:
@@ -130,6 +143,16 @@ def parse_args():
         nargs="+",
         default=[-12.0, 0.0, 12.0],
     )
+    parser.add_argument(
+        "--tip-x-mm",
+        type=float,
+        default=0.0,
+    )
+    parser.add_argument(
+        "--tip-y-mm",
+        type=float,
+        default=0.0,
+    )
     args = parser.parse_args()
 
     if args.boards < 1:
@@ -146,6 +169,13 @@ def parse_args():
         for value in args.offsets
     ):
         parser.error("--offsets must be in [-35, 35]")
+    if (
+        not np.isfinite(args.tip_x_mm)
+        or not np.isfinite(args.tip_y_mm)
+        or args.tip_x_mm ** 2
+        + args.tip_y_mm ** 2 > 144.0
+    ):
+        parser.error("tip offset radius must be <= 12 mm")
     return args
 
 

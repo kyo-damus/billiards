@@ -156,11 +156,42 @@ object ball, optionally with a bounded offset, and a physical power.
 - This is explicitly separate from ATTACK Micro SAC and from the
   currently unexecutable SAFETY MacroCandidates.
 - Scratches and newly pocketed object balls are observable.
-  Observed object-ball displacement is **not verified first contact**.
-  Full legality needs C++ first-contact event exposure and a foul rule.
+  First-contact event exposure is added in the next stage, but full
+  legality still requires foul-rule handling.
 - No learned Defense Micro and no MCTS integration is claimed.
 - A small deterministic physical probe and scoped tests are included.
 
 Only after this executor is verified should SAFETY candidates be
 augmented with feasible *shot proposals* and compared by their
 opponent DIRECT threat on the resulting state.
+
+
+## Optional tip offsets and first contact (stage 3b)
+
+The FastFiz C++ wrapper exposes previously fixed cue-tip contact
+coordinates via optional `tip_x_mm`/`tip_y_mm` values.
+They map directly to FastFiz `ShotParams(a,b,theta,phi,v)`
+where `a,b` are **millimeters**, `theta=10 deg` is still fixed,
+`phi` is the absolute angle and `v` is the cue speed.
+A conservative tip-offset radius of at most 12 mm is enforced,
+followed by FastFiz's own physical-possibility check.
+
+`ShotAction.tip_x_mm`/`tip_y_mm` are distinct from the older
+unused `spin_x`/`spin_y` placeholders. **No existing SAC action
+dimension changes**. ATTACK still supplies the center hit at (0,0),
+so prior checkpoints and training datasets retain their contract.
+
+C++ now records the *first cue/object BALL_COLLISION event* per shot:
+
+- `-1`: cue did not hit either object ball;
+- `0`: object ball 0 first;
+- `1`: object ball 1 first.
+
+`DefenseShotResult.first_contact_verified` checks whether that
+first ball matches the intended defensive target, without claiming
+full official foul legality. Movement alone is no longer used as a
+first-contact proxy.
+
+**The C++ extension must be rebuilt after updating this wrapper.**
+This stage does not yet connect DEFENSE to MacroCandidate or MCTS,
+and does not claim spin-aware Micro policy learning.

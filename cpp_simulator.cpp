@@ -11,6 +11,7 @@ using namespace Pool;
 class BilliardSimulator {
 private:
     TableState ts; // FastFizの盤面クラス
+    int last_first_contact_ball = -1;
 
     // 内部用のヘルパー関数：FastFizの座標(Point)から std::vector を作る
     std::vector<float> _get_state_vector() {
@@ -58,6 +59,7 @@ public:
     BilliardSimulator() { reset(); }
 
     void reset() {
+        last_first_contact_ball = -1;
         ts = TableState(); // 盤面をクリア
         
         // 【修正点】一度変数として球を作ってから、セットする
@@ -71,6 +73,7 @@ public:
     }
 
     void set_state(std::vector<float> state) {
+        last_first_contact_ball = -1;
         ts = TableState();
         
         // 【修正点】一度変数として球を作ってから、セットする
@@ -99,6 +102,7 @@ public:
             );
         }
 
+        last_first_contact_ball = -1;
         ts = TableState();
 
         Ball cue_ball(
@@ -176,12 +180,17 @@ public:
         }
     }
 
-    std::vector<float> step(int target_ball, float power, float angle) {
+    int get_last_first_contact_ball() const { return last_first_contact_ball; }
+
+    std::vector<float> step(int target_ball, float power, float angle, float tip_x_mm = 0.0f, float tip_y_mm = 0.0f) {
+        last_first_contact_ball = -1;
+        if (target_ball != 0 && target_ball != 1) throw std::invalid_argument("target_ball must be 0 or 1");
+        if (!std::isfinite(tip_x_mm) || !std::isfinite(tip_y_mm) || tip_x_mm * tip_x_mm + tip_y_mm * tip_y_mm > 144.0f) throw std::invalid_argument("tip must be within 12 mm radius");
         float reward = 0.0f;
         float done = 1.0f; 
 
         // 1. Pythonからの入力(angle, power)をFastFizのShotParamsに変換
-        ShotParams sp(0.0, 0.0, 10.0, angle, power);
+        ShotParams sp(tip_x_mm, tip_y_mm, 10.0, angle, power);
 
         // 2. ショットが物理的に可能かチェック
         if (ts.isPhysicallyPossible(sp) != TableState::OK_PRECONDITION) {
@@ -199,6 +208,13 @@ public:
         Ball::Type target_id = (target_ball == 0) ? Ball::ONE : Ball::TWO;
 
         for (Event* e : events) {
+            if (last_first_contact_ball == -1 && e->getType() == Event::BALL_COLLISION) {
+                Ball::Type b1 = e->getBall1();
+                Ball::Type b2 = e->getBall2();
+                Ball::Type hit = (b1 == Ball::CUE) ? b2 : ((b2 == Ball::CUE) ? b1 : Ball::UNKNOWN_ID);
+                if (hit == Ball::ONE) last_first_contact_ball = 0;
+                if (hit == Ball::TWO) last_first_contact_ball = 1;
+            }
             if (e->getType() == Event::POCKETED) {
                 PocketedEvent* pe = static_cast<PocketedEvent*>(e);
                 if (pe->getBall1() == target_id) {
@@ -226,5 +242,8 @@ PYBIND11_MODULE(billiard_env_cpp, m) {
         .def("set_full_state", &BilliardSimulator::set_full_state)
         .def("get_state", &BilliardSimulator::get_state)
         .def("get_pocket_index", &BilliardSimulator::get_pocket_index)
-        .def("step", &BilliardSimulator::step);
+        .def("get_last_first_contact_ball", &BilliardSimulator::get_last_first_contact_ball)
+        .def("step", &BilliardSimulator::step,
+             py::arg("target_ball"), py::arg("power"), py::arg("angle"),
+             py::arg("tip_x_mm") = 0.0f, py::arg("tip_y_mm") = 0.0f);
 }

@@ -90,7 +90,10 @@ def test_defense_shot_can_execute_without_attack_action():
     assert result.physical_state.ball_positions.shape == (3, 2)
     assert isinstance(result.game_reward, float)
     assert isinstance(result.turn_changed, bool)
-    assert result.first_contact_verified is False
+    assert result.first_contact_ball in (-1, 0, 1)
+    assert result.first_contact_verified == (
+        result.first_contact_ball == 0
+    )
 
     # The reusable root board must not be mutated.
     np.testing.assert_array_equal(
@@ -143,3 +146,36 @@ def test_defense_shot_is_deterministic_from_restored_state():
         first.next_state.ball_pocket_indices,
         second.next_state.ball_pocket_indices,
     )
+
+
+
+def test_defense_shot_tip_offsets_are_preserved():
+    shot = plan_defense_shot(
+        make_state(),
+        target_ball=0,
+        power=1.0,
+        tip_x_mm=4.0,
+        tip_y_mm=-3.0,
+    )
+
+    assert np.isclose(shot.tip_x_mm, 4.0)
+    assert np.isclose(shot.tip_y_mm, -3.0)
+
+    result = DefenseShotExecutor().execute(
+        make_state(),
+        target_ball=0,
+        shot=shot,
+    )
+
+    assert result.first_contact_ball in (-1, 0, 1)
+
+
+def test_defense_shot_rejects_out_of_range_tip():
+    with pytest.raises(ValueError, match="Tip"):
+        plan_defense_shot(
+            make_state(),
+            target_ball=0,
+            power=1.0,
+            tip_x_mm=12.0,
+            tip_y_mm=12.0,
+        )

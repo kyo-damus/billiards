@@ -30,8 +30,10 @@ class DefenseShotResult:
     object_ball_moved: bool
     newly_pocketed_object_count: int
 
-    # The current FastFiz wrapper does not expose first contact.
-    # Object movement is NOT proof that the shot was legal.
+    # First cue/object contact from FastFiz (-1=no collision).
+    # A hit on the intended target is only a v0 contact check,
+    # not proof that all official billiard rules are satisfied.
+    first_contact_ball: int = -1
     first_contact_verified: bool = False
 
 
@@ -40,6 +42,8 @@ def plan_defense_shot(
     target_ball: int,
     power: float,
     angle_offset_deg: float = 0.0,
+    tip_x_mm: float = 0.0,
+    tip_y_mm: float = 0.0,
 ) -> ShotAction:
     """
     Construct a physical shot aimed at an object-ball center.
@@ -78,6 +82,19 @@ def plan_defense_shot(
             "angle_offset_deg must be finite and in [-35, 35]."
         )
 
+    tip = np.asarray(
+        [tip_x_mm, tip_y_mm],
+        dtype=np.float64,
+    )
+
+    if (
+        not np.all(np.isfinite(tip))
+        or float(np.dot(tip, tip)) > 144.0
+    ):
+        raise ValueError(
+            "Tip offsets must be within 12 mm radius."
+        )
+
     positions = np.asarray(
         state.ball_positions,
         dtype=np.float32,
@@ -113,6 +130,8 @@ def plan_defense_shot(
             base_angle + angle_offset_deg
         ),
         power=float(power),
+        tip_x_mm=float(tip_x_mm),
+        tip_y_mm=float(tip_y_mm),
     )
 
 
@@ -121,8 +140,9 @@ class DefenseShotExecutor:
     Execute one explicit physical shot in FastFiz, then apply
     the same simplified game rules as ATTACK.
 
-    Does not claim verified legal first contact. It does not
-    use ATTACK reward shaping or learned Micro behavior.
+    Reports the first cue/object collision, but does not
+    implement official foul rules, ATTACK reward shaping,
+    or learned Micro behavior.
     """
 
     def __init__(
@@ -189,6 +209,19 @@ class DefenseShotExecutor:
                 "Defense v0 does not support spin."
             )
 
+        tip = np.asarray(
+            [shot.tip_x_mm, shot.tip_y_mm],
+            dtype=np.float64,
+        )
+
+        if (
+            not np.all(np.isfinite(tip))
+            or float(np.dot(tip, tip)) > 144.0
+        ):
+            raise ValueError(
+                "Tip offsets must be within 12 mm radius."
+            )
+
         positions = np.asarray(
             state.ball_positions,
             dtype=np.float32,
@@ -213,6 +246,8 @@ class DefenseShotExecutor:
             target_ball=int(target_ball),
             power=float(shot.power),
             angle=float(shot.angle),
+            tip_x_mm=float(shot.tip_x_mm),
+            tip_y_mm=float(shot.tip_y_mm),
         )
 
         # The current C++ wrapper returns -1 for an invalid
@@ -289,5 +324,11 @@ class DefenseShotExecutor:
             object_ball_moved=object_ball_moved,
             newly_pocketed_object_count=(
                 newly_pocketed_count
+            ),
+            first_contact_ball=(
+                step.first_contact_ball
+            ),
+            first_contact_verified=(
+                step.first_contact_ball == target_ball
             ),
         )

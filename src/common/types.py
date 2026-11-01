@@ -73,9 +73,17 @@ class MacroAction:
 
 @dataclass
 class ShotAction:
-    """Micro が決定し、物理シミュレータへ渡す実際のショット."""
+    """
+    Physical shot: absolute angle in degrees and cue speed in m/s.
+
+    tip_x_mm / tip_y_mm are actual cue-tip contact offsets in mm.
+    The legacy spin_x / spin_y placeholders remain unused; do not
+    interpret these fields as contact positions.
+    """
 
     angle: float
     power: float
     spin_x: float = 0.0
     spin_y: float = 0.0
+    tip_x_mm: float = 0.0
+    tip_y_mm: float = 0.0

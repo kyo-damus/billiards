@@ -100,3 +100,57 @@ def test_restore_pocketed_ball():
     assert sim.get_pocket_index(-1) == -1
     assert sim.get_pocket_index(0) == 0
     assert sim.get_pocket_index(1) == -1
+
+
+
+def test_step_exposes_first_cue_object_collision():
+    sim = FastFizSimulator()
+    sim.set_state(
+        np.array(
+            [0.5, 0.3, 0.5, 0.8, 0.9, 1.5],
+            dtype=np.float32,
+        )
+    )
+
+    result = sim.step(
+        target_ball=0,
+        power=1.0,
+        angle=90.0,
+    )
+
+    assert result.first_contact_ball in (-1, 0, 1)
+
+
+def test_step_accepts_tip_offsets_in_millimeters():
+    sim = FastFizSimulator()
+    sim.set_state(
+        np.array(
+            [0.5, 0.3, 0.5, 0.8, 0.9, 1.5],
+            dtype=np.float32,
+        )
+    )
+
+    result = sim.step(
+        target_ball=0,
+        power=1.0,
+        angle=90.0,
+        tip_x_mm=4.0,
+        tip_y_mm=-3.0,
+    )
+
+    assert result.state.shape == (6,)
+    assert result.first_contact_ball in (-1, 0, 1)
+
+
+def test_step_rejects_tip_offset_outside_conservative_range():
+    sim = FastFizSimulator()
+
+    import pytest
+    with pytest.raises(ValueError, match="Tip"):
+        sim.step(
+            target_ball=0,
+            power=1.0,
+            angle=90.0,
+            tip_x_mm=12.0,
+            tip_y_mm=12.0,
+        )
