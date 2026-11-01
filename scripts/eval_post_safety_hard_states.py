@@ -141,6 +141,7 @@ def main(args):
     selected_hard_states = 0
     tested_hard_states = 0
     no_attack = 0
+    filtered_attack = 0
     no_safety = 0
     oracle_deltas = []
     mcts_safety_chosen = 0
@@ -197,6 +198,7 @@ def main(args):
                 feasibility.successful_pot_count
                 > args.max_successful_attacks
             ):
+                filtered_attack += 1
                 continue
 
             new_safety_proposals = safety_shots.generate(hard)
@@ -279,6 +281,7 @@ def main(args):
     )
     print(
         f"no Attack candidates: {no_attack}; "
+        f"filtered by all-Attack success: {filtered_attack}; "
         f"no Safety continuation: {no_safety}"
     )
 
