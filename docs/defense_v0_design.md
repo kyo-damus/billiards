@@ -668,3 +668,49 @@ python -m scripts.eval_post_safety_hard_states \
   --max-successful-direct 0 --max-successful-attacks 2 \
   --max-compared 2 --retry-expanded-safety --device cuda
 ```
+
+
+## Stage 6f: FastFiz physical rejection bitmask diagnosis
+
+On five source boards (seeds 90000-90004), two post-SAFETY
+opponent states had zero executable Attack outcomes.
+Neither permitted a subsequent eligible SAFETY in the tested
+grids. The observed rejection counts were:
+- source board 1: 24/24 baseline and 120/120 expanded
+  shots rejected by the native FastFiz precondition.
+- source board 3: 24/24 baseline and 116/120 expanded
+  shots rejected at precondition; remaining 4 failed
+  first cue/object contact.
+
+This strongly indicates that the physical shot precondition
+is the limiting step. The native FastFiz `isPhysicallyPossible`
+check uses a bitmask including invalid shot parameters
+and `CUE_STICK_COLLISION=128`, which includes collision
+of the cue stick with an object ball or rail before impact.
+For a cue ball parked near a cushion, the fixed cue elevation
+(theta=10 degrees in the wrapper) is one possible cause;
+**actual rejection codes must be measured**, not inferred.
+
+The native wrapper now retains the precondition code and exposes
+the `isValidBallPlacement()` status separately. Python maps
+the bitmask names, carries the **pre-shot** ball-placement code,
+and raises a typed `FastFizPreconditionError` rather than
+discarding the reason behind a rejected shot. The Safety
+generator counts rejected-shot codes without changing
+eligible Safety criteria, shot physics, rewards or learned
+policies. The post-Safety probe prints the raw code histogram
+and decoded names for baseline and expanded attempts, and
+the hard-state cue position for identifying rail proximity.
+
+The native `billiard_env_cpp` extension MUST be rebuilt:
+
+```bash
+git pull
+cmake --build build -j4
+python -m pytest tests/test_fastfiz_simulator.py tests/test_defense_shot.py tests/test_outcome_guided_safety_shots.py tests/test_post_safety_hard_states.py -v
+```
+
+If `CUE_STICK_COLLISION` dominates, do not expand power as
+the first remedy: check the cue-to-rail distance, other-ball
+obstruction, and the fixed cue elevation. No rule has been
+relaxed to force artificially legal shots.

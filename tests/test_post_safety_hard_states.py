@@ -191,3 +191,22 @@ def test_safety_grid_can_report_both_grids_empty():
     assert candidates == []
     assert a["eligible"] == 0
     assert b["eligible"] == 0
+
+
+def test_safety_stats_format_includes_precondition_and_placement_flags():
+    from scripts.eval_post_safety_hard_states import (
+        format_safety_stats,
+    )
+    stats = {
+        "attempted": 24,
+        "invalid_physics": 24,
+        "precondition_codes": {128: 22, 8: 2},
+        "placement_codes": {0: 24},
+        "eligible": 0,
+    }
+
+    message = format_safety_stats(stats)
+    assert "invalid_physics=24" in message
+    assert "128:CUE_STICK_COLLISION=22" in message
+    assert "8:BAD_PHI_VAL=2" in message
+    assert "placements=[0:OK_PRECONDITION=24]" in message

@@ -7,6 +7,50 @@ import numpy as np
 from src.env.simulator_state import SimulatorSnapshot
 
 
+# FastFiz TableState precondition/placement bitmask values.
+FASTFIZ_PRECONDITION_FLAGS = {
+    1: "BAD_A_VAL",
+    2: "BAD_B_VAL",
+    4: "BAD_THETA_VAL",
+    8: "BAD_PHI_VAL",
+    16: "BAD_V_VAL",
+    32: "BAD_X_VAL",
+    64: "BAD_Y_VAL",
+    128: "CUE_STICK_COLLISION",
+    256: "BALL_OVERLAP",
+}
+
+
+def describe_fastfiz_precondition(code: int) -> str:
+    code = int(code)
+    if code == 0:
+        return "OK_PRECONDITION"
+    flags = [
+        name
+        for bit, name in FASTFIZ_PRECONDITION_FLAGS.items()
+        if code & bit
+    ]
+    unrecognized = code & ~sum(FASTFIZ_PRECONDITION_FLAGS)
+    if unrecognized:
+        flags.append(f"UNKNOWN_BITS({unrecognized})")
+    return "|".join(flags) if flags else f"UNKNOWN({code})"
+
+
+class FastFizPreconditionError(RuntimeError):
+    """FastFiz rejected a shot before execution; original codes retained."""
+
+    def __init__(self, precondition_code, placement_code):
+        self.precondition_code = int(precondition_code)
+        self.placement_code = int(placement_code)
+        super().__init__(
+            "FastFiz rejected this physical shot: "
+            f"precondition={self.precondition_code} "
+            f"({describe_fastfiz_precondition(self.precondition_code)}); "
+            f"ball_placement={self.placement_code} "
+            f"({describe_fastfiz_precondition(self.placement_code)})"
+        )
+
+
 # CMakeで生成された billiard_env_cpp を読み込む
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 BUILD_DIR = PROJECT_ROOT / "build"
@@ -30,6 +74,10 @@ class SimulatorStepResult:
 
     # -1=no cue/object collision, 0/1=first contacted object ball.
     first_contact_ball: int = -1
+
+    # FastFiz bitmasks before this shot (0 = OK).
+    precondition_code: int = 0
+    placement_code: int = 0
 
 
 class FastFizSimulator:
@@ -133,6 +181,20 @@ class FastFizSimulator:
                 "Tip offset must be within a 12 mm radius."
             )
 
+        # Fail loudly if the native extension was not rebuilt after
+        # enabling precondition diagnostics; never fabricate code 0.
+        if not (
+            hasattr(self._sim, "get_last_precondition_code")
+            and hasattr(self._sim, "get_ball_placement_code")
+        ):
+            raise RuntimeError(
+                "billiard_env_cpp is outdated. Rebuild it with "
+                "'cmake --build build -j4' before using FastFiz diagnostics."
+            )
+
+        placement_code_before = int(
+            self._sim.get_ball_placement_code()
+        )
         result = self._sim.step(
             int(target_ball),
             float(power),
@@ -153,4 +215,8 @@ class FastFizSimulator:
             first_contact_ball=int(
                 self._sim.get_last_first_contact_ball()
             ),
+            precondition_code=int(
+                self._sim.get_last_precondition_code()
+            ),
+            placement_code=placement_code_before,
         )

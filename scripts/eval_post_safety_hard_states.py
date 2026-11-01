@@ -152,9 +152,35 @@ def format_safety_stats(stats):
         "other_ineligible",
         "eligible",
     )
-    return " ".join(
+    base = " ".join(
         f"{key}={stats.get(key, 0)}" for key in keys
     )
+    preconditions = stats.get("precondition_codes", {})
+    placements = stats.get("placement_codes", {})
+    if preconditions or placements:
+        from src.env.fastfiz_simulator import (
+            describe_fastfiz_precondition,
+        )
+
+        def describe_counts(items):
+            return ",".join(
+                (
+                    f"{code}:"
+                    f"{describe_fastfiz_precondition(code)}={count}"
+                )
+                for code, count in sorted(items.items())
+            ) or "none"
+
+        base += (
+            f" preconditions=[{describe_counts(preconditions)}]"
+            f" placements=[{describe_counts(placements)}]"
+        )
+    if stats.get("other_runtime_errors", 0):
+        base += (
+            f" other_runtime_errors="
+            f"{stats['other_runtime_errors']}"
+        )
+    return base
 
 
 def main(args):
@@ -293,6 +319,7 @@ def main(args):
                 f"source_board={board} "
                 f"poststate_direct_success="
                 f"{sample.source_direct_successes} "
+                f"cue_xy={np.asarray(hard.ball_positions[0]).round(4).tolist()} "
                 f"attack_success="
                 f"{feasibility.successful_pot_count}/"
                 f"{feasibility.candidate_count} "

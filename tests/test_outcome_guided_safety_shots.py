@@ -146,3 +146,31 @@ def test_rejects_invalid_grid():
             opponent_threat_evaluator=DummyThreat(),
             powers=(),
         )
+
+
+def test_safety_search_records_native_fastfiz_precondition_codes():
+    from src.env.fastfiz_simulator import FastFizPreconditionError
+
+    class InvalidExecutor:
+        def execute(self, state, target_ball, shot):
+            raise FastFizPreconditionError(
+                precondition_code=128,
+                placement_code=0,
+            )
+
+    generator = OutcomeGuidedSafetyShotGenerator(
+        defense_executor=InvalidExecutor(),
+        opponent_threat_evaluator=DummyThreat(),
+        powers=(0.65,),
+        angle_offsets_deg=(0.0,),
+        tip_offsets_mm=((0.0, 0.0),),
+        top_k=2,
+    )
+
+    assert generator.generate(make_state()) == []
+    stats = generator.last_stats
+    assert stats["attempted"] == 2
+    assert stats["invalid_physics"] == 2
+    assert stats["precondition_codes"] == {128: 2}
+    assert stats["placement_codes"] == {0: 2}
+    assert stats["other_runtime_errors"] == 0

@@ -7,6 +7,7 @@ not MacroCandidate and are not passed into the Attack-trained Q/Policy.
 from dataclasses import dataclass
 
 from src.common.types import ShotAction
+from src.env.fastfiz_simulator import FastFizPreconditionError
 
 from src.micro.defense_shot import (
     DefenseShotExecutor,
@@ -104,6 +105,9 @@ class OutcomeGuidedSafetyShotGenerator:
         stats = {
             "attempted": 0,
             "invalid_physics": 0,
+            "precondition_codes": {},
+            "placement_codes": {},
+            "other_runtime_errors": 0,
             "wrong_or_no_first_contact": 0,
             "scratch": 0,
             "pocketed": 0,
@@ -140,8 +144,20 @@ class OutcomeGuidedSafetyShotGenerator:
                                 target_ball=ball,
                                 shot=shot,
                             )
+                        except FastFizPreconditionError as exc:
+                            stats["invalid_physics"] += 1
+                            code = exc.precondition_code
+                            placement = exc.placement_code
+                            codes = stats["precondition_codes"]
+                            codes[code] = codes.get(code, 0) + 1
+                            placements = stats["placement_codes"]
+                            placements[placement] = (
+                                placements.get(placement, 0) + 1
+                            )
+                            continue
                         except RuntimeError:
                             stats["invalid_physics"] += 1
+                            stats["other_runtime_errors"] += 1
                             continue
 
                         if (

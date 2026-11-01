@@ -154,3 +154,30 @@ def test_step_rejects_tip_offset_outside_conservative_range():
             tip_x_mm=12.0,
             tip_y_mm=12.0,
         )
+
+
+def test_precondition_diagnostic_is_exposed_and_decoded():
+    from src.env.fastfiz_simulator import (
+        describe_fastfiz_precondition,
+    )
+
+    sim = FastFizSimulator()
+    sim.set_state(
+        np.array(
+            [0.5, 0.3, 0.5, 0.8, 0.9, 1.5],
+            dtype=np.float32,
+        )
+    )
+    result = sim.step(
+        target_ball=0,
+        power=1.0,
+        angle=90.0,
+    )
+
+    assert result.precondition_code == 0
+    assert isinstance(result.placement_code, int)
+    assert describe_fastfiz_precondition(0) == "OK_PRECONDITION"
+    assert describe_fastfiz_precondition(128) == "CUE_STICK_COLLISION"
+    assert "CUE_STICK_COLLISION" in (
+        describe_fastfiz_precondition(128 | 8)
+    )

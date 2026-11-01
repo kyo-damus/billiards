@@ -12,6 +12,7 @@ class BilliardSimulator {
 private:
     TableState ts; // FastFizの盤面クラス
     int last_first_contact_ball = -1;
+    int last_precondition_code = 0;
 
     // 内部用のヘルパー関数：FastFizの座標(Point)から std::vector を作る
     std::vector<float> _get_state_vector() {
@@ -60,6 +61,7 @@ public:
 
     void reset() {
         last_first_contact_ball = -1;
+        last_precondition_code = 0;
         ts = TableState(); // 盤面をクリア
         
         // 【修正点】一度変数として球を作ってから、セットする
@@ -74,6 +76,7 @@ public:
 
     void set_state(std::vector<float> state) {
         last_first_contact_ball = -1;
+        last_precondition_code = 0;
         ts = TableState();
         
         // 【修正点】一度変数として球を作ってから、セットする
@@ -103,6 +106,7 @@ public:
         }
 
         last_first_contact_ball = -1;
+        last_precondition_code = 0;
         ts = TableState();
 
         Ball cue_ball(
@@ -182,8 +186,13 @@ public:
 
     int get_last_first_contact_ball() const { return last_first_contact_ball; }
 
+    // Raw FastFiz bitmask. In particular 128 = CUE_STICK_COLLISION.
+    int get_last_precondition_code() const { return last_precondition_code; }
+    int get_ball_placement_code() const { return ts.isValidBallPlacement(); }
+
     std::vector<float> step(int target_ball, float power, float angle, float tip_x_mm = 0.0f, float tip_y_mm = 0.0f) {
         last_first_contact_ball = -1;
+        last_precondition_code = 0;
         if (target_ball != 0 && target_ball != 1) throw std::invalid_argument("target_ball must be 0 or 1");
         if (!std::isfinite(tip_x_mm) || !std::isfinite(tip_y_mm) || tip_x_mm * tip_x_mm + tip_y_mm * tip_y_mm > 144.0f) throw std::invalid_argument("tip must be within 12 mm radius");
         float reward = 0.0f;
@@ -193,7 +202,8 @@ public:
         ShotParams sp(tip_x_mm, tip_y_mm, 10.0, angle, power);
 
         // 2. ショットが物理的に可能かチェック
-        if (ts.isPhysicallyPossible(sp) != TableState::OK_PRECONDITION) {
+        last_precondition_code = ts.isPhysicallyPossible(sp);
+        if (last_precondition_code != TableState::OK_PRECONDITION) {
             auto state = _get_state_vector();
             state.push_back(-1.0f); // ペナルティ
             state.push_back(1.0f);  
@@ -243,6 +253,8 @@ PYBIND11_MODULE(billiard_env_cpp, m) {
         .def("get_state", &BilliardSimulator::get_state)
         .def("get_pocket_index", &BilliardSimulator::get_pocket_index)
         .def("get_last_first_contact_ball", &BilliardSimulator::get_last_first_contact_ball)
+        .def("get_last_precondition_code", &BilliardSimulator::get_last_precondition_code)
+        .def("get_ball_placement_code", &BilliardSimulator::get_ball_placement_code)
         .def("step", &BilliardSimulator::step,
              py::arg("target_ball"), py::arg("power"), py::arg("angle"),
              py::arg("tip_x_mm") = 0.0f, py::arg("tip_y_mm") = 0.0f);

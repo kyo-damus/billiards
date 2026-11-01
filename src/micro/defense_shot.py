@@ -10,7 +10,10 @@ import math
 import numpy as np
 
 from src.common.types import GameState, ShotAction
-from src.env.fastfiz_simulator import FastFizSimulator
+from src.env.fastfiz_simulator import (
+    FastFizSimulator,
+    FastFizPreconditionError,
+)
 from src.env.simulator_state import SimulatorSnapshot
 from src.game.simple_rules import SimplifiedGameRules
 
@@ -254,8 +257,9 @@ class DefenseShotExecutor:
         # physical shot. Reject it instead of mistaking it
         # for a legitimate miss/turn change.
         if step.legacy_reward < 0.0:
-            raise RuntimeError(
-                "FastFiz rejected this physical shot."
+            raise FastFizPreconditionError(
+                precondition_code=step.precondition_code,
+                placement_code=step.placement_code,
             )
 
         snapshot = self.sim.snapshot()
