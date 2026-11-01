@@ -160,7 +160,14 @@ def test_defense_transition_executes_explicit_shot_and_changes_turn():
     assert result.evaluation.safety_eligible
     assert result.evaluation.goal_achieved
     assert result.evaluation.cue_region_reached
-    assert np.isclose(result.evaluation.cue_distance, 0.0)
+    # GameState stores float32 positions. Converting to Python
+    # float for goal-distance calculations can leave sub-micron
+    # numerical noise even when the positions conceptually match.
+    assert np.isclose(
+        result.evaluation.cue_distance,
+        0.0,
+        atol=1e-6,
+    )
 
 
 def test_defense_transition_penalizes_missed_first_contact():
