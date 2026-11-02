@@ -1184,3 +1184,54 @@ only selected actions have observed returns, and the original
 25-D Attack / 31-D mixed two-step supervised datasets retain
 their separate roles. The 2-object-ball SimplifiedGameRules and
 fixed-elevation action spaces remain unchanged.
+
+
+## Stage 7g: Policy learning from MCTS visits, including incomplete games
+
+The two-game collection smoke (seed 94000/94001; 3-turn limit)
+successfully saved six executed turns, but neither game reached
+the simplified terminal state. Hence NO Monte Carlo return
+dataset was created; this was the intended nonterminal safeguard.
+
+This motivates an independent Policy-only data path. The root
+MCTS visit distribution is already available even for a
+truncated game. `scripts/build_mixed_rollout_visit_dataset.py`
+converts the `root_candidate`, `root_turn_index`, and
+`root_visit_count` arrays into a normalized
+`policy_target` for each root state. The output includes
+31-D v2 Candidate features, 12-D state vectors, state_id,
+episode_id and `target_kind=mcts_root_visit_distribution`.
+Only root states with 2+ candidates and positive total visits
+are supervised. This is an imitation of the current MCTS
+search policy, not a Q regression or a game-performance label.
+
+`scripts/train_macro_visit_policy.py` trains the existing
+31-D Candidate Policy network with cross-entropy against the
+target distribution. Crucially, training/validation splits are
+at the WHOLE-GAME level (`episode_id`), not by individual
+adjacent states. The resulting checkpoint has the same
+Candidate Policy v2 loader format, with target-kind provenance.
+The former softmax-of-oracle-Q policy training script and
+the completed-only MC return/Q pipeline are unchanged.
+
+Quick integration only:
+
+```bash
+python -m pytest tests/test_mixed_rollout_visit_policy.py -v
+
+python -m scripts.build_mixed_rollout_visit_dataset \
+  --rollout \
+    mixed_rollouts_smoke_batch/rollout_seed_94000.npz \
+    mixed_rollouts_smoke_batch/rollout_seed_94001.npz \
+  --output macro_candidate_policy_visits_smoke.npz
+
+python -m scripts.train_macro_visit_policy \
+  --dataset macro_candidate_policy_visits_smoke.npz \
+  --checkpoint macro_candidate_policy_visits_smoke.pt \
+  --epochs 2 --device cuda
+```
+
+The toy batch is far too small to assess or improve Policy
+quality. The purpose is solely to connect the incomplete-game
+experience pipeline to a valid Candidate Policy learning
+objective while keeping the distinct Q-target semantics safe.
