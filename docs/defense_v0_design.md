@@ -1235,3 +1235,53 @@ The toy batch is far too small to assess or improve Policy
 quality. The purpose is solely to connect the incomplete-game
 experience pipeline to a valid Candidate Policy learning
 objective while keeping the distinct Q-target semantics safe.
+
+
+## Stage 7h: bounded collect->visit->Policy iteration
+
+The six MCTS root states / 110 candidates from two
+three-turn-limited mixed game experiences were successfully
+converted to `policy_target` root visit distributions and used
+to train a 31-D Candidate Policy for two short epochs. A
+valid v2 checkpoint was saved, completing the first
+end-to-end visit-supervised learning path. This is a
+software integration result, not a measured policy gain.
+
+`scripts/iterate_mixed_macro_policy.py` now runs a deliberately
+bounded iteration cycle using the PRE-EXISTING building blocks:
+
+1. Load the current 31-D Candidate Policy checkpoint and fixed
+   31-D mixed Candidate Q checkpoint into the mixed HierarchicalAgent.
+2. Collect independently seeded simplified games to separate
+   `rollout_seed_*.npz` files (including truncated ones).
+3. Convert MCTS root visits to normalized Candidate Policy targets.
+4. Train a **new** Candidate Policy checkpoint.
+5. Optionally repeat with the freshly trained policy on the
+   NEXT collection batch, keeping the Candidate Q fixed.
+
+Output files are separated by iteration and preflight collision
+checks refuse all overwrites. `--iterations 1` is the default;
+two or more cycles are explicitly opt-in. Two games per cycle
+are required so train/validation can split at episode level.
+This does not implement on-policy/off-policy Q updates and
+does not treat missing terminal games as MC labels.
+
+Quick one-cycle smoke:
+
+```bash
+python -m pytest tests/test_iterate_mixed_macro_policy.py -v
+
+python -m scripts.iterate_mixed_macro_policy \
+  --base-checkpoint goal_conditioned_micro_mixed_curriculum_100k.pt \
+  --residual-checkpoint position_power_residual_mlp_2000.pt \
+  --candidate-value-checkpoint macro_candidate_value_mixed_v2.pt \
+  --candidate-policy-checkpoint macro_candidate_policy_visits_smoke.pt \
+  --iterations 1 --games-per-iteration 2 \
+  --start-seed 94100 --max-turns 3 --simulations 10 \
+  --policy-epochs 2 --output-dir macro_policy_iteration_smoke \
+  --device cuda
+```
+
+The small sample size, limited actions, and two-object-ball rules
+make this strictly a wiring smoke. Detailed parameter studies,
+performance metrics and long-duration training are deferred.
