@@ -31,6 +31,7 @@ from scripts.eval_post_safety_hard_states import (
 from src.common.table import TABLE_LENGTH, TABLE_WIDTH
 from src.common.types import GameState
 from src.game.simple_rules import SimplifiedGameRules
+from src.macro.elevated_direct_threat import ElevatedDirectThreatProbe
 from src.env.fastfiz_simulator import (
     FastFizSimulator,
     describe_fastfiz_precondition,
@@ -99,6 +100,7 @@ def probe_elevation_grid(
     tip_y_mm=(0.0,),
     threat_evaluator=None,
     threat_samples_per_elevation=0,
+    elevated_direct_probe=None,
 ):
     """Return per-elevation FastFiz feasibility and first-contact counts.
 
@@ -110,7 +112,11 @@ def probe_elevation_grid(
     tips = tuple(tip_y_mm)
     if threat_samples_per_elevation < 0:
         raise ValueError("threat_samples_per_elevation must be >= 0.")
-    if threat_samples_per_elevation and threat_evaluator is None:
+    if (
+        threat_samples_per_elevation
+        and threat_evaluator is None
+        and elevated_direct_probe is None
+    ):
         raise ValueError("Threat evaluator required for threat sampling.")
     if (
         not powers
@@ -140,6 +146,10 @@ def probe_elevation_grid(
         eligible_safety = 0
         sampled_threat_count = 0
         minimum_opponent_direct_success = None
+        minimum_opponent_elevated_direct_success = None
+        maximum_opponent_elevated_direct_success = None
+        elevated_direct_attempts = 0
+        elevated_direct_physics_valid = 0
 
         for target in target_balls:
             for offset in angle_offsets:
@@ -211,22 +221,58 @@ def probe_elevation_grid(
                         if next_state is not None:
                             eligible_safety += 1
                             if (
-                                threat_evaluator is not None
-                                and sampled_threat_count
+                                sampled_threat_count
                                 < threat_samples_per_elevation
+                                and (
+                                    threat_evaluator is not None
+                                    or elevated_direct_probe is not None
+                                )
                             ):
-                                threat = threat_evaluator.evaluate(
-                                    next_state,
-                                    defending_player=state.current_player,
-                                )
-                                count = int(threat.successful_pot_count)
-                                minimum_opponent_direct_success = (
-                                    count
-                                    if minimum_opponent_direct_success is None
-                                    else min(
-                                        minimum_opponent_direct_success, count
+                                if threat_evaluator is not None:
+                                    threat = threat_evaluator.evaluate(
+                                        next_state,
+                                        defending_player=state.current_player,
                                     )
-                                )
+                                    count = int(threat.successful_pot_count)
+                                    minimum_opponent_direct_success = (
+                                        count
+                                        if minimum_opponent_direct_success is None
+                                        else min(
+                                            minimum_opponent_direct_success,
+                                            count,
+                                        )
+                                    )
+                                if elevated_direct_probe is not None:
+                                    elevated_threat = (
+                                        elevated_direct_probe.evaluate(next_state)
+                                    )
+                                    count = int(
+                                        elevated_threat.successful_routes
+                                    )
+                                    minimum_opponent_elevated_direct_success = (
+                                        count
+                                        if minimum_opponent_elevated_direct_success
+                                        is None
+                                        else min(
+                                            minimum_opponent_elevated_direct_success,
+                                            count,
+                                        )
+                                    )
+                                    maximum_opponent_elevated_direct_success = (
+                                        count
+                                        if maximum_opponent_elevated_direct_success
+                                        is None
+                                        else max(
+                                            maximum_opponent_elevated_direct_success,
+                                            count,
+                                        )
+                                    )
+                                    elevated_direct_attempts += (
+                                        elevated_threat.attempted
+                                    )
+                                    elevated_direct_physics_valid += (
+                                        elevated_threat.physically_valid
+                                    )
                                 sampled_threat_count += 1
 
         rows.append({
@@ -239,6 +285,14 @@ def probe_elevation_grid(
             "eligible_safety": eligible_safety,
             "sampled_threat_count": sampled_threat_count,
             "min_opponent_direct_success": minimum_opponent_direct_success,
+            "min_opponent_elevated_direct_success": (
+                minimum_opponent_elevated_direct_success
+            ),
+            "max_opponent_elevated_direct_success": (
+                maximum_opponent_elevated_direct_success
+            ),
+            "elevated_direct_attempts": elevated_direct_attempts,
+            "elevated_direct_physics_valid": elevated_direct_physics_valid,
             "first_contact_example": first_contact_example,
             "codes": codes,
             "placements": placement_codes,
@@ -285,10 +339,20 @@ def main(args):
     (
         transition,
         attack_generator,
-        _,
+        direct_generator,
         safety_shots,
         _,
     ) = make_mixed_components(args, device)
+
+    opponent_probe = None
+    if args.opponent_elevated_grid:
+        opponent_probe = ElevatedDirectThreatProbe(
+            direct_generator=direct_generator,
+            elevations=args.opponent_elevations,
+            angle_offsets=args.opponent_angle_offsets,
+            powers=args.opponent_powers,
+            tip_y_mm=args.opponent_tip_y_mm,
+        )
 
     seen = set()
     env = MicroBilliardEnv()
@@ -310,9 +374,20 @@ def main(args):
     )
     if args.threat_samples_per_elevation:
         print(
-            "Threat is deterministic under the existing 10-degree "
-            "opponent Micro; samples follow shot-grid order, "
-            "not a representative win-rate estimate."
+            "Learned opponent DIRECT threat uses fixed 10-degree Micro; "
+            "samples follow Safety shot-grid order."
+        )
+    if opponent_probe is not None:
+        print(
+            "Extra opponent ghost-ball physical grid: "
+            f"elevations={args.opponent_elevations} "
+            f"offsets={args.opponent_angle_offsets} "
+            f"powers={args.opponent_powers} "
+            f"tip_y_mm={args.opponent_tip_y_mm}"
+        )
+        print(
+            "This is an enumerated physical attack search, "
+            "NOT trained SAC or an exhaustive optimal opponent."
         )
 
     for board in range(args.source_boards):
@@ -368,6 +443,7 @@ def main(args):
                 threat_samples_per_elevation=(
                     args.threat_samples_per_elevation
                 ),
+                elevated_direct_probe=opponent_probe,
             ):
                 print(
                     f"  theta={row['elevation']:4.0f} deg "
@@ -381,6 +457,16 @@ def main(args):
                     f"{row['min_opponent_direct_success']} "
                     f"codes=[{summarize_code_counts(row['codes'])}]"
                 )
+                if opponent_probe is not None:
+                    print(
+                        "    opponent_elevated_physical_grid: "
+                        f"min/max_success_routes="
+                        f"{row['min_opponent_elevated_direct_success']}/"
+                        f"{row['max_opponent_elevated_direct_success']} "
+                        f"valid/attempts="
+                        f"{row['elevated_direct_physics_valid']}/"
+                        f"{row['elevated_direct_attempts']}"
+                    )
                 if row["first_contact_example"] is not None:
                     print(
                         "    first_correct_contact_example="
@@ -427,6 +513,26 @@ def parse_args():
     )
     parser.add_argument(
         "--tip-y-mm", type=float, nargs="+", default=[0.0],
+    )
+    parser.add_argument(
+        "--opponent-elevated-grid", action="store_true",
+        help="Also probe physical DIRECT pot routes at multiple elevations.",
+    )
+    parser.add_argument(
+        "--opponent-elevations", type=float, nargs="+",
+        default=[10.0, 20.0, 35.0],
+    )
+    parser.add_argument(
+        "--opponent-angle-offsets", type=float, nargs="+",
+        default=[-5.0, 0.0, 5.0],
+    )
+    parser.add_argument(
+        "--opponent-powers", type=float, nargs="+",
+        default=[0.65, 1.0, 1.5],
+    )
+    parser.add_argument(
+        "--opponent-tip-y-mm", type=float, nargs="+",
+        default=[0.0, 5.0],
     )
     parser.add_argument(
         "--threat-samples-per-elevation", type=int, default=0,
@@ -484,6 +590,20 @@ def parse_args():
             )
         )
         or args.threat_samples_per_elevation < 0
+        or (args.opponent_elevated_grid and
+            args.threat_samples_per_elevation < 1)
+        or not args.opponent_elevations
+        or any(not np.isfinite(x) or not 0.0 <= x <= 70.0
+               for x in args.opponent_elevations)
+        or not args.opponent_angle_offsets
+        or any(not np.isfinite(x) or abs(x) > 35.0
+               for x in args.opponent_angle_offsets)
+        or not args.opponent_powers
+        or any(not np.isfinite(x) or not 0.5 <= x <= 3.0
+               for x in args.opponent_powers)
+        or not args.opponent_tip_y_mm
+        or any(not np.isfinite(x) or abs(x) > 12.0
+               for x in args.opponent_tip_y_mm)
         or not args.tip_y_mm
         or any(
             not np.isfinite(v) or abs(v) > 12.0

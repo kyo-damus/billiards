@@ -889,3 +889,47 @@ be carried consistently in the physical-shot representation,
 the macro encoding, execution and next-state teacher. That
 is deliberately deferred until physical and simplified-game
 diagnostics justify it.
+
+
+## Stage 6j: opponent-elevation-aware DIRECT physical diagnostic
+
+The full post-SAFETY threat scan found 21 eligible elevated SAFETY
+shots from source board 3 (10 with cue elevation 20 degrees; 11
+with 35 degrees). Under the existing opponent 10-degree learned
+DIRECT Micro, the best recorded result retained one successful
+DIRECT candidate at each elevation (none reduced the count to 0).
+Source board 1 still had no eligible Safety in the tested grid.
+
+This does NOT mean elevated cue control would make a strategic
+Safety better or worse: the defender can change theta while
+the opponent in that metric is still restricted to theta=10.
+
+A separate `src/macro/elevated_direct_threat.py` diagnostic
+enumerates, for each geometrically feasible DIRECT candidate,
+physical shots aimed at the ghost-ball position for that target
+ball and pocket, with small heading offsets, power, cue-tip Y
+and elevation options. A successful ROUTE requires:
+- FastFiz precondition 0;
+- first collision with the intended object ball;
+- the intended ball pocketed in its specified pocket;
+- no cue scratch.
+
+The count is over **distinct (ball, pocket) routes**, not the
+number of parameter combinations that made the same route.
+The grid is neither a trained multi-elevation SAC policy nor
+an exhaustive opponent action search. In particular, a failed
+route may succeed using a shot outside the grid.
+
+To avoid lengthy nested simulation, pass `--opponent-elevated-grid`
+and a small `--threat-samples-per-elevation` (e.g. 2) to
+`probe_cue_elevation_on_hard_states.py`. On each selected
+post-Safety board, it now reports:
+- legacy 10-degree Micro minimum successful DIRECT candidates;
+- physical elevation-grid minimum and maximum successful DIRECT
+  routes across exactly the same sampled Safety poststates;
+- physical shot attempts and validity totals.
+
+These two metrics use different action-selection mechanisms.
+Interpret disagreement as a possible action-space limitation,
+not as a fair learned-policy comparison. No Q targets, trained
+checkpoints, MacroCandidate encodings, or game rules are altered.

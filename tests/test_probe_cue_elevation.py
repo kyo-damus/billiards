@@ -191,3 +191,62 @@ def test_probe_turn_and_threat_sample_limit(monkeypatch):
     assert rows[0]["sampled_threat_count"] == 1
     assert rows[0]["min_opponent_direct_success"] == 1
     assert t.count == 1
+
+
+
+def test_threat_sampling_can_compare_trained_and_physical_opponent(
+    monkeypatch,
+):
+    import scripts.probe_cue_elevation_on_hard_states as module
+
+    class FakeSimulator:
+        def restore(self, snapshot):
+            self.current = snapshot
+
+        def step(self, target_ball, **kwargs):
+            return SimpleNamespace(
+                precondition_code=0,
+                placement_code=0,
+                first_contact_ball=target_ball,
+            )
+
+        def snapshot(self):
+            return self.current
+
+    class TrainedThreat:
+        def evaluate(self, state, defending_player):
+            return SimpleNamespace(successful_pot_count=1)
+
+    class PhysicalThreat:
+        def __init__(self):
+            self.calls = 0
+
+        def evaluate(self, state):
+            self.calls += 1
+            return SimpleNamespace(
+                successful_routes=2,
+                attempted=12,
+                physically_valid=8,
+            )
+
+    monkeypatch.setattr(module, "FastFizSimulator", FakeSimulator)
+    physical = PhysicalThreat()
+    rows = probe_elevation_grid(
+        make_state(),
+        elevations=[20.0],
+        angle_offsets=[0.0],
+        powers=[1.0],
+        tip_y_mm=[0.0, 5.0],
+        threat_evaluator=TrainedThreat(),
+        elevated_direct_probe=physical,
+        threat_samples_per_elevation=1,
+    )
+    row = rows[0]
+    assert row["eligible_safety"] == 4
+    assert row["sampled_threat_count"] == 1
+    assert row["min_opponent_direct_success"] == 1
+    assert row["min_opponent_elevated_direct_success"] == 2
+    assert row["max_opponent_elevated_direct_success"] == 2
+    assert row["elevated_direct_attempts"] == 12
+    assert row["elevated_direct_physics_valid"] == 8
+    assert physical.calls == 1
