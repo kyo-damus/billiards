@@ -137,3 +137,119 @@ def test_trainer_checkpoint_is_required(tmp_path):
             visit_builder=visit, policy_trainer=does_not_save,
             state_factory=lambda seed: seed,
         )
+
+
+
+def test_optional_critics_skip_if_fewer_than_two_completed(tmp_path):
+    config = args(tmp_path, iterations=1)
+    config.update_critics = True
+    config.critic_epochs = 2
+    config.state_value_checkpoint = "existing_v.pt"
+    seen, agent, collector, visit, train = make_fakes()
+
+    def incomplete_collector(*a, **kwargs):
+        result = collector(*a, **kwargs)
+        return SimpleNamespace(
+            saved_games=result.saved_games,
+            completed_paths=(),
+        )
+
+    def should_not_build(*a, **kwargs):
+        raise AssertionError("No critic update on incomplete games.")
+
+    records = run_policy_iterations(
+        config,
+        agent_builder=agent,
+        collector=incomplete_collector,
+        visit_builder=visit,
+        policy_trainer=train,
+        return_builder=should_not_build,
+        q_trainer=should_not_build,
+        value_trainer=should_not_build,
+        state_factory=lambda seed: seed,
+    )
+    assert records[0].output_q is None
+    assert records[0].output_v is None
+    assert records[0].complete_games == 0
+
+
+def test_optional_critics_train_and_reload_next_iteration(tmp_path):
+    config = args(tmp_path, iterations=2, games=2)
+    config.update_critics = True
+    config.critic_epochs = 2
+    config.state_value_checkpoint = "original_v.pt"
+    seen, agent, collect, visit, train = make_fakes()
+    seen["q_inputs"] = []
+    seen["v_inputs"] = []
+
+    def agent_with_critics(settings, device):
+        seen["q_inputs"].append(settings.candidate_value_checkpoint)
+        seen["v_inputs"].append(settings.state_value_checkpoint)
+        return agent(settings, device)
+
+    def completed_collector(*a, **kwargs):
+        result = collect(*a, **kwargs)
+        root = Path(kwargs["output_dir"])
+        return SimpleNamespace(
+            saved_games=result.saved_games,
+            completed_paths=tuple(
+                root / f"rollout_seed_{seed}.npz"
+                for seed in seen["seeds"][-1]
+            ),
+        )
+
+    def returns(paths, output, *, gamma):
+        assert len(paths) == 2
+        assert all(p.exists() for p in paths)
+        assert gamma == 0.99
+        Path(output).write_bytes(b"returns")
+
+    def critic_trainer(settings):
+        assert Path(settings.dataset).exists()
+        assert settings.epochs == 2
+        assert settings.batch_size == 64
+        Path(settings.checkpoint).write_bytes(b"trained")
+
+    records = run_policy_iterations(
+        config,
+        agent_builder=agent_with_critics,
+        collector=completed_collector,
+        visit_builder=visit,
+        policy_trainer=train,
+        return_builder=returns,
+        q_trainer=critic_trainer,
+        value_trainer=critic_trainer,
+        state_factory=lambda seed: seed,
+    )
+    first = config.output_dir / "iteration_000"
+    assert seen["q_inputs"] == [
+        config.__dict__.get("candidate_value_checkpoint", None),
+        str(first / "candidate_q.pt"),
+    ]
+    assert seen["v_inputs"] == [
+        "original_v.pt",
+        str(first / "state_value.pt"),
+    ]
+    assert records[0].output_q == first / "candidate_q.pt"
+    assert records[1].complete_games == 2
+    assert (first / "completed_action_returns.npz").exists()
+
+
+def test_optional_critics_preflight_future_outputs(tmp_path):
+    config = args(tmp_path, iterations=1)
+    config.update_critics = True
+    config.critic_epochs = 2
+    future = (
+        config.output_dir / "iteration_000" / "candidate_q.pt"
+    )
+    future.parent.mkdir(parents=True)
+    future.write_bytes(b"original")
+    seen, agent, collect, visit, train = make_fakes()
+    with pytest.raises(FileExistsError, match="Existing iteration files"):
+        run_policy_iterations(
+            config, agent_builder=agent, collector=collect,
+            visit_builder=visit, policy_trainer=train,
+            state_factory=lambda seed: seed,
+        )
+    assert seen["inputs"] == []
+    assert future.read_bytes() == b"original"

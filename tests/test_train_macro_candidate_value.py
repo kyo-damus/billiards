@@ -142,3 +142,54 @@ def test_load_dataset_keeps_attack_v0_compatible(tmp_path):
     )
     _, candidates, _, _ = load_dataset(output)
     assert candidates.shape == (2, 25)
+
+
+
+def test_executed_return_q_training_uses_episode_disjoint_split(tmp_path):
+    from types import SimpleNamespace
+    import torch
+    from scripts.train_macro_candidate_value import train
+
+    dataset = tmp_path / "selected_returns.npz"
+    path = tmp_path / "selected_q.pt"
+    np.savez_compressed(
+        dataset,
+        state=np.zeros((4, 12), dtype=np.float32),
+        candidate=np.zeros((4, 31), dtype=np.float32),
+        q_target=np.array([0.49, 1.0, -1.49, 1.0], dtype=np.float32),
+        state_id=np.arange(4, dtype=np.int32),
+        episode_id=np.array([0, 0, 1, 1], dtype=np.int32),
+        candidate_encoding_version=np.array(2),
+        turn_aware=np.array(True),
+        target_kind=np.array("selected_action_mc_return"),
+    )
+    train(SimpleNamespace(
+        dataset=str(dataset), checkpoint=str(path), device="cpu",
+        seed=123, validation_fraction=0.5, hidden_dim=16,
+        learning_rate=0.001, weight_decay=0.0, epochs=2,
+        batch_size=2, grad_clip=5.0, log_interval=1,
+    ))
+    checkpoint = torch.load(path, map_location="cpu", weights_only=False)
+    assert checkpoint["target_kind"] == "selected_action_mc_return"
+    assert checkpoint["turn_aware"] is True
+    assert checkpoint["candidate_dim"] == 31
+
+
+def test_executed_return_q_training_rejects_missing_episode_id(tmp_path):
+    import pytest
+    from types import SimpleNamespace
+    from scripts.train_macro_candidate_value import train
+
+    dataset = tmp_path / "missing_episode.npz"
+    np.savez_compressed(
+        dataset,
+        state=np.zeros((4, 12), dtype=np.float32),
+        candidate=np.zeros((4, 31), dtype=np.float32),
+        q_target=np.ones(4, dtype=np.float32),
+        state_id=np.arange(4),
+        candidate_encoding_version=np.array(2),
+        turn_aware=np.array(True),
+        target_kind=np.array("selected_action_mc_return"),
+    )
+    with pytest.raises(ValueError, match="requires episode_id"):
+        train(SimpleNamespace(dataset=str(dataset), device="cpu", seed=1))

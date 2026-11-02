@@ -401,7 +401,7 @@ def train(
 
     # New datasets record whether opponent continuations
     # were negated. Old Attack v0 datasets have no flag.
-    with np.load(args.dataset) as dataset_metadata:
+    with np.load(args.dataset, allow_pickle=False) as dataset_metadata:
         turn_aware_targets = bool(
             dataset_metadata["turn_aware"].item()
         ) if "turn_aware" in dataset_metadata else False
@@ -410,6 +410,22 @@ def train(
             if "target_kind" in dataset_metadata
             else "unspecified_legacy_or_oracle"
         )
+        # Executed returns are temporally correlated within a
+        # game. Split by episode_id rather than per-turn state_id.
+        if target_kind == "selected_action_mc_return":
+            if "episode_id" not in dataset_metadata:
+                raise ValueError(
+                    "Selected-return Q dataset requires episode_id."
+                )
+            split_ids = np.asarray(
+                dataset_metadata["episode_id"], dtype=np.int64
+            ).reshape(-1)
+            if split_ids.shape != state_ids_np.shape:
+                raise ValueError(
+                    "episode_id length must match the Q samples."
+                )
+        else:
+            split_ids = state_ids_np
 
     candidate_dim = int(
         candidates_np.shape[1]
@@ -425,7 +441,7 @@ def train(
         train_indices,
         val_indices,
     ) = make_group_split(
-        state_ids_np,
+        split_ids,
         args.validation_fraction,
         args.seed,
     )

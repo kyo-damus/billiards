@@ -1345,3 +1345,55 @@ integration. The leaf V should not be interpreted as
 accurate state evaluation before larger representative
 training. The simplified rules and fixed-elevation actions
 remain unchanged.
+
+
+## Stage 7j: optional complete-game Q and V updates in Policy iteration
+
+The three-network integration smoke used the learned 31-D
+Candidate Policy and Candidate Q plus a trained 12-D
+state V. It completed three executed turns with both
+player handoffs (0->1 and 1->0), one player-1 point, and
+then hit the configured 3-turn limit. There was no
+failure, and no evidence of performance or accuracy
+from the tiny two-game / four-transition V dataset.
+
+The existing `scripts.iterate_mixed_macro_policy` can now
+accept `--update-critics`. The default is OFF so previous
+smokes preserve a fixed Q and optional fixed V.
+
+When enabled, each iteration:
+- collects experiences and trains Candidate Policy from
+  root visits (whether or not the games end);
+- when **two or more games actually complete**, builds
+  selected-action MC return targets from only those
+  complete games;
+- trains a new 31-D Candidate Q and a new 12-D state V,
+  saving separate checkpoints under the iteration folder;
+- on the NEXT iteration, loads updated Policy, Q and V.
+- if fewer than two games complete, leaves the prior Q/V
+  checkpoints intact (no zero-bootstrap pseudo targets).
+
+The Candidate Q trainer now splits executed-return datasets
+by `episode_id` rather than by per-step `state_id`,
+to avoid train/validation leakage between adjacent states.
+Legacy Attack and two-step oracle Q datasets still split by
+candidate state groups as before.
+
+This is **not** a joint end-to-end policy-gradient method
+or a claim of strong gameplay. The Policy imitates its MCTS
+root visits, Q regresses executed action returns when games
+finish, and V regresses state returns. In particular, Q/V
+are reinitialized for each optional training call, not
+fine-tuned from the previous checkpoint. The Micro and
+Safety hand-designed shot generator remain unchanged.
+
+For implementation verification, use only the narrow tests:
+
+```bash
+python -m pytest tests/test_iterate_mixed_macro_policy.py \
+  tests/test_train_macro_candidate_value.py -v
+```
+
+No new long physical experiment is required. In a later
+smoke, `--update-critics --critic-epochs 2` will activate
+the guarded branch, but only if at least two games terminate.
