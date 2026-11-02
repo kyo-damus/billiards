@@ -179,6 +179,10 @@ def parse_args():
     parser.add_argument("--residual-checkpoint", required=True)
     parser.add_argument("--candidate-value-checkpoint", required=True)
     parser.add_argument("--candidate-policy-checkpoint")
+    parser.add_argument(
+        "--state-value-checkpoint",
+        help="Optional trained 12D state V; otherwise zero leaf value.",
+    )
     parser.add_argument("--iterations", type=int, default=1)
     parser.add_argument("--games-per-iteration", type=int, default=2)
     parser.add_argument("--start-seed", type=int, default=94100)

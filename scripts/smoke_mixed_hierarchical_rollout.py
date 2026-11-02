@@ -30,6 +30,7 @@ from src.macro.candidate_value import (
 )
 from src.macro.mcts import MCTS
 from src.macro.mixed_search import MixedRootGenerator, ZeroValue
+from src.macro.value import load_macro_state_value_network
 
 
 def build_agent(args, device):
@@ -74,9 +75,20 @@ def build_agent(args, device):
         safety_shots,
         safety_adapter,
     )
+
+    state_value_checkpoint = getattr(
+        args, "state_value_checkpoint", None
+    )
+    if state_value_checkpoint is not None:
+        state_value_network, _ = load_macro_state_value_network(
+            state_value_checkpoint, device=device,
+        )
+    else:
+        state_value_network = ZeroValue().to(device)
+
     mcts = MCTS(
         policy_network=policy,
-        value_network=ZeroValue().to(device),
+        value_network=state_value_network,
         action_generator=direct_generator,
         root_action_generator=roots,
         transition_model=transition,
@@ -121,6 +133,14 @@ def main(args):
             "learned 31-D"
             if args.candidate_policy_checkpoint
             else "uniform"
+        )
+    )
+    print(
+        "State V: "
+        + (
+            str(args.state_value_checkpoint)
+            if args.state_value_checkpoint
+            else "zero integration baseline"
         )
     )
 
@@ -177,6 +197,10 @@ def parse_args():
     parser.add_argument("--residual-checkpoint", required=True)
     parser.add_argument("--candidate-value-checkpoint", required=True)
     parser.add_argument("--candidate-policy-checkpoint")
+    parser.add_argument(
+        "--state-value-checkpoint",
+        help="Optional 12-D turn-aware state V trained on complete games.",
+    )
     parser.add_argument(
         "--save-rollout",
         help=(

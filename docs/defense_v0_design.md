@@ -1285,3 +1285,63 @@ python -m scripts.iterate_mixed_macro_policy \
 The small sample size, limited actions, and two-object-ball rules
 make this strictly a wiring smoke. Detailed parameter studies,
 performance metrics and long-duration training are deferred.
+
+
+## Stage 7i: opt-in trained state value V(s) for mixed MCTS
+
+The bounded collect->visit distribution->Policy training iteration
+finished end-to-end: two independent games, five executed shots,
+five MCTS root states, 100 candidate rows, a new 31-D Policy
+checkpoint at `iteration_000/candidate_policy.pt`. One game
+completed and one was truncated; no performance conclusion follows.
+
+The mixed MCTS has so far relied on `ZeroValue` for nonterminal
+search leaves. The existing 12-D `MacroValueNetwork` is now
+paired with an explicit `scripts/train_macro_state_value.py`
+trainer and strict `load_macro_state_value_network` checkpoint
+loader. It fits **observed, turn-aware MC returns of executed
+actions from complete games**, as a behavior-policy V(s)
+supervision signal, not as oracle max-over-candidates Q. The
+training/validation split is by whole `episode_id` to avoid
+leaking adjacent states. It requires >=2 completed episodes;
+never pad a truncated experience with zero continuation.
+
+`scripts.smoke_mixed_hierarchical_rollout` and
+`scripts.iterate_mixed_macro_policy` accept the optional
+`--state-value-checkpoint` argument. With no argument, the
+existing zero leaf V behavior is retained. Candidate Policy
+and Candidate Q checkpoints and teacher semantics do not change.
+
+The user has two distinct *completed* smoke experiences available:
+`mixed_rollout_smoke.npz` (seed 94000, two turns) and
+`macro_policy_iteration_smoke/iteration_000/rollouts/rollout_seed_94101.npz`
+(seed 94101, two turns). For a tiny wiring check:
+
+```bash
+python -m pytest tests/test_macro_state_value.py -v
+
+python -m scripts.build_mixed_rollout_return_dataset \
+  --rollout mixed_rollout_smoke.npz \
+    macro_policy_iteration_smoke/iteration_000/rollouts/rollout_seed_94101.npz \
+  --output macro_state_value_return_smoke.npz
+
+python -m scripts.train_macro_state_value \
+  --dataset macro_state_value_return_smoke.npz \
+  --checkpoint macro_state_value_mixed_v2.pt \
+  --epochs 2 --device cuda
+
+python -m scripts.smoke_mixed_hierarchical_rollout \
+  --base-checkpoint goal_conditioned_micro_mixed_curriculum_100k.pt \
+  --residual-checkpoint position_power_residual_mlp_2000.pt \
+  --candidate-policy-checkpoint macro_policy_iteration_smoke/iteration_000/candidate_policy.pt \
+  --candidate-value-checkpoint macro_candidate_value_mixed_v2.pt \
+  --state-value-checkpoint macro_state_value_mixed_v2.pt \
+  --seed 94000 --max-turns 3 --simulations 10 --device cuda
+```
+
+These two completed episodes are nowhere near a meaningful
+state-value learning sample; only verify trainer/loader/MCTS
+integration. The leaf V should not be interpreted as
+accurate state evaluation before larger representative
+training. The simplified rules and fixed-elevation actions
+remain unchanged.

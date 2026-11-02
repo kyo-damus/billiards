@@ -30,3 +30,35 @@ class MacroValueNetwork(nn.Module):
     def forward(self, state):
         return self.network(state)
         
+
+
+def load_macro_state_value_network(checkpoint_path, device="cpu"):
+    """Load explicitly tagged state V(s) from completed mixed games."""
+    import torch
+
+    checkpoint = torch.load(checkpoint_path, map_location=device)
+    required = (
+        "state_value_network", "state_dim", "hidden_dim",
+        "target_kind", "turn_aware", "reward_kind",
+    )
+    missing = [key for key in required if key not in checkpoint]
+    if missing:
+        raise ValueError(
+            "State V checkpoint is missing keys: " + ", ".join(missing)
+        )
+    if (
+        int(checkpoint["state_dim"]) != MACRO_STATE_DIM
+        or str(checkpoint["target_kind"]) != "selected_action_mc_return"
+        or not bool(checkpoint["turn_aware"])
+        or str(checkpoint["reward_kind"]) != "macro_local_reward"
+    ):
+        raise ValueError(
+            "Expected 12D turn-aware State V from Macro local MC returns."
+        )
+    network = MacroValueNetwork(
+        state_dim=MACRO_STATE_DIM,
+        hidden_dim=int(checkpoint["hidden_dim"]),
+    ).to(device)
+    network.load_state_dict(checkpoint["state_value_network"])
+    network.eval()
+    return network, checkpoint
