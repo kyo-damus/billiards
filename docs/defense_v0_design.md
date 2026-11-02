@@ -1138,3 +1138,49 @@ A two-action complete episode only supplies TWO supervised
 Q targets. Training on it would be a software wiring check,
 not meaningful optimization. The original full-candidate
 two-step teacher datasets/checkpoints remain untouched.
+
+
+## Stage 7f: collect multiple bounded mixed games
+
+The seed-94000 complete two-turn experience was successfully converted
+to the selected-action Monte Carlo return archive:
+1 completed trajectory and 2 labeled executed actions. This is
+an interface verification, not evidence of learning or play strength.
+
+A new script `scripts/collect_mixed_rollouts.py` reuses the working
+31-D Candidate Policy / Q / mixed MCTS / FastFiz stack to play a
+user-bounded number of independently seeded simplified games.
+Each game gets its own `rollout_seed_N.npz` under `--output-dir`.
+Both complete and truncated/no-candidate games are persisted.
+
+`--return-dataset PATH` is opt-in and converts **only terminated
+complete games** through the existing executed-return converter;
+nonterminal rollouts remain as unlabeled experience files. When
+none complete, the script does not create a misleading empty or
+zero-bootstrap return dataset. A preflight conflict check refuses
+to overwrite any existing output unless `--overwrite` is given.
+The script prints only execution/collection status and does
+not perform policy training or performance comparisons.
+
+A tiny bounded system smoke:
+
+```bash
+python -m pytest tests/test_collect_mixed_rollouts.py \
+  tests/test_mixed_rollout_return_dataset.py -v
+
+python -m scripts.collect_mixed_rollouts \
+  --base-checkpoint goal_conditioned_micro_mixed_curriculum_100k.pt \
+  --residual-checkpoint position_power_residual_mlp_2000.pt \
+  --candidate-policy-checkpoint macro_candidate_policy_mixed_v2.pt \
+  --candidate-value-checkpoint macro_candidate_value_mixed_v2.pt \
+  --games 2 --start-seed 94000 --max-turns 3 \
+  --simulations 10 --output-dir mixed_rollouts_smoke_batch \
+  --return-dataset macro_selected_return_batch_smoke.npz \
+  --device cuda
+```
+
+This still does not train Macro Policy from execution data:
+only selected actions have observed returns, and the original
+25-D Attack / 31-D mixed two-step supervised datasets retain
+their separate roles. The 2-object-ball SimplifiedGameRules and
+fixed-elevation action spaces remain unchanged.
