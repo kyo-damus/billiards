@@ -33,6 +33,7 @@
 - `tests/`: 関連機能の単体・結合テスト
 - [docs/defense_v0_design.md](docs/defense_v0_design.md): Defense v0と実装段階ごとの技術ログ
 - [docs/RESEARCH_CONTEXT.md](docs/RESEARCH_CONTEXT.md): **研究方針と引き継ぎ資料（主に更新する文書）**
+- [docs/CHAT_HANDOFF_PROMPT.md](docs/CHAT_HANDOFF_PROMPT.md): **新しいChatGPTチャットを開始するときのコピー用プロンプト**
 
 実行方法・今後の優先事項は上記の引き継ぎ資料を参照してください。
 
