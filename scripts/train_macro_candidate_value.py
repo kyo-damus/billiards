@@ -405,10 +405,21 @@ def train(
         turn_aware_targets = bool(
             dataset_metadata["turn_aware"].item()
         ) if "turn_aware" in dataset_metadata else False
+        target_kind = (
+            str(dataset_metadata["target_kind"].item())
+            if "target_kind" in dataset_metadata
+            else "unspecified_legacy_or_oracle"
+        )
 
     candidate_dim = int(
         candidates_np.shape[1]
     )
+    if target_kind == "selected_action_mc_return":
+        print(
+            "NOTE: selected-action MC returns (executed actions only); "
+            "not the all-candidate two-step oracle. "
+            "Use this run for pipeline verification, not policy evaluation."
+        )
 
     (
         train_indices,
@@ -675,6 +686,7 @@ def train(
         "turn_aware": bool(
             turn_aware_targets
         ),
+        "target_kind": target_kind,
         "best_epoch": int(
             best_epoch
         ),

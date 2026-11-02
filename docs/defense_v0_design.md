@@ -1092,3 +1092,49 @@ NOT teacher Q labels, MC returns, policy training targets, or
 a win-rate evaluation. Off-policy / truncated-episode target
 construction and strategic training remain future work; existing
 25-D/31-D checkpoints and mixed-policy smoke are unchanged.
+
+
+## Stage 7e: executed mixed-rollout return labels (selected actions only)
+
+The `--save-rollout mixed_rollout_smoke.npz` integration run
+completed and saved **two executed turns** from seed 94000;
+the score and selected local rewards were consistent with the
+earlier run. This establishes file generation, not value learning.
+
+`scripts/build_mixed_rollout_return_dataset.py` converts one or
+more *complete, terminated* experience archives into the tensor
+shape accepted by the existing 31-D Candidate Q trainer. It uses
+the **actually executed Macro local rewards**, not game score
+changes, and computes per-player turn-aware discounted returns:
+
+`G_t = r_t + gamma * (+1 if player_t==player_(t+1) else -1) * G_(t+1)`
+
+The final terminal action has `G_last=r_last`, with no
+bootstrap. Truncated episodes (`max_turns`, no candidate, etc.)
+are **rejected** instead of being mislabeled as full returns.
+Each row labels one actually chosen action; other MCTS root
+candidates do NOT receive returns.
+
+The resulting `q_target` archive is explicitly tagged
+`target_kind=selected_action_mc_return`,
+`turn_aware=True`, and `candidate_encoding_version=2`.
+The existing Candidate Q training script can load it,
+and saves the target provenance in its checkpoint.
+The Candidate Policy training script deliberately rejects
+selected-action returns: a single labeled candidate in each
+state cannot provide the relative distribution over choices.
+
+Minimal file conversion smoke (not a valid basis for performance
+comparison or checkpoint improvement):
+
+```bash
+python -m scripts.build_mixed_rollout_return_dataset \
+  --rollout mixed_rollout_smoke.npz \
+  --output macro_selected_return_smoke.npz \
+  --gamma 0.99
+```
+
+A two-action complete episode only supplies TWO supervised
+Q targets. Training on it would be a software wiring check,
+not meaningful optimization. The original full-candidate
+two-step teacher datasets/checkpoints remain untouched.

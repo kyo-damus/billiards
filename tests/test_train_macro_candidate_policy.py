@@ -131,3 +131,24 @@ def test_train_policy_on_tiny_mixed_31d_dataset(tmp_path):
             torch.zeros(MACRO_STATE_DIM), torch.zeros(2, 31)
         )
     assert scores.shape == (2,)
+
+
+
+def test_policy_trainer_rejects_executed_only_mc_returns(tmp_path):
+    from types import SimpleNamespace
+    import pytest
+    from scripts.train_macro_candidate_policy import train
+
+    path = tmp_path / "selected_only.npz"
+    np.savez_compressed(
+        path,
+        state=np.zeros((2, 12), dtype=np.float32),
+        candidate=np.zeros((2, 31), dtype=np.float32),
+        q_target=np.array([0.5, 1.0], dtype=np.float32),
+        state_id=np.array([0, 1], dtype=np.int32),
+        candidate_encoding_version=np.array(2),
+        turn_aware=np.array(True),
+        target_kind=np.array("selected_action_mc_return"),
+    )
+    with pytest.raises(ValueError, match="cannot train Candidate Policy"):
+        train(SimpleNamespace(dataset=str(path), device="cpu", seed=1))

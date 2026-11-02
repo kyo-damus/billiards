@@ -257,6 +257,20 @@ def train(
         args.dataset
     )
 
+    # Candidate Policy is a distribution over competing root
+    # choices. An executed-only return log has one labeled action
+    # per state and would give trivial one-class softmax targets.
+    with np.load(args.dataset, allow_pickle=False) as metadata:
+        if (
+            "target_kind" in metadata
+            and str(metadata["target_kind"].item())
+            == "selected_action_mc_return"
+        ):
+            raise ValueError(
+                "Executed-only return data cannot train Candidate Policy. "
+                "Use full-candidate Q/oracle targets or MCTS visit targets."
+            )
+
     candidate_dim = int(candidates_np.shape[1])
     if candidate_dim not in (MACRO_CANDIDATE_DIM, MACRO_CANDIDATE_V2_DIM):
         raise ValueError("Candidate dimension must be 25 or 31.")
