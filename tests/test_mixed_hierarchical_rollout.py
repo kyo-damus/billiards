@@ -237,3 +237,53 @@ def test_rollout_propagates_defense_turn_change_to_opponent():
     assert result.records[1].player_before == 1
     assert result.records[1].score_delta == (0.0, 1.0)
     assert not result.terminated
+
+
+
+def test_rollout_records_executed_state_snapshots_and_mcts_root():
+    from types import SimpleNamespace
+
+    candidate = direct_candidate()
+    initial = make_state()
+
+    class RootPlanner:
+        def __init__(self):
+            self.last_root = None
+
+        def select_action(self, state):
+            self.last_root = SimpleNamespace(
+                children={
+                    candidate: SimpleNamespace(
+                        visit_count=7, prior=0.6, predicted_q=1.25,
+                    )
+                }
+            )
+            return candidate
+
+    class Physical:
+        def step(self, state, action):
+            return MacroTransitionResult(
+                next_state=make_state(
+                    player=1, pockets=(-1, -1, -1)
+                ),
+                reward=0.0,
+                terminated=False,
+            )
+
+    agent = HierarchicalAgent(RootPlanner(), Physical())
+    result = MixedHierarchicalRollout(agent).run(
+        initial, max_turns=1
+    )
+    record = result.records[0]
+
+    assert record.state_before is not initial
+    assert record.state_before.current_player == 0
+    assert record.state_after.current_player == 1
+    assert len(record.root_candidates) == 1
+    assert record.root_candidates[0].selected
+    assert record.root_candidates[0].visits == 7
+    assert record.root_candidates[0].prior == 0.6
+    assert record.root_candidates[0].predicted_q == 1.25
+
+    initial.ball_positions[0, 0] = 0.1
+    assert record.state_before.ball_positions[0, 0] == 0.5

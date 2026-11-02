@@ -1051,3 +1051,44 @@ off from a scripted Safety action to the opponent's next turn.
 Neither tests a learned Defense choice nor changes scoring or
 physics. This is implementation contract coverage, not
 performance comparison.
+
+
+## Stage 7d: persist executed trajectories and root search candidates
+
+The repeat multi-turn smoke on seed 94000/15 simulations confirmed
+two turns before simplified terminal: on turn 0 the selected
+DIRECT_ATTACK targeted pocket 0 but its object ball actually entered
+pocket 5, resulting in Macro local reward -0.5 while GameRules
+increased player 0's score by one. Turn 1 potted another object ball,
+and the game ended 2-0. This is a useful interface test but NOT a
+learned-play performance estimate.
+
+For future data collection, `MixedHierarchicalRollout` snapshots
+the GameState before and after each *executed* shot, plus the
+selected MacroCandidate and (when MCTS provides `last_root`) the
+root candidates with their visit counts, priors, and predicted Q.
+The new `src/controller/mixed_rollout_dataset.py` saves these
+records as strictly typed `.npz` arrays (`allow_pickle=False`
+can read them), including:
+- `state` / `next_state` (12-D) and `candidate` (31-D)
+  corresponding to the executed move;
+- exact raw ball positions, pocket indices, and game scores
+  before/after, so a GameState can be reconstructed despite
+  the 12-D encoder only storing pocket *flags*;
+- `macro_local_reward` and `score_delta` separately,
+  current/next players and terminal flags;
+- variable-number candidate roots in flat `root_candidate`
+  rows, grouped by `root_turn_index`, with
+  `root_visit_count`, `root_prior`, `root_predicted_q`,
+  and `root_selected`.
+
+Add `--save-rollout mixed_rollout_smoke.npz` to
+`scripts.smoke_mixed_hierarchical_rollout` to opt in.
+Nothing is saved by default. A zero-step stop also saves
+typed empty matrices without inventing a completed game.
+
+**Crucial distinction:** These are observed experience samples,
+NOT teacher Q labels, MC returns, policy training targets, or
+a win-rate evaluation. Off-policy / truncated-episode target
+construction and strategic training remain future work; existing
+25-D/31-D checkpoints and mixed-policy smoke are unchanged.

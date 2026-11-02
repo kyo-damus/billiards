@@ -18,6 +18,9 @@ from src.controller.hierarchical_agent import HierarchicalAgent
 from src.controller.mixed_hierarchical_rollout import (
     MixedHierarchicalRollout,
 )
+from src.controller.mixed_rollout_dataset import (
+    save_mixed_rollout_npz,
+)
 from src.env.micro_billiard_env import MicroBilliardEnv
 from src.macro.candidate_policy import (
     load_macro_candidate_policy_network,
@@ -145,6 +148,17 @@ def main(args):
     )
     print(f"stop reason: {rollout.stop_reason}")
     print(f"game terminated: {rollout.terminated}")
+    if args.save_rollout is not None:
+        path = save_mixed_rollout_npz(
+            rollout,
+            args.save_rollout,
+            seed=args.seed,
+        )
+        print(
+            f"saved mixed rollout experience: {path} "
+            f"({len(rollout.records)} executed turns)"
+        )
+
     print(
         "Macro local rewards and SimplifiedGameRules score deltas "
         "are intentionally separate. Wrong-pocket shots can score "
@@ -163,6 +177,13 @@ def parse_args():
     parser.add_argument("--residual-checkpoint", required=True)
     parser.add_argument("--candidate-value-checkpoint", required=True)
     parser.add_argument("--candidate-policy-checkpoint")
+    parser.add_argument(
+        "--save-rollout",
+        help=(
+            "Optional .npz experience log of executed turns and "
+            "MCTS root candidates; NOT supervised Q targets."
+        ),
+    )
     parser.add_argument("--seed", type=int, default=94000)
     parser.add_argument("--max-turns", type=int, default=3)
     parser.add_argument("--simulations", type=int, default=15)

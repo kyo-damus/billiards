@@ -8,10 +8,35 @@ forward across independent MCTS decisions.
 
 from dataclasses import dataclass
 
+import numpy as np
+
 from src.common.types import GameState
 from src.controller.hierarchical_agent import HierarchicalAgent
 from src.macro.candidate import MacroCandidate
 from src.macro.mcts import NoFeasibleMacroActionError
+
+
+def copy_game_state(state: GameState) -> GameState:
+    """Snapshot mutable positions/score/pocket arrays for rollout logs."""
+    return GameState(
+        ball_positions=np.asarray(
+            state.ball_positions, dtype=np.float32
+        ).copy(),
+        score=np.asarray(state.score, dtype=np.float32).copy(),
+        current_player=int(state.current_player),
+        ball_pocket_indices=np.asarray(
+            state.ball_pocket_indices, dtype=np.int32
+        ).copy(),
+    )
+
+
+@dataclass(frozen=True)
+class RootCandidateRecord:
+    choice: MacroCandidate
+    visits: int
+    prior: float
+    predicted_q: float | None
+    selected: bool
 
 
 @dataclass(frozen=True)
@@ -24,6 +49,9 @@ class HierarchicalTurnRecord:
     terminated: bool
     score_delta: tuple[float, float]
     newly_pocketed_balls: tuple[int, ...]
+    state_before: GameState
+    state_after: GameState
+    root_candidates: tuple[RootCandidateRecord, ...] = ()
 
 
 @dataclass
@@ -97,6 +125,25 @@ class MixedHierarchicalRollout:
                 )
             )
 
+            root_candidates = ()
+            mcts = getattr(self.agent, "mcts", None)
+            root = getattr(mcts, "last_root", None)
+            if root is not None:
+                root_candidates = tuple(
+                    RootCandidateRecord(
+                        choice=candidate,
+                        visits=int(child.visit_count),
+                        prior=float(child.prior),
+                        predicted_q=(
+                            None
+                            if child.predicted_q is None
+                            else float(child.predicted_q)
+                        ),
+                        selected=(candidate == result.macro_action),
+                    )
+                    for candidate, child in root.children.items()
+                )
+
             records.append(
                 HierarchicalTurnRecord(
                     turn_index=turn_index,
@@ -107,6 +154,9 @@ class MixedHierarchicalRollout:
                     terminated=bool(result.terminated),
                     score_delta=score_delta,
                     newly_pocketed_balls=newly_pocketed,
+                    state_before=copy_game_state(state),
+                    state_after=copy_game_state(result.next_state),
+                    root_candidates=root_candidates,
                 )
             )
             state = result.next_state
