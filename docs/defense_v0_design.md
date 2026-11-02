@@ -834,3 +834,58 @@ python -m scripts.probe_cue_elevation_on_hard_states \
   --tip-y-mm 0 5 \
   --device cuda
 ```
+
+
+## Stage 6i: first contact is possible but Defense value is still unknown
+
+The 4 elevation x 5 heading offsets x 3 powers x 2 tip-Y grid
+on two physical post-SAFETY rail-hard states found:
+- Source board 1: 20/35/50/60 deg physical validity
+  0/6/33/42 out of 60; **0** correct first contacts at all
+  elevations, even when shots were physically allowed.
+- Source board 3: validity 18/48/60/60 out of 60; correct
+  first contacts **10/11/0/0**, respectively. All 21
+  correct contacts were nonpotting and nonscratching.
+- The earlier 10-deg trained Attack candidate set remained
+  physically invalid (12/12 and 9/9) with code 128.
+
+Therefore (a) 10-degree impossibility creates a spurious
+hard-board label; (b) increasing elevation can unblock the
+cue, but higher is not always better for object-ball contact;
+(c) there are possible physical Safety-like contacts from
+board 3, but no demonstration that they lower opponent
+threat or pass official billiards legality.
+
+An isolated diagnostic addition now checks the post-shot
+state using SimplifiedGameRules and reports
+`simplified_safety_eligible`. With
+`--threat-samples-per-elevation N`, it also evaluates up
+to N of those eligible shots per elevation under the
+**existing fixed 10-degree opponent DIRECT Micro**, reporting
+the minimum successful opponent DIRECT count over that
+nonrandom, grid-ordered sample. This does not re-label
+the 31D Q, create executable elevated MacroCandidates, or
+establish any real-game success rate. The opponent can also
+be blocked by the same 10-degree actuator restriction, so
+zero observed DIRECT success may overstate tactical Safety.
+
+First try a small threat sample:
+
+```bash
+python -m scripts.probe_cue_elevation_on_hard_states \
+  --base-checkpoint goal_conditioned_micro_mixed_curriculum_100k.pt \
+  --residual-checkpoint position_power_residual_mlp_2000.pt \
+  --source-boards 5 --source-seed 90000 \
+  --max-hard-states 2 --max-successful-direct 0 \
+  --elevations 20 35 50 60 \
+  --angle-offsets -10 -5 0 5 10 \
+  --powers 0.65 1.0 1.5 --tip-y-mm 0 5 \
+  --threat-samples-per-elevation 3 \
+  --device cuda
+```
+
+For training or deployed action selection, elevation must
+be carried consistently in the physical-shot representation,
+the macro encoding, execution and next-state teacher. That
+is deliberately deferred until physical and simplified-game
+diagnostics justify it.

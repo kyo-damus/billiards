@@ -29,6 +29,8 @@ from scripts.eval_post_safety_hard_states import (
     select_hard_states_from_safety,
 )
 from src.common.table import TABLE_LENGTH, TABLE_WIDTH
+from src.common.types import GameState
+from src.game.simple_rules import SimplifiedGameRules
 from src.env.fastfiz_simulator import (
     FastFizSimulator,
     describe_fastfiz_precondition,
@@ -48,6 +50,46 @@ def rail_distances(positions):
     }
 
 
+def classify_safety_after_elevated_shot(
+    original_state, snapshot, first_contact_ball, intended_ball,
+    rules=None,
+):
+    """Apply simplified game rules to an elevation-probe result.
+
+    Return a next opponent-turn GameState only for a v0-eligible
+    nonpotting Safety. This does not validate official foul rules.
+    """
+    if first_contact_ball != intended_ball:
+        return None
+    before = np.asarray(
+        original_state.ball_pocket_indices, dtype=np.int32
+    )
+    after = np.asarray(snapshot.pocket_indices, dtype=np.int32)
+    if after[0] >= 0:
+        return None
+    if np.any((before[1:] < 0) & (after[1:] >= 0)):
+        return None
+
+    physical = GameState(
+        ball_positions=np.asarray(
+            snapshot.positions, dtype=np.float32
+        ).copy(),
+        ball_pocket_indices=after.copy(),
+        score=original_state.score.copy(),
+        current_player=original_state.current_player,
+    )
+    transition = (
+        rules if rules is not None else SimplifiedGameRules()
+    ).apply(
+        previous_state=original_state,
+        physical_state=physical,
+        shot_info={"scratched": False},
+    )
+    if transition.terminated or not transition.turn_changed:
+        return None
+    return transition.next_state
+
+
 def probe_elevation_grid(
     state,
     elevations,
@@ -55,6 +97,8 @@ def probe_elevation_grid(
     power=1.0,
     powers=None,
     tip_y_mm=(0.0,),
+    threat_evaluator=None,
+    threat_samples_per_elevation=0,
 ):
     """Return per-elevation FastFiz feasibility and first-contact counts.
 
@@ -64,6 +108,10 @@ def probe_elevation_grid(
     """
     powers = (power,) if powers is None else tuple(powers)
     tips = tuple(tip_y_mm)
+    if threat_samples_per_elevation < 0:
+        raise ValueError("threat_samples_per_elevation must be >= 0.")
+    if threat_samples_per_elevation and threat_evaluator is None:
+        raise ValueError("Threat evaluator required for threat sampling.")
     if (
         not powers
         or not tips
@@ -72,6 +120,7 @@ def probe_elevation_grid(
     ):
         raise ValueError("Invalid power/tip diagnostic grid.")
     sim = FastFizSimulator()
+    rules = SimplifiedGameRules()
     rows = []
 
     target_balls = [
@@ -88,6 +137,9 @@ def probe_elevation_grid(
         any_first = 0
         safety_like = 0
         first_contact_example = None
+        eligible_safety = 0
+        sampled_threat_count = 0
+        minimum_opponent_direct_success = None
 
         for target in target_balls:
             for offset in angle_offsets:
@@ -149,6 +201,34 @@ def probe_elevation_grid(
                         if not scratched and not new_pots:
                             safety_like += 1
 
+                        next_state = classify_safety_after_elevated_shot(
+                            state,
+                            snapshot,
+                            result.first_contact_ball,
+                            target,
+                            rules=rules,
+                        )
+                        if next_state is not None:
+                            eligible_safety += 1
+                            if (
+                                threat_evaluator is not None
+                                and sampled_threat_count
+                                < threat_samples_per_elevation
+                            ):
+                                threat = threat_evaluator.evaluate(
+                                    next_state,
+                                    defending_player=state.current_player,
+                                )
+                                count = int(threat.successful_pot_count)
+                                minimum_opponent_direct_success = (
+                                    count
+                                    if minimum_opponent_direct_success is None
+                                    else min(
+                                        minimum_opponent_direct_success, count
+                                    )
+                                )
+                                sampled_threat_count += 1
+
         rows.append({
             "elevation": float(elevation),
             "attempted": attempted,
@@ -156,6 +236,9 @@ def probe_elevation_grid(
             "correct_first": correct_first,
             "any_first": any_first,
             "safety_like": safety_like,
+            "eligible_safety": eligible_safety,
+            "sampled_threat_count": sampled_threat_count,
+            "min_opponent_direct_success": minimum_opponent_direct_success,
             "first_contact_example": first_contact_example,
             "codes": codes,
             "placements": placement_codes,
@@ -221,6 +304,16 @@ def main(args):
     print(f"angles: {args.angle_offsets}")
     print(f"powers: {args.powers if args.powers is not None else [args.power]}")
     print(f"tip_y_mm: {args.tip_y_mm}")
+    print(
+        f"opponent DIRECT threat samples per elevation: "
+        f"{args.threat_samples_per_elevation}"
+    )
+    if args.threat_samples_per_elevation:
+        print(
+            "Threat is deterministic under the existing 10-degree "
+            "opponent Micro; samples follow shot-grid order, "
+            "not a representative win-rate estimate."
+        )
 
     for board in range(args.source_boards):
         initial = random_state(env, args.source_seed + board)
@@ -268,6 +361,13 @@ def main(args):
                 power=args.power,
                 powers=args.powers,
                 tip_y_mm=args.tip_y_mm,
+                threat_evaluator=(
+                    safety_shots.opponent_threat_evaluator
+                    if args.threat_samples_per_elevation else None
+                ),
+                threat_samples_per_elevation=(
+                    args.threat_samples_per_elevation
+                ),
             ):
                 print(
                     f"  theta={row['elevation']:4.0f} deg "
@@ -275,6 +375,10 @@ def main(args):
                     f"any_first={row['any_first']} "
                     f"correct_first={row['correct_first']} "
                     f"no_pot_no_scratch_after_contact={row['safety_like']} "
+                    f"simplified_safety_eligible={row['eligible_safety']} "
+                    f"sampled_opponent_threat={row['sampled_threat_count']} "
+                    f"min_opponent_DIRECT_success="
+                    f"{row['min_opponent_direct_success']} "
                     f"codes=[{summarize_code_counts(row['codes'])}]"
                 )
                 if row["first_contact_example"] is not None:
@@ -325,6 +429,13 @@ def parse_args():
         "--tip-y-mm", type=float, nargs="+", default=[0.0],
     )
     parser.add_argument(
+        "--threat-samples-per-elevation", type=int, default=0,
+        help=(
+            "Evaluate up to N eligible elevated shots per elevation "
+            "using the CURRENT fixed-elevation opponent DIRECT Micro."
+        ),
+    )
+    parser.add_argument(
         "--device", choices=("auto", "cpu", "cuda"), default="auto"
     )
     parser.add_argument("--residual-scale", type=float, default=0.75)
@@ -372,6 +483,7 @@ def parse_args():
                 )
             )
         )
+        or args.threat_samples_per_elevation < 0
         or not args.tip_y_mm
         or any(
             not np.isfinite(v) or abs(v) > 12.0

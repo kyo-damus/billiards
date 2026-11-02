@@ -148,3 +148,46 @@ def test_probe_rejects_out_of_range_power_and_tip():
             powers=[1.0],
             tip_y_mm=[13.0],
         )
+
+def test_probe_turn_and_threat_sample_limit(monkeypatch):
+    from types import SimpleNamespace
+    import scripts.probe_cue_elevation_on_hard_states as module
+
+    class Sim:
+        def restore(self, snapshot):
+            self.snapshot_value = snapshot
+
+        def step(self, target_ball, **kwargs):
+            return SimpleNamespace(
+                precondition_code=0,
+                placement_code=0,
+                first_contact_ball=target_ball,
+            )
+
+        def snapshot(self):
+            return self.snapshot_value
+
+    class Threat:
+        def __init__(self):
+            self.count = 0
+
+        def evaluate(self, state, defending_player):
+            assert state.current_player != defending_player
+            self.count += 1
+            return SimpleNamespace(successful_pot_count=1)
+
+    monkeypatch.setattr(module, "FastFizSimulator", Sim)
+    t = Threat()
+    rows = probe_elevation_grid(
+        make_state(),
+        elevations=[20.0],
+        angle_offsets=[0.0],
+        powers=[1.0],
+        tip_y_mm=[0.0, 5.0],
+        threat_evaluator=t,
+        threat_samples_per_elevation=1,
+    )
+    assert rows[0]["eligible_safety"] == 4
+    assert rows[0]["sampled_threat_count"] == 1
+    assert rows[0]["min_opponent_direct_success"] == 1
+    assert t.count == 1
