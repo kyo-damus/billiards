@@ -1,7 +1,7 @@
 """Smoke: Attack and Safety root candidates in turn-aware v2 MCTS.
 
 The 31-D Candidate Q is used for unvisited branch estimates.
-No 31-D Candidate Policy has been trained, so priors are uniform.
+Optionally load a trained 31-D Candidate Policy, otherwise uniform priors.
 Only DIRECT candidates are generated deeper in the tree; this
 matches the two-step teacher's next-action set at the first depth.
 
@@ -24,6 +24,9 @@ from src.macro.candidate_value import (
     load_macro_candidate_value_network,
 )
 from src.macro.mcts import MCTS
+from src.macro.candidate_policy import (
+    load_macro_candidate_policy_network,
+)
 from src.macro.mixed_search import (
     MixedRootGenerator,
     ZeroValue,
@@ -46,6 +49,23 @@ def main(args):
             "Expected a turn-aware 31D mixed Candidate Q v2 checkpoint."
         )
 
+    policy = None
+    if args.candidate_policy_checkpoint:
+        policy, policy_checkpoint = (
+            load_macro_candidate_policy_network(
+                args.candidate_policy_checkpoint,
+                device=device,
+                expected_candidate_dim=31,
+            )
+        )
+        if (
+            int(policy_checkpoint.get("candidate_encoding_version", -1)) != 2
+            or not bool(policy_checkpoint.get("turn_aware", False))
+        ):
+            raise ValueError(
+                "Expected a turn-aware 31D mixed Candidate Policy v2."
+            )
+
     (
         transition,
         attack_generator,
@@ -60,7 +80,7 @@ def main(args):
         safety_adapter,
     )
     mcts = MCTS(
-        policy_network=None,
+        policy_network=policy,
         value_network=ZeroValue().to(device),
         action_generator=direct_generator,
         root_action_generator=roots,
@@ -73,7 +93,7 @@ def main(args):
         candidate_value_network=value,
         candidate_q_prior_visits=args.candidate_q_prior_visits,
         candidate_encoding_version=2,
-        uniform_candidate_priors=True,
+        uniform_candidate_priors=(policy is None),
         turn_aware=True,
         root_min_visits_before_puct=args.root_min_visits,
     )
@@ -85,6 +105,14 @@ def main(args):
 
     print("=== Turn-aware mixed Candidate Q MCTS v2 smoke ===")
     print(f"device: {device}; boards: {args.states}")
+    print(
+        "Candidate Policy prior: "
+        + (
+            f"learned 31D ({args.candidate_policy_checkpoint})"
+            if policy is not None
+            else "uniform integration baseline"
+        )
+    )
     print(
         f"simulations/board: {args.simulations}, "
         f"root_min_visits: {args.root_min_visits}, "
@@ -154,7 +182,7 @@ def main(args):
     )
     print(
         "This is a mixed search integration smoke, not a "
-        "fair win-rate comparison or trained Candidate Policy."
+        "fair win-rate comparison or learned policy performance test."
     )
 
 
@@ -163,6 +191,7 @@ def parse_args():
     parser.add_argument("--base-checkpoint", required=True)
     parser.add_argument("--residual-checkpoint", required=True)
     parser.add_argument("--candidate-value-checkpoint", required=True)
+    parser.add_argument("--candidate-policy-checkpoint")
     parser.add_argument("--states", type=int, default=2)
     parser.add_argument("--start-seed", type=int, default=94000)
     parser.add_argument("--simulations", type=int, default=30)

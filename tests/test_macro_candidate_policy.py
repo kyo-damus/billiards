@@ -235,3 +235,71 @@ def test_candidate_policy_checkpoint_roundtrip(
         checkpoint["hidden_dim"]
         == 32
     )
+
+
+
+def test_mixed_candidate_policy_v2_checkpoint_requires_explicit_opt_in(
+    tmp_path,
+):
+    import pytest
+    from src.macro.candidate_policy import (
+        load_macro_candidate_policy_network,
+    )
+
+    original = MacroCandidatePolicyNetwork(
+        candidate_dim=31,
+        hidden_dim=16,
+    )
+    path = tmp_path / "mixed_candidate_policy.pt"
+    torch.save(
+        {
+            "candidate_policy_network": original.state_dict(),
+            "state_dim": MACRO_STATE_DIM,
+            "candidate_dim": 31,
+            "candidate_encoding_version": 2,
+            "turn_aware": True,
+            "hidden_dim": 16,
+        },
+        path,
+    )
+
+    # Existing Attack-only code may only load 25-D by default.
+    with pytest.raises(ValueError, match="expected 25"):
+        load_macro_candidate_policy_network(path)
+
+    restored, metadata = load_macro_candidate_policy_network(
+        path, expected_candidate_dim=31
+    )
+    assert metadata["candidate_encoding_version"] == 2
+    state = torch.zeros(MACRO_STATE_DIM)
+    candidates = torch.zeros(3, 31)
+    with torch.no_grad():
+        torch.testing.assert_close(
+            original(state, candidates),
+            restored(state, candidates),
+        )
+
+
+def test_mixed_policy_loader_rejects_missing_v2_metadata(tmp_path):
+    import pytest
+    from src.macro.candidate_policy import (
+        load_macro_candidate_policy_network,
+    )
+
+    network = MacroCandidatePolicyNetwork(
+        candidate_dim=31, hidden_dim=16
+    )
+    path = tmp_path / "invalid_mixed_policy.pt"
+    torch.save(
+        {
+            "candidate_policy_network": network.state_dict(),
+            "state_dim": MACRO_STATE_DIM,
+            "candidate_dim": 31,
+            "hidden_dim": 16,
+        },
+        path,
+    )
+    with pytest.raises(ValueError, match="31-D v2"):
+        load_macro_candidate_policy_network(
+            path, expected_candidate_dim=31
+        )

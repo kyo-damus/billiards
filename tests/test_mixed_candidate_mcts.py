@@ -181,3 +181,56 @@ def test_mixed_mcts_rejects_25d_q():
             uniform_candidate_priors=True,
             candidate_value_network=WrongQ(),
         )
+
+
+
+class StrategyPolicy(nn.Module):
+    candidate_dim = 31
+
+    def forward(self, state, candidates):
+        return candidates[:, 1] * 3.0
+
+
+def test_mixed_mcts_uses_learned_31d_candidate_priors():
+    attack, safety = make_candidates()
+    mcts = MCTS(
+        policy_network=StrategyPolicy(),
+        value_network=ZeroValue(),
+        action_generator=FixedGenerator([]),
+        root_action_generator=FixedGenerator([attack, safety]),
+        transition_model=DummyTransition(),
+        simulations=4,
+        candidate_mode=True,
+        candidate_encoding_version=2,
+        uniform_candidate_priors=False,
+        turn_aware=True,
+        device="cpu",
+    )
+    root = mcts.search(make_state())
+    assert root.children[safety].prior > root.children[attack].prior
+    assert np.isclose(
+        sum(child.prior for child in root.children.values()),
+        1.0,
+    )
+    assert sum(child.visit_count for child in root.children.values()) == 4
+
+
+def test_mixed_mcts_refuses_old_25d_candidate_policy():
+    class OldPolicy(nn.Module):
+        candidate_dim = 25
+
+        def forward(self, state, candidates):
+            return torch.zeros(candidates.shape[0])
+
+    with pytest.raises(ValueError, match="31-D Candidate"):
+        MCTS(
+            policy_network=OldPolicy(),
+            value_network=ZeroValue(),
+            action_generator=FixedGenerator([]),
+            transition_model=DummyTransition(),
+            device="cpu",
+            candidate_mode=True,
+            turn_aware=True,
+            candidate_encoding_version=2,
+            uniform_candidate_priors=False,
+        )

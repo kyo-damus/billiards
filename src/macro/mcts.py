@@ -126,10 +126,17 @@ class MCTS:
                     "and turn_aware=True."
                 )
             if not self.uniform_candidate_priors:
-                raise ValueError(
-                    "31D mixed MCTS has no trained Candidate "
-                    "Policy v2; set uniform_candidate_priors=True."
+                # Explicitly require a 31-D candidate policy.
+                # A legacy fixed-12-class or 25-D policy must
+                # never silently enter the mixed search.
+                policy_dim = getattr(
+                    policy_network, "candidate_dim", None
                 )
+                if policy_dim != MACRO_CANDIDATE_V2_DIM:
+                    raise ValueError(
+                        "31D mixed MCTS requires a 31-D Candidate "
+                        "Policy v2 or uniform_candidate_priors=True."
+                    )
         self.candidate_value_network = (
             candidate_value_network
         )

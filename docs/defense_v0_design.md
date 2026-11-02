@@ -933,3 +933,47 @@ These two metrics use different action-selection mechanisms.
 Interpret disagreement as a possible action-space limitation,
 not as a fair learned-policy comparison. No Q targets, trained
 checkpoints, MacroCandidate encodings, or game rules are altered.
+
+
+## Stage 7a: trainable 31-D Candidate Policy prior (implementation-first)
+
+The multi-elevation exploratory probe is sufficiently validated for a
+small integration smoke: elevated Safety shots could make correct first
+contact and an opponent DIRECT physical-grid evaluation executed.
+Further shot-parameter tuning and performance comparisons are deferred.
+
+The existing state-candidate Candidate Policy scoring network now
+trains with either the legacy 25-D Attack dataset or the 31-D mixed
+Attack/Safety dataset. For v2, the checkpoint explicitly stores
+`candidate_encoding_version=2` and `turn_aware=True`; the
+checkpoint loader defaults to 25-D and requires
+`expected_candidate_dim=31` for mixed loading.
+
+Mixed MCTS accepts the trained 31-D Candidate Policy for prior logits
+and still retains uniform priors as a deliberate baseline when no
+policy checkpoint is supplied. Legacy 25-D weights and fixed-action
+Policy nets are rejected in the mixed search. Candidate Q, turn-aware
+backup and physical transitions are unchanged.
+
+Example *integration only*, using the existing small 20-board mixed Q
+dataset (not sufficient for broad performance conclusions):
+
+```bash
+python -m scripts.train_macro_candidate_policy \
+  --dataset macro_candidate_value_mixed_v2_train.npz \
+  --checkpoint macro_candidate_policy_mixed_v2.pt \
+  --epochs 20 --temperature 0.5 --device cuda
+
+python -m scripts.smoke_mixed_candidate_mcts \
+  --base-checkpoint goal_conditioned_micro_mixed_curriculum_100k.pt \
+  --residual-checkpoint position_power_residual_mlp_2000.pt \
+  --candidate-policy-checkpoint macro_candidate_policy_mixed_v2.pt \
+  --candidate-value-checkpoint macro_candidate_value_mixed_v2.pt \
+  --states 2 --start-seed 94000 --simulations 30 --device cuda
+```
+
+Only require the code to run and emit nonuniform priors and executable
+choices. Do not optimize Policy performance or mistake the small
+dataset for meaningful generalization. Elevation is NOT part of the
+mixed MacroCandidate representation yet, so the policy still selects
+the existing fixed-elevation executable Safety candidates.

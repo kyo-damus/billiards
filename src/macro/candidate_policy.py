@@ -122,6 +122,7 @@ class MacroCandidatePolicyNetwork(
 def load_macro_candidate_policy_network(
     checkpoint_path,
     device="cpu",
+    expected_candidate_dim=MACRO_CANDIDATE_DIM,
 ):
     """
     train_macro_candidate_policy.py が保存したcheckpointから
@@ -167,12 +168,25 @@ def load_macro_candidate_policy_network(
             f"expected {MACRO_STATE_DIM}."
         )
 
-    if candidate_dim != MACRO_CANDIDATE_DIM:
+    # Default loader remains Attack-v0 (25-D). Mixed 31-D models
+    # require explicit opt-in so incompatible models never mix.
+    if candidate_dim != int(expected_candidate_dim):
         raise ValueError(
             "Candidate policy checkpoint "
             f"candidate_dim={candidate_dim}, "
-            f"expected {MACRO_CANDIDATE_DIM}."
+            f"expected {expected_candidate_dim}."
         )
+
+    if candidate_dim != MACRO_CANDIDATE_DIM:
+        if (
+            candidate_dim != 31
+            or int(checkpoint.get("candidate_encoding_version", -1)) != 2
+            or not bool(checkpoint.get("turn_aware", False))
+        ):
+            raise ValueError(
+                "Mixed Candidate Policy requires 31-D v2 "
+                "checkpoint with turn_aware=True."
+            )
 
     network = MacroCandidatePolicyNetwork(
         state_dim=state_dim,

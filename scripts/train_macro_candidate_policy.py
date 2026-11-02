@@ -14,6 +14,7 @@ from scripts.train_macro_candidate_value import (
 )
 from src.macro.candidate_encoding import (
     MACRO_CANDIDATE_DIM,
+    MACRO_CANDIDATE_V2_DIM,
 )
 from src.macro.candidate_policy import (
     MacroCandidatePolicyNetwork,
@@ -256,6 +257,10 @@ def train(
         args.dataset
     )
 
+    candidate_dim = int(candidates_np.shape[1])
+    if candidate_dim not in (MACRO_CANDIDATE_DIM, MACRO_CANDIDATE_V2_DIM):
+        raise ValueError("Candidate dimension must be 25 or 31.")
+
     (
         train_indices,
         val_indices,
@@ -292,6 +297,7 @@ def train(
 
     network = (
         MacroCandidatePolicyNetwork(
+            candidate_dim=candidate_dim,
             hidden_dim=args.hidden_dim,
         )
         .to(
@@ -329,6 +335,7 @@ def train(
     print(
         f"samples: {len(q_targets_np)}"
     )
+    print(f"candidate dimension: {candidate_dim}")
     print(
         f"target temperature: "
         f"{args.temperature:.3f}"
@@ -471,8 +478,12 @@ def train(
         "state_dim": int(
             MACRO_STATE_DIM
         ),
-        "candidate_dim": int(
-            MACRO_CANDIDATE_DIM
+        "candidate_dim": int(candidate_dim),
+        "candidate_encoding_version": int(
+            2 if candidate_dim == MACRO_CANDIDATE_V2_DIM else 1
+        ),
+        "turn_aware": bool(
+            candidate_dim == MACRO_CANDIDATE_V2_DIM
         ),
         "hidden_dim": int(
             args.hidden_dim
