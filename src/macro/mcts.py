@@ -32,6 +32,11 @@ from src.macro.candidate_encoding import (
 
 MacroChoice = MacroAction | MacroCandidate
 
+
+class NoFeasibleMacroActionError(RuntimeError):
+    """No root Macro action can be generated in the current GameState."""
+
+
 @dataclass
 class MCTSNode:
     """
@@ -243,7 +248,7 @@ class MCTS:
         )
 
         if not root.children:
-            raise RuntimeError(
+            raise NoFeasibleMacroActionError(
                 "No feasible MacroActions from root state."
             )
 

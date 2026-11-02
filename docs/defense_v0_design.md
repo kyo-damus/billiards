@@ -977,3 +977,50 @@ choices. Do not optimize Policy performance or mistake the small
 dataset for meaningful generalization. Elevation is NOT part of the
 mixed MacroCandidate representation yet, so the policy still selects
 the existing fixed-elevation executable Safety candidates.
+
+
+## Stage 7b: bounded multi-turn mixed hierarchical execution
+
+The 31D Candidate Policy was trained for a brief 20 epochs on the
+existing 20-board mixed dataset (best checkpoint epoch 3, val
+cross-entropy 2.784, val top1 0.750 on only four held-out groups).
+With that checkpoint the 31D Policy and Q were successfully loaded
+together by mixed MCTS. Two one-shot seeds selected
+POSITION_ATTACK and physically executed without errors.
+These results establish wiring, not policy quality; no
+parameter tuning is warranted at this stage.
+
+To continue implementation without performance exploration,
+`src/controller/mixed_hierarchical_rollout.py` now provides a
+bounded multi-turn runner around the existing HierarchicalAgent.
+It uses an actual executed `GameState` as input to the next
+MCTS decision, preserving score, pocket status, and current_player.
+A rollout ends on SimplifiedGameRules termination, reaching
+`max_turns`, or a typed no-feasible-root-candidates signal
+(which is NOT counted as a normal game termination).
+The original Attack-only path and all trained weights are untouched.
+
+`scripts/smoke_mixed_hierarchical_rollout.py` connects the
+current 31D Policy+Q, uniform/zero leaf V baseline, turn-aware
+MCTS, mixed strategy transition, and FastFiz for up to
+three real steps. This is NOT an official billiards game or
+a win-rate benchmark and still uses the simplified 2-object-ball
+rules; downstream leaf branches use DIRECT-only candidates.
+
+Suggested quick verification:
+
+```bash
+python -m pytest tests/test_mixed_hierarchical_rollout.py \
+  tests/test_mixed_candidate_mcts.py -v
+
+python -m scripts.smoke_mixed_hierarchical_rollout \
+  --base-checkpoint goal_conditioned_micro_mixed_curriculum_100k.pt \
+  --residual-checkpoint position_power_residual_mlp_2000.pt \
+  --candidate-policy-checkpoint macro_candidate_policy_mixed_v2.pt \
+  --candidate-value-checkpoint macro_candidate_value_mixed_v2.pt \
+  --seed 94000 --max-turns 3 --simulations 15 --device cuda
+```
+
+Keep subsequent work implementation-first: game rule extensibility,
+strategy-aware episodic logs, and training wiring are more valuable
+than tuning physical powers, tip offsets, or one-board selection rates.
