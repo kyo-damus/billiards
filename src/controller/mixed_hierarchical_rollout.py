@@ -22,6 +22,8 @@ class HierarchicalTurnRecord:
     reward: float
     player_after: int
     terminated: bool
+    score_delta: tuple[float, float]
+    newly_pocketed_balls: tuple[int, ...]
 
 
 @dataclass
@@ -79,6 +81,22 @@ class MixedHierarchicalRollout:
                     "Physical execution must return a new GameState."
                 )
 
+            # Score is assigned by SimplifiedGameRules, while the
+            # returned reward is the Macro local evaluation used
+            # by search. Preserve both without equating them.
+            score_delta = tuple(
+                float(result.next_state.score[i] - state.score[i])
+                for i in range(2)
+            )
+            newly_pocketed = tuple(
+                ball
+                for ball in (0, 1)
+                if (
+                    state.ball_pocket_indices[ball + 1] < 0
+                    and result.next_state.ball_pocket_indices[ball + 1] >= 0
+                )
+            )
+
             records.append(
                 HierarchicalTurnRecord(
                     turn_index=turn_index,
@@ -87,6 +105,8 @@ class MixedHierarchicalRollout:
                     reward=float(result.reward),
                     player_after=int(result.next_state.current_player),
                     terminated=bool(result.terminated),
+                    score_delta=score_delta,
+                    newly_pocketed_balls=newly_pocketed,
                 )
             )
             state = result.next_state

@@ -99,6 +99,10 @@ def test_rollout_replans_from_executed_next_state():
     assert result.stop_reason == "max_turns"
     assert not result.terminated
     assert result.final_state.score.tolist() == [1.0, 0.0]
+    assert result.records[0].score_delta == (1.0, 0.0)
+    assert result.records[0].newly_pocketed_balls == (0,)
+    assert result.records[1].score_delta == (0.0, 0.0)
+    assert result.records[1].newly_pocketed_balls == ()
 
 
 def test_rollout_handles_no_feasible_root_without_faking_terminal():
@@ -153,3 +157,83 @@ def test_rollout_rejects_terminal_initial_state_and_bad_horizon():
     assert result.stop_reason == "initial_terminal_state"
     with pytest.raises(ValueError, match="max_turns"):
         rollout.run(make_state(), max_turns=0)
+
+
+
+def test_rollout_preserves_negative_local_reward_and_positive_game_score():
+    class WrongPocketShot:
+        def step(self, state):
+            return HierarchicalStepResult(
+                macro_action=direct_candidate(),
+                next_state=make_state(
+                    player=0,
+                    score=(1.0, 0.0),
+                    pockets=(-1, 5, -1),
+                ),
+                reward=-0.5,
+                terminated=False,
+            )
+
+    result = MixedHierarchicalRollout(WrongPocketShot()).run(
+        make_state(), max_turns=1
+    )
+    assert result.records[0].reward == -0.5
+    assert result.records[0].score_delta == (1.0, 0.0)
+    assert result.records[0].newly_pocketed_balls == (0,)
+    assert not result.terminated
+
+
+def test_rollout_propagates_defense_turn_change_to_opponent():
+    from src.macro.candidate import PhysicalShotSpec
+
+    defense = MacroCandidate(
+        action=MacroAction(
+            strategy=Strategy.DEFENSE,
+            target_ball=0,
+            target_pocket=None,
+        ),
+        goal=TacticalGoal(
+            TacticalGoalType.SAFETY,
+            target_ball=0,
+            cue_target_position=(0.55, 0.35),
+            cue_target_radius=0.1,
+        ),
+        physical_shot=PhysicalShotSpec(angle=90.0, power=0.65),
+    )
+
+    class ScriptedMixedAgent:
+        def __init__(self):
+            self.seen_players = []
+
+        def step(self, state):
+            self.seen_players.append(state.current_player)
+            if len(self.seen_players) == 1:
+                return HierarchicalStepResult(
+                    macro_action=defense,
+                    next_state=make_state(player=1),
+                    reward=0.0,
+                    terminated=False,
+                )
+            return HierarchicalStepResult(
+                macro_action=direct_candidate(),
+                next_state=make_state(
+                    player=1,
+                    score=(0.0, 1.0),
+                    pockets=(-1, 3, -1),
+                ),
+                reward=1.0,
+                terminated=False,
+            )
+
+    agent = ScriptedMixedAgent()
+    result = MixedHierarchicalRollout(agent).run(
+        make_state(), max_turns=2
+    )
+    assert agent.seen_players == [0, 1]
+    assert len(result.records) == 2
+    assert result.records[0].choice.action.strategy == Strategy.DEFENSE
+    assert result.records[0].player_after == 1
+    assert result.records[0].score_delta == (0.0, 0.0)
+    assert result.records[1].player_before == 1
+    assert result.records[1].score_delta == (0.0, 1.0)
+    assert not result.terminated

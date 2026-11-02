@@ -128,7 +128,10 @@ def main(args):
             f"strategy={turn.choice.action.strategy.value} "
             f"goal={turn.choice.goal.goal_type.value} "
             f"target_ball={turn.choice.action.target_ball} "
-            f"reward={turn.reward:+.3f} "
+            f"target_pocket={turn.choice.action.target_pocket} "
+            f"macro_local_reward={turn.reward:+.3f} "
+            f"score_delta={turn.score_delta} "
+            f"newly_pocketed={turn.newly_pocketed_balls} "
             f"terminated={turn.terminated}"
         )
 
@@ -142,6 +145,11 @@ def main(args):
     )
     print(f"stop reason: {rollout.stop_reason}")
     print(f"game terminated: {rollout.terminated}")
+    print(
+        "Macro local rewards and SimplifiedGameRules score deltas "
+        "are intentionally separate. Wrong-pocket shots can score "
+        "a ball yet receive a negative Macro local reward."
+    )
     print(
         "Uses simplified rules and selected model-based Safety "
         "candidates. This is a multi-turn execution smoke, "

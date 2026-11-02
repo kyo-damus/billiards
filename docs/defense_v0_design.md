@@ -1024,3 +1024,30 @@ python -m scripts.smoke_mixed_hierarchical_rollout \
 Keep subsequent work implementation-first: game rule extensibility,
 strategy-aware episodic logs, and training wiring are more valuable
 than tuning physical powers, tip offsets, or one-board selection rates.
+
+
+## Stage 7c: multi-turn diagnostics without reward/score conflation
+
+The first real multi-turn smoke on seed 94000, 15 MCTS
+simulations per turn, finished after two actual FastFiz shots:
+
+- turn 0: player 0 -> 0; DIRECT_ATTACK; Macro local reward -0.5
+- turn 1: player 0 -> 0; DIRECT_ATTACK; Macro local reward +1.0
+- final SimplifiedGameRules score [2.0, 0.0], pockets [-1, 5, 3],
+  game terminated. This exercises successive replanning from
+  the physical state but not actual Defense selection/turn handoff.
+
+The negative Macro reward with one object ball pocketed is
+consistent with a wrong-pocket result: GameRules awards one
+point for any newly pocketed object, whereas MacroLocalEvaluator
+penalizes incorrect target pockets and controls search rewards.
+Score must NOT be inferred from reward.
+
+The bounded rollout now records per-turn `score_delta` and
+`newly_pocketed_balls`, and its smoke prints these alongside
+`macro_local_reward`. Added deterministic unit tests for
+negative local reward with positive game score and for handing
+off from a scripted Safety action to the opponent's next turn.
+Neither tests a learned Defense choice nor changes scoring or
+physics. This is implementation contract coverage, not
+performance comparison.
