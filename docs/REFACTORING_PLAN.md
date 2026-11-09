@@ -166,3 +166,11 @@
 - `test_train_position_residual.py`、`test_train_position_residual_scale_gate.py`、`test_position_residual_dataset.py`を`tests/pipelines/micro/`へ移動。Residualモデルの訓練・教師データ検証は実験本体ではなく小規模契約テスト。
 - 今回の10ファイルは全てGitの既存blob SHAを再利用し、**テスト内容に変更なし**。ファイル内の相対import、`__file__`、`sys.path`、chdir等のパス依存がないことを確認済み。旧パスで指定せず新パスでpytestを実行すること。
 - Phase 3累計**39/76ファイル**（unit24、integration6、pipelines9）。残る37ファイルは未分類。研究ロジック・訓練済みモデル・成果物・データの移動や削除はしていない。**移動後のpytestは未実行。**
+
+## Phase 3: Position候補・Micro位置系・評価ヘルパーの分類（2026-11-09・第6段階）
+
+- **ユーザー実行結果:** 第5段階のDefense/Safety・Micro学習48件が全件PASSED（4.14秒）、Git作業ツリークリーン。
+- 位置関連の候補生成・到達可能性/feasibilityの5ファイルを `tests/unit/macro/position/`、Macro action generatorを `tests/unit/macro/`、Shot Geometryを `tests/unit/env/`、SimplifiedGameRulesを `tests/unit/game/` に移動。
+- Adaptive Position Policy・Position Blend Gateを `tests/unit/micro/`、Position Success/Probability GateとOutcome Witness BCの小規模学習契約を `tests/pipelines/micro/`、Position Actor Blend・Position Goal Evalの評価CLIヘルパーを `tests/pipelines/evaluation/` に移動。
+- 計15ファイル。各ファイルは `__file__` や相対import等に依存しないことを検査し、Gitの既存blob SHAを再使用した**内容変更ゼロの移動**。これらのテストは既存の関数とassertionをそのまま保持する。
+- 累計**54/76ファイル**を分類（unit34、integration6、pipelines14）、未分類22ファイル。学習済みモデル、Macro/Micro/FastFiz実装、既存データ・成果物は移動も削除もしない。移動後の指定pytestは**ユーザーDGXで要確認**。

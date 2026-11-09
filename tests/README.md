@@ -4,9 +4,11 @@
 
 - `tests/unit/pipelines/`: 学習・推論の共通処理、旧import互換性の局所的検証
 - `tests/unit/tools/`: 実験管理・保全用ツールの局所的検証
-- `tests/unit/game/`: ゲームルールのデータ型・インターフェース
+- `tests/unit/game/`: ゲームルールのデータ型・インターフェース、簡易GameRules
+- `tests/unit/env/`: ショット幾何・環境の局所契約
 - `tests/unit/macro/`: Macro候補表現・Policy/Qネットワーク・局所評価
-- `tests/unit/micro/`: SAC・Position Residualとゲート処理
+- `tests/unit/macro/position/`: Position候補生成、到達可能性・feasibility
+- `tests/unit/micro/`: SAC・Position Residual、適応的Position Policy、ゲート処理
 - `tests/unit/goal/`: TacticalGoal・Goal条件付け・報酬・Safety Goal
 - `tests/unit/defense/`: 防御候補生成、相手脅威・仰角の局所評価
 - `tests/test_*.py`: 未移動のテスト。依存関係・fixtureを確認してから段階的に分類
@@ -15,7 +17,8 @@
 - `tests/integration/defense/`: FastFizを伴うDefenseショット・Macro遷移
 - `tests/pipelines/macro/`: Macro Candidate Policy/Q、State V、反復更新の小規模学習パイプライン
 - `tests/pipelines/rollout/`: MCTS訪問分布教師と完了軌跡のMC return教師の生成
-- `tests/pipelines/micro/`: Position Residual教師データと小規模学習契約
+- `tests/pipelines/micro/`: Position Residual/Success・Probability Gateの教師・小規模学習契約
+- `tests/pipelines/evaluation/`: 評価スクリプトの設定値・出力変換の局所的契約
 
 ## 関連テストの実行例
 
@@ -84,3 +87,22 @@ python -m pytest \
 ```
 
 10ファイルの内容は変更していない。`tests/integration/defense/` の実物理ケースはFastFizライブラリに依存する。既存の`tests/unit/goal/`全体は第2段階で検証済みのため、ここでは移した`test_safety_goal.py`だけを指定する。
+
+## Phase 3第6段階の実行例
+
+```bash
+python -m pytest \
+  tests/unit/macro/test_macro_action_generator.py \
+  tests/unit/macro/position/ \
+  tests/unit/env/ \
+  tests/unit/game/test_simple_game_rules.py \
+  tests/unit/micro/test_adaptive_position_policy.py \
+  tests/unit/micro/test_position_blend_gate.py \
+  tests/pipelines/micro/test_position_success_gate.py \
+  tests/pipelines/micro/test_position_probability_gate.py \
+  tests/pipelines/micro/test_outcome_witness_bc.py \
+  tests/pipelines/evaluation/ \
+  -v
+```
+
+上記15ファイルは**内容変更なし**の配置変更。元のルートのパスは廃止され、従来の `python -m scripts.*` の呼び出しは変更しない。
