@@ -16,7 +16,12 @@ billiards/
 ├── configs/
 │   ├── macro/           # 人が読む実験設定
 │   └── smoke/           # 人が読む小規模検証設定
-├── tests/               # 現行配置。Phase 3でunit/integration等を検討
+├── tests/               # テスト（Phase 3で段階的に分類）
+│   ├── unit/            # 局所的な契約の検証
+│   │   ├── pipelines/   # 共通処理と旧import互換性
+│   │   ├── tools/       # 実験準備・管理ツール
+│   │   └── game/        # ゲームルールのデータ型
+│   └── test_*.py        # 未移動のテスト（安全確認まで維持）
 ├── tools/               # 監査、退避、実験ディレクトリ準備
 ├── docs/                # 設計、引き継ぎ、保守記録
 ├── artifacts/           # Git管理外。新しい実験時に生成
@@ -63,8 +68,8 @@ python tools/prepare_run.py \
 
 ## 次の移行フェーズ（未実施）
 
-- **Phase 2（進行中）**: `src/pipelines/` に `training_utils.py` と `checkpoint_loading.py` を配置し、続いて `attack_components.py`・`mixed_components.py` のファクトリ実装を移行。旧 `scripts/` 同名モジュールは同一関数を再公開する互換ラッパーとして残す。既存の `python -m scripts.<既存名>` は維持する。次の責務分離は実装・テストと合わせて小さく進める。
-- **Phase 3**: `tests/` をunit/integration/pipelinesに分ける。import、pytest root、CLIテスト、外部ツール参照を先に棚卸しする。
+- **Phase 2（主要部分完了）**: `src/pipelines/` に共通学習補助・チェックポイントローダー・Attack/Mixedファクトリの本体を移動。旧 `scripts/` importを維持。22件の関連pytestと、2026-11-09のCPU 1ターンsmokeで移動前と同一結果を確認。
+- **Phase 3（第1段階）**: 依存の少ない5テストファイルを `tests/unit/pipelines/`、`tests/unit/tools/`、`tests/unit/game/` に移動。テスト関数と検証内容は変えない。残るテストは相対import・fixture・外部参照などを検査してから順次分類。
 - **Phase 4**: CMakeの自動生成 `build/Makefile`、追跡済み`outputs/micro/`、過去の実験成果物と新しいルールの整合性を検証する。保全条件を満たすまで追跡解除・削除しない。
 
 各フェーズで、関連テストと少量の統合smokeを実行し、研究モデルの学習条件・探索・FastFizの挙動を変更しない。

@@ -118,3 +118,16 @@
 - `scripts/attack_components.py` と `scripts/mixed_components.py` は、既存import元が使えるよう元の関数と公開クラス名を再公開する互換ラッパーに置換。既存の呼び出し側のimport行は変更せず、従来のCLIも維持。
 - `tests/test_component_factories_compat.py` で旧/新import関数のidentity、Attackの3要素＋checkpoint metadataの契約、Mixedの5要素とSafety powers/angles/tip offsets等をモックで検証。既存モデル・学習済み重み・Dataset・前回退避データには触れない。
 - **テスト未実行。** ユーザーDGX上で関連pytestと必要ならCPU 1ターンの統合smokeの再実行結果を確認してから、次のファイル整理に進む。
+
+## Phase 2完了確認とPhase 3テスト配置整理（2026-11-09・第1段階）
+
+- **ユーザー確認:** ファクトリ移行後の関連22テストが全件PASSED（3.41秒）。続くCPU 1ターン混合階層smoke（seed=94000、simulations=1、学習済み5モデル）は移行前と同一出力: `attack/position_attack`、ball=0、pocket=5、Macro local reward +1.250、score [1,0]、停止理由 `max_turns`、ゲーム非終了。これは限定した条件の互換性確認でありモデル強度の証明ではない。
+- **Phase 2の主要実装を完了:** `src/pipelines/` に共通学習補助、モデルローダー、Attack/Mixed構築を移し、従来の `scripts/` importとCLIを維持。
+- **Phase 3の初回はテスト内容を変えないパス移動のみ**。以下5ファイルを単体テスト階層へ整理。旧パスはGit上からなくなるため、`python -m pytest` のファイル指定は新パスを使用すること。
+  - `tests/test_training_utils_compat.py` → `tests/unit/pipelines/test_training_utils_compat.py`
+  - `tests/test_checkpoint_loading_compat.py` → `tests/unit/pipelines/test_checkpoint_loading_compat.py`
+  - `tests/test_component_factories_compat.py` → `tests/unit/pipelines/test_component_factories_compat.py`
+  - `tests/test_prepare_run.py` → `tests/unit/tools/test_prepare_run.py`
+  - `tests/test_game_rules_interface.py` → `tests/unit/game/test_game_rules_interface.py`
+- 相対importを持たず、root起動の `python -m pytest` で参照可能なファイルを選択。ファイル内容・テスト関数・pytestマーカー・物理/学習実装は無変更。旧テストはGit履歴から復元可能。
+- `tests/README.md` に分類基準とテスト指定コマンドを明記。残るテストは未移動で、分類を継続する。現時点では新配置でのpytestは未実行。
