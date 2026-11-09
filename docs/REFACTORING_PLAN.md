@@ -131,3 +131,10 @@
   - `tests/test_game_rules_interface.py` → `tests/unit/game/test_game_rules_interface.py`
 - 相対importを持たず、root起動の `python -m pytest` で参照可能なファイルを選択。ファイル内容・テスト関数・pytestマーカー・物理/学習実装は無変更。旧テストはGit履歴から復元可能。
 - `tests/README.md` に分類基準とテスト指定コマンドを明記。残るテストは未移動で、分類を継続する。現時点では新配置でのpytestは未実行。
+
+## Phase 3: Macro/Micro/Goal単体テストの分類（2026-11-09・第2段階）
+
+- ユーザー報告: 第1段階の `tests/unit/pipelines/`・`unit/tools/`・`unit/game/` と `test_iterate_mixed_macro_policy.py` の**27件全件PASSED（3.64秒）**、`git status` クリーン。
+- Macro5件（candidate / networks / candidate_policy / candidate_value / local_evaluation）、Micro3件（sac / position_residual_policy / position_residual_scale_gate）、Goal3件（goal_reward / goal_conditioning / tactical_goal）をそれぞれ `tests/unit/macro/`、`unit/micro/`、`unit/goal/` に移動。計11ファイル。
+- Git blob SHAを再利用した**テスト内容変更ゼロのパス移動**。ファイル内に他テストへの相対importや `__file__` / `sys.path` / chdirのパス依存がないことを確認。研究コード・テスト関数・成果物・チェックポイントは不変更。
+- 次のユーザー検証では `python -m pytest tests/unit/macro/ tests/unit/micro/ tests/unit/goal/ -v` を使用。新ディレクトリでのpytestは未実行。FastFizの物理統合や大量の学習処理はこの分類変更に含めない。

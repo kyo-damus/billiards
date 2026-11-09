@@ -20,7 +20,10 @@ billiards/
 │   ├── unit/            # 局所的な契約の検証
 │   │   ├── pipelines/   # 共通処理と旧import互換性
 │   │   ├── tools/       # 実験準備・管理ツール
-│   │   └── game/        # ゲームルールのデータ型
+│   │   ├── game/        # ゲームルールのデータ型
+│   │   ├── macro/       # Macro候補・Policy/Q・局所評価
+│   │   ├── micro/       # SAC・Residualの単体動作
+│   │   └── goal/        # TacticalGoalと目標条件付け
 │   └── test_*.py        # 未移動のテスト（安全確認まで維持）
 ├── tools/               # 監査、退避、実験ディレクトリ準備
 ├── docs/                # 設計、引き継ぎ、保守記録
@@ -69,7 +72,7 @@ python tools/prepare_run.py \
 ## 次の移行フェーズ（未実施）
 
 - **Phase 2（主要部分完了）**: `src/pipelines/` に共通学習補助・チェックポイントローダー・Attack/Mixedファクトリの本体を移動。旧 `scripts/` importを維持。22件の関連pytestと、2026-11-09のCPU 1ターンsmokeで移動前と同一結果を確認。
-- **Phase 3（第1段階）**: 依存の少ない5テストファイルを `tests/unit/pipelines/`、`tests/unit/tools/`、`tests/unit/game/` に移動。テスト関数と検証内容は変えない。残るテストは相対import・fixture・外部参照などを検査してから順次分類。
+- **Phase 3（第1・2段階）**: 最初に5テストを`unit/pipelines`・`unit/tools`・`unit/game`に分類して関連27件のpytest成功。続いてMacroの5ファイル、Microの3ファイル、Goalの3ファイルを`tests/unit/{macro,micro,goal}/`へ内容変更なしで移動。依存の大きい物理・探索・学習テストは今後段階的に分類する。
 - **Phase 4**: CMakeの自動生成 `build/Makefile`、追跡済み`outputs/micro/`、過去の実験成果物と新しいルールの整合性を検証する。保全条件を満たすまで追跡解除・削除しない。
 
 各フェーズで、関連テストと少量の統合smokeを実行し、研究モデルの学習条件・探索・FastFizの挙動を変更しない。
