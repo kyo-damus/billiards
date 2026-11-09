@@ -63,3 +63,12 @@
 - `tests/test_mixed_hierarchical_rollout.py` に `test_hierarchical_agent_legacy_select_execute_and_step_contract` を追加し、**3種類の公開メソッド全てを維持して検証**。特に現行Mixed専用のMacroCandidateだけでなく、従来の`MacroAction`を通す経路を残す。
 - 元の3件を1件にまとめることでテストファイル73→72、テスト関数296→294件（見込み）。遷移回数、入力の同一性も新たに確認する。旧テストファイルは作業ブランチ上では削除し、分岐元・履歴から復元可能。
 - この変更はテストコードのみ。実装コード・チェックポイント・データは変更しない。テストはユーザーDGX上で未実施。
+
+## データ整理・安全監査（2026-11-09・第1段階）
+
+- ユーザー実施の最新確認: 2026-11-09、\`tests/test_mixed_hierarchical_rollout.py\` / \`test_hierarchical_smoke.py\` / \`test_candidate_mcts.py\` / \`test_defense_macro_transition.py\` / \`test_collect_mixed_rollouts.py\` の関連33件全件PASSED（6.03秒）。\`b21b18a\` 時点の範囲指定テストであり全スイートの合格は意味しない。
+- ユーザーは \`~/billiards_research_backup_20261109.tar.gz\` (105MB) を作成し、\`tar -tzf\` の一覧読み出しで \`Backup OK\` を確認。GitHubに存在しないモデル/データも当時の研究ディレクトリ内に含む可能性が高いが、**ファイル単位のバイト一致は未検証**。
+- 新設 \`tools/audit_local_artifacts.py\` はファイル名・SHA256・サイズ・Git追跡・過去のtarアーカイブ内の名前・Git文書/ソースの名前出現を一覧化する。**データを読み込む学習処理、削除・移動処理は一切実行しない。** バックアップとの照合はアーカイブ内の名前のみ。
+- 保護対象の候補は \`goal_conditioned_micro_mixed_curriculum_100k.pt\`、\`position_power_residual_mlp_2000.pt\`、\`macro_candidate_policy_mixed_v2.pt\`、\`macro_candidate_value_mixed_v2.pt\`、\`macro_state_value_mixed_v2.pt\` と、実験反復・選択済み行動MCリターンの関連成果物。
+- \`build/results/\`、\`build/results_muzero/\` の過去学習結果や同一SHA256の重複は、**削除確定ではなく移動・削減候補**。物理的なデータ削除は利用者による保存方針の確認とバックアップの照合の後だけ行う。
+- \`.gitignore\` とデータ保存先の設計は、一覧を確認してから決定する（現時点では変更しない）。
