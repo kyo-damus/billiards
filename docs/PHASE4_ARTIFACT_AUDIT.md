@@ -132,3 +132,42 @@ git status --short --branch
 ```
 
 `MISMATCH` は削除理由ではなく、バックアップ取得後にファイルが変わった可能性を含む**追加調査の合図**。現物は保持する。
+
+## 3件のMicroチェックポイントのtarとのSHA-256一致（2026-11-09）
+
+ユーザーが既存の `~/billiards_research_backup_20261109.tar.gz` 内の各ファイルと、`outputs/micro/` の現物をstreamごとにSHA-256で比較して以下を報告した。
+
+| 対象 | 現物とバックアップ |
+| --- | --- |
+| `micro_sac_final.pt` | `MATCH` |
+| `micro_sac_step_2500.pt` | `MATCH` |
+| `micro_sac_step_5000.pt` | `MATCH` |
+
+`git status --short --branch` もクリーン。**これら3件はバックアップとの内容一致が確認済み**であり、従来の「tar内の名前のみ確認」という不確実性は解消した。ただし、モデルの役割や将来の比較実験への必要性は別問題なので、3件とも削除・移動・追跡解除しない。
+
+### Makefile追跡整理に向けた準備（既存buildは変更しない）
+
+現行 `build/Makefile` はGit追跡中でCMake生成・環境固有パスを含む。Git追跡から外す処理は**まだ実施しない**。以下の順に、まずリポジトリ外へオリジナルを保全し、次に隔離された一時ディレクトリへCMakeを設定できるか試す。既存の `build/`、`*.so`、`outputs/micro/` には書き込まない。
+
+```bash
+cd ~/research
+mkdir -p ~/billiards_refactor_safety_20261109
+backup=~/billiards_refactor_safety_20261109/Makefile.original
+if [ ! -e "$backup" ]; then
+  cp -p -- build/Makefile "$backup"
+fi
+cmp -s -- build/Makefile "$backup" && echo "Makefile backup MATCH" || echo "Makefile backup MISMATCH"
+
+cmake --version | head -n 1
+python --version
+git submodule status -- libs/fastfiz
+
+scratch="$(mktemp -d /tmp/billiards-cmake-phase4.XXXXXX)"
+echo "Isolated configure directory: $scratch"
+cmake -S . -B "$scratch"
+git status --short --branch
+```
+
+一時ディレクトリのconfigureでエラーが出ても既存buildは触らず、**エラーログを先に確認してから**対応する。成功しても実際のビルドと `*.so` の再生成はまだ確認したことにならない。安全なバックアップとconfigure検証を経てから `build/Makefile` の追跡方針を改めて判断する。
+
+**注意:** 追跡解除コミットをGitHubで先に作成すると、その後のpullでローカルのMakefileが削除される可能性がある。既存buildと追跡済み重みは現状維持。

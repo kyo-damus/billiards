@@ -212,3 +212,10 @@
 - 既存tarには追跡中の3モデルが `research/outputs/micro/` 配下の名前で存在。**内容のハッシュ照合は未実施**。
 - `docs/PHASE4_ARTIFACT_AUDIT.md` に、3件の読み取り専用SHA-256照合手順と、今後のMicro学習で別出力先を明示して既存チェックポイントの上書きを回避する運用を追加。
 - **今回の変更はドキュメントのみ**。`outputs/micro/`の3件、`build/Makefile`、FastFiz拡張、バックアップは移動も削除もせず、追跡解除もしない。
+
+## Phase 4: Micro3モデルのSHA-256バックアップ照合（2026-11-09）
+
+- ユーザーDGX実行で `micro_sac_final.pt`、`micro_sac_step_2500.pt`、`micro_sac_step_5000.pt` の **3件全てがtarバックアップの同名ファイルとSHA-256一致（MATCH）**。Git作業ツリーはクリーン。
+- 3モデルのバックアップとの内容一致は確認できたが、研究上の要不要や既存 `outputs/micro/` の維持方針は別途判断する。現時点で3件すべて保持する。
+- 次の安全な作業は、`build/Makefile` をリポジトリ外に保全し、`/tmp` の隔離ディレクトリでCMake configure可能か確認すること。**現在のbuild/Makefile、`*.so`、重みの削除・Git追跡解除・再ビルドは未実施**。
+- 詳細: [PHASE4_ARTIFACT_AUDIT.md](PHASE4_ARTIFACT_AUDIT.md)。
