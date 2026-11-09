@@ -80,4 +80,7 @@
 - **初期退避候補107件/29.12MiB**: `build/results/sac_actor_ep1000.pth`〜`sac_actor_ep100000.pth`（100件、1000ごと）、旧Actor/Critic finalの2件、`build/results_muzero/*_net_latest.pth`の3件に加え、`build/mcts_experience.pt`、`build/policy_model.pth`の2件。すべて削除済みの旧build Pythonスクリプトの成果物で、現行研究への名前参照が見つからない。
 - **退避保留**: 主要5モデル、反復Policy実験8件、Macro 25/31D教師データ、Residual/Goal-conditioned Micro学習済みモデル（比較実験・再現に使う可能性）。`build/` 以外の24モデルから旧2件を除いた22モデルは個別確認待ち。
 - `tools/quarantine_legacy_build_artifacts.py` を追加。**デフォルトは読み取り専用**で、監査TSVのサイズ・SHA256、現物のサイズ・SHA256、tar内の同じファイルの実バイトSHA256、107件の厳密なホワイトリストを照合。すべて一致する場合に限り `--apply` によってリポジトリ外の `~/billiards_refactor_quarantine_20261109/` に移動可能。`--restore` で上書きせず復元可能。削除は行わない。
-- 次はユーザーDGXで**デフォルトの照合のみ実行**して結果を確認した後、退避可否を判断する。アーカイブが存在するだけでは復元可能とは断言しない。
+- **検証と退避は完了（2026-11-09、ユーザー実行ログ）:** 初回の読み取り専用照合で107件全てが監査TSV・ローカル現物・tarバックアップのSHA-256で一致。続く `python tools/quarantine_legacy_build_artifacts.py --apply` で107件/29.12MiBを `~/billiards_refactor_quarantine_20261109/` へ移動した（削除0件）。`_legacy_build_quarantine_manifest.tsv` の存在も確認。復元は `python tools/quarantine_legacy_build_artifacts.py --restore`。退避先フォルダや元tarを消さないこと。
+- 残る成果物50件（約50.52MiB）：現行主要5件/3.54MiB、Git追跡3件/4.03MiB、比較候補の過去チェックポイント22件/約42.48MiB、Macro・Micro学習データセット12件/0.24MiB、Policy反復実験8件/0.21MiB。これら50件は**意図的に維持**（性能比較・再現性・モデル互換性の根拠）。
+- 生成済み `.npz` と既知のローカル監査/評価テキストを `.gitignore` に追加し、Gitの作業状態を読みやすくする。Git無視はファイル削除ではない。必要なデータを後にGit管理したい場合は `git add -f` で明示的に追加する。
+- 次の確認: 最新現物で `tools/audit_local_artifacts.py` を再実行して50件を再計数し、必要な主要チェックポイントの読み込みを含む短い統合smokeを実行する。全テストスイートの合格や科学的な性能向上は主張しない。

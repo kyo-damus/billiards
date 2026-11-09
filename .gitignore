@@ -17,3 +17,16 @@ cmake_install.cmake
 Gomi/
 build/results/
 build/results_muzero/
+# Local generated research datasets (explicitly add -f if versioning a fixture)
+*.npz
+
+# Local audit reports (files are retained on disk)
+billiards_refactor_inventory.txt
+refactor_audit_*.txt
+local_artifacts_*.tsv
+local_artifacts_audit_summary.txt
+
+# Local exploratory evaluation logs
+outcome_finetune_direct_eval.txt
+outcome_finetune_eval.txt
+position_probability_gate_unseen_eval.txt
