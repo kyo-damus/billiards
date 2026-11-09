@@ -1,91 +1,192 @@
-# 研究リポジトリの構成・ファイル管理ルール
+# リポジトリのフォルダ構造とファイル管理ガイド
 
-更新: 2026-11-09。対象ブランチ: `refactor-phase9-preserve-20261109`。
+**更新日:** 2026-11-09（JST）  
+**対象:** `kyo-damus/billiards` の `refactor-phase9-preserve-20261109` ブランチ  
+**目的:** 初めて本研究を引き継ぐ人やChatGPTが、**どのファイルをどこに置き、何をGitで管理し、何を保全するか**を、この文書だけで把握できるようにする。
 
-## 現状と目標
+この文書を**フォルダ構造・ファイル管理の正本**とする。研究目的・学習仕様は [RESEARCH_CONTEXT.md](RESEARCH_CONTEXT.md)、リファクタリングの変更履歴は [REFACTORING_PLAN.md](REFACTORING_PLAN.md) に記録する。実際のファイル構成やCLI仕様が変わったら、必ず最新のGitツリーとコードを確認する。
 
-Phase 1開始前のGit管理ファイルは `src/` 59、`scripts/` 53、`tests/` 72、`docs/` 4、`tools/` 3、`outputs/micro/` 3など。Phase 3時点ではテストファイル76件（追加4件）の分類を進めている。過去のモデル107件はGit管理外の `~/billiards_refactor_quarantine_20261109/` に移動済みであり、変更・削除しない。
-
-Phase 1では**新しい実験の保存方針と記録手段**を追加し、既存の`src/`、`scripts/`、`tests/`、学習済みモデル、既存データは移動・削除しなかった。Phase 2の第1段階では、Macro学習の共通ユーティリティの実装だけを`src/pipelines/training_utils.py`へ移し、旧`scripts`モジュールを再公開用ラッパーとして維持する。
+## 1. 現行の構成（Phase 1〜4整理後）
 
 ```text
-billiards/
-├── src/                 # Macro/Micro/Goal/物理/Controller
-│   └── pipelines/       # 学習補助・チェックポイント読み込み・構築ファクトリ
-├── scripts/             # 現行の起動CLI（互換性維持）
-├── configs/
-│   ├── macro/           # 人が読む実験設定
-│   └── smoke/           # 人が読む小規模検証設定
-├── tests/               # テスト（Phase 3で76ファイル分類）
-│   ├── unit/            # 局所的な契約の検証
-│   │   ├── pipelines/   # 共通処理と旧import互換性
-│   │   ├── tools/       # 実験準備・管理ツール
-│   │   ├── game/        # ゲームルールのデータ型・簡易GameRules
-│   │   ├── macro/       # Macro候補・Policy/Q・局所評価
-│   │   │   └── position/ # Position候補・到達可能性
-│   │   ├── micro/       # SAC・Residual・位置調整
-│   │   ├── goal/        # TacticalGoalと目標条件付け
-│   │   ├── defense/     # 防御候補・相手脅威の単体評価
-│   │   └── env/         # ショット幾何などの純粋関数
-│   ├── integration/     # 実物理・階層構成を通した接続確認
-│   │   ├── physics/    # FastFiz・Micro環境・物理遷移
-│   │   ├── agent/      # 階層AgentとMixed rollout
-│   │   ├── defense/    # Defense物理ショットと遷移
-│   │   └── goal/       # 実環境でのGoal sampler
-│   ├── pipelines/       # Macro学習・rollout変換の処理契約
-│   │   ├── macro/      # Macroモデルの小規模学習・反復
-│   │   ├── rollout/    # 訪問分布・リターン教師生成
-│   │   ├── micro/      # Residual・Gateの教師データ/学習
-│   │   └── evaluation/ # 評価CLIヘルパー・集計
-│   └── README.md        # テスト分類と実行方法
-├── tools/               # 監査、退避、実験ディレクトリ準備
-├── docs/                # 設計、引き継ぎ、保守記録
-├── artifacts/           # Git管理外。新しい実験時に生成
-│   └── runs/
-│       └── <run_id>/
-│           ├── config.json
-│           ├── metadata.json
-│           ├── outputs/
-│           └── logs/
-├── outputs/micro/       # 既存の追跡済みモデル3件。今は移動しない
-└── build/               # CMake生成物。今は構成変更しない
+~/research/                         # ローカルのリポジトリルート
+├── src/                             # Python実装本体
+│   ├── common/                      # 共通の型・定義
+│   ├── controller/                  # 階層Agent、実行・Rollout管理
+│   ├── env/                         # FastFizラッパー、Micro環境
+│   ├── game/                        # 簡易ゲームルール
+│   ├── goal/                        # TacticalGoal・Goal関連
+│   ├── macro/                       # 候補生成・Policy/Q/V・MCTS
+│   ├── micro/                       # Goal-conditioned SAC、Residual制御
+│   └── pipelines/                   # 共通処理をsrc側へ集約
+│       ├── training_utils.py
+│       ├── checkpoint_loading.py
+│       ├── attack_components.py
+│       └── mixed_components.py
+├── scripts/                         # 学習・評価・データ生成・smokeのCLI
+│                                    # 一部は旧import互換ラッパー
+├── configs/                         # 実験設定の記録用テンプレート
+│   ├── macro/
+│   ├── smoke/
+│   └── README.md
+├── tests/                           # 計76テストファイル
+│   ├── unit/                        # 36: 純粋/局所的な契約
+│   │   ├── macro/position/
+│   │   ├── micro/
+│   │   ├── goal/
+│   │   ├── defense/
+│   │   ├── env/
+│   │   ├── game/
+│   │   ├── pipelines/
+│   │   └── tools/
+│   ├── integration/                 # 11: 実物理・Agent・Defenseなどの接続
+│   │   ├── physics/
+│   │   ├── agent/
+│   │   ├── defense/
+│   │   └── goal/
+│   ├── pipelines/                   # 29: 学習/評価/教師データ生成の処理
+│   │   ├── macro/
+│   │   ├── micro/
+│   │   ├── rollout/
+│   │   └── evaluation/
+│   └── README.md                    # テストの細かな指定方法
+├── tools/                           # 実験準備・監査・旧成果物の安全な退避
+│   ├── prepare_run.py
+│   ├── audit_local_artifacts.py
+│   ├── refactor_audit.py
+│   └── quarantine_legacy_build_artifacts.py
+├── docs/                            # 研究方針・設計・保全記録
+│   ├── PROJECT_STRUCTURE.md         # ★この文書（構成と管理の正本）
+│   ├── RESEARCH_CONTEXT.md          # 研究目的・実装状況の引き継ぎ
+│   ├── CHAT_HANDOFF_PROMPT.md       # 新しいチャットへの移行文面
+│   ├── REFACTORING_PLAN.md          # 整理の変更・テスト履歴
+│   ├── PHASE4_ARTIFACT_AUDIT.md     # CMake・モデル保全の詳細
+│   └── defense_v0_design.md
+├── libs/fastfiz/                     # Gitサブモジュール（物理エンジン）
+├── CMakeLists.txt                    # C++/pybind11のビルド設定
+├── cpp_simulator.cpp                 # Python用C++バインディング
+├── build/                            # CMake出力先（ディレクトリは維持）
+│   ├── .gitignore                    # Git追跡中
+│   ├── Makefile                      # ローカルのみ・Git無視
+│   └── billiard_env_cpp*.so          # ローカルのみ・Git無視
+├── outputs/micro/                    # 過去の追跡済みMicroモデル3件
+│   ├── micro_sac_final.pt
+│   ├── micro_sac_step_2500.pt
+│   └── micro_sac_step_5000.pt
+├── artifacts/                        # 新規実験の生成先（Git管理外）
+│   └── runs/<run_id>/
+│       ├── config.json
+│       ├── metadata.json
+│       ├── outputs/
+│       └── logs/
+├── .gitignore
+├── .gitmodules
+└── README.md
 ```
 
-将来的には `artifacts/checkpoints/current/`、`artifacts/checkpoints/archive/`、`artifacts/datasets/` を設けてもよいが、**既存モデルへのパス依存を検証する前には移動しない**。
+上の `build/Makefile`、`*.so`、`artifacts/` は**現行DGX上のローカル生成物/運用先**として示したもので、Gitのclone直後に必ず存在するとは限らない。 `artifacts/runs/<run_id>/` は `tools/prepare_run.py` を実行して初めて生成される。
 
-## 新しい実験の記録
+## 2. 役割・新規ファイルの置き場所
 
-1. `configs/` のテンプレートを編集・複製する。設定内容は記録用であり、現行CLIはJSONを自動読み込みしない。
-2. 一意の `run_id` を選ぶ。推奨 `YYYYMMDD_<目的>_<番号>`。例: `20261109_macro_visit_01`。日時、モデル版、seedを識別できる命名にする。
-3. 準備コマンドを実行する。ファイル・ディレクトリが既存なら上書きを拒否する。
+| 内容 | 保存先 | 管理方針 |
+| --- | --- | --- |
+| Macro/Micro/Goal、ゲーム・物理との接続の実装 | `src/` | Git管理。研究処理の本体 |
+| 共通ローダー・学習ユーティリティ・構築ファクトリ | `src/pipelines/` | Git管理。重複した本体を `scripts/` に作らない |
+| 実行可能な学習・評価・dataset生成コマンド | `scripts/` | Git管理。既存 `python -m scripts.*` を維持 |
+| 単体/統合/学習パイプラインのテスト | `tests/{unit,integration,pipelines}/` | Git管理。機能と依存の性質に応じて選択 |
+| 開発・保守・データ監査ツール | `tools/` | Git管理。退避・移動ツールの実行は十分に確認 |
+| 説明、実験設計、引き継ぎ資料 | `docs/`、各README | Git管理 |
+| 実験の設定テンプレート | `configs/` | Git管理。**現行CLIはJSONを自動読込しない** |
+| 新しい学習済み重み・評価ログ・生成データ | `artifacts/runs/<run_id>/outputs/`、`logs/` | Git管理外。出力先を明示する |
+| C++のビルドファイル・共有ライブラリ | `build/` | ローカル生成物。既存の`build/`は消さない |
+| 旧Microの3重み | `outputs/micro/` | **例外的にGit追跡中・維持**。新しい実験で上書きしない |
+| 過去の大容量データと退避済みモデル | 下記「4. 保全・バックアップ」 | Git管理外。勝手に削除・移動しない |
+
+`src/pipelines/` の実装を `scripts/attack_components.py` 等の旧import経路から呼ぶ互換ラッパーは意図的に残してある。研究コードを整理するときは、Macro状態12D、旧Attack候補25D、Mixed候補31D、手番・報酬・教師種別（MCTS訪問教師、2-step Q、実行済みMC return Q/V）を混同・変更しない。
+
+## 3. Gitで管理するもの / 管理しないもの
+
+- **通常追跡するもの:** `src/`、`scripts/`、`tests/`、`tools/`、`docs/`、`configs/`、`README.md`、`CMakeLists.txt`、`cpp_simulator.cpp`、サブモジュールの参照。
+- **通常追跡しないもの:** `*.pt`、`*.pth`、`*.npz`、`*.so`、`*.o`、CMakeの生成キャッシュ、`/build/Makefile`、`/artifacts/`、ローカルの監査TSV・実験ログ（`.gitignore` が適用される場合）。
+- **例外:** `outputs/micro/` にある `micro_sac_final.pt`、`micro_sac_step_2500.pt`、`micro_sac_step_5000.pt` の3ファイルは以前からGit追跡中で、2026-11-09時点も維持。ルートの `.gitignore` はすでに追跡済みのファイルには遡及しない。
+
+`build/Makefile` はPhase 4でGit追跡を解除し、`/build/Makefile` としてignoreに登録済み。2026-11-09、DGXでは元のMakefileを退避コピーから復元し、`git check-ignore`・FastFiz回帰11テストの成功を確認。**`build/`そのものや`billiard_env_cpp*.so`は削除しない。** `src/env/fastfiz_simulator.py` が `build/` にあるネイティブ拡張をimportするため。
+
+GitHubにpushしても、無視した実験重み・データ・ `artifacts/` は保存されない。重要な成果はGitコミット、モデルの出所、seed、実行コマンド、出力を関連付け、必要に応じて別媒体へバックアップする。
+
+## 4. 現在の成果物の保全とバックアップ
+
+2026-11-09の監査で、ローカル研究成果物157件を棚卸しした。
+
+| 対象 | 配置/状態 | 取り扱い |
+| --- | --- | --- |
+| 旧build系モデル107件 | `~/billiards_refactor_quarantine_20261109/` に退避済み | **削除せず保管**。`tools/quarantine_legacy_build_artifacts.py --restore` で戻せる |
+| 残る研究成果物50件 | `~/research` 配下に残存 | 主要モデル・比較モデル・dataset・反復実験を保全 |
+| 2026-11-09の研究バックアップ | `~/billiards_research_backup_20261109.tar.gz` | 旧107件は退避前に照合済み |
+| 旧Micro3モデル | `outputs/micro/` に存在 | tar中の同名ファイルと**SHA-256が3件すべて一致**。現状のまま保管 |
+| 元のCMake Makefile | `~/billiards_refactor_safety_20261109/Makefile.original` | DGX上の復元用コピー。元Makefileとの `cmp` 一致を確認 |
+
+**重要:** 上記以外のすべての研究ファイルまでバックアップのバイト一致を保証したわけではない。未確認ファイルを「未使用だから削除可能」と決めない。特にチェックポイント名の文字列検索に現れなくても、CLI引数や動的なファイル名で参照されることがある。
+
+今後 `git rm --cached` などで追跡を変更する場合、**GitHubに削除コミットを作成してpullすると、手元の追跡ファイルが消える可能性がある**。実施前に別パスへコピーし、内容一致・復元方法を検証すること。原ブランチ `phase9-defense-v0` とバックアップは保護する。
+
+## 5. 新しい実験を記録する方法
+
+1. `configs/` のJSONテンプレート（例: `configs/smoke/mixed_one_turn.example.json`）をベースに設定を記録する。
+2. 一意のrun ID（例: `20261109_macro_visit_01`）を選ぶ。
+3. 以下を実行し、上書き禁止の新規実験ディレクトリを作る。
 
 ```bash
+cd ~/research
 python tools/prepare_run.py \
   --config configs/smoke/mixed_one_turn.example.json \
   --id 20261109_mixed_smoke_01
 ```
 
-4. `artifacts/runs/<run_id>/outputs/` にスクリプトの出力先を明示指定し、実行した**正確なコマンド、コンソール出力、例外、学習結果**を `logs/` に保存する。例: `python -m scripts.iterate_mixed_macro_policy ... --output-dir artifacts/runs/<run_id>/outputs`。ここでの `...` は説明用であり、実際には必要な引数をすべて指定する。
-5. `metadata.json` には準備時点のGitコミット・ブランチ・作業ツリー変更有無、Python版、設定のSHA-256を自動保存する。これは**実験実行自体を記録するものではない**。実行直前に準備し、別途実行コマンドを残す。
+作成される `artifacts/runs/<run_id>/` には、設定のスナップショット `config.json`、準備時点のGitコミット/ブランチ・Python版などを記録した `metadata.json`、`outputs/`、`logs/` が置かれる。**このツール自体は学習・評価を実行しない。**
 
-区別すべきデータ契約: Macroの12D状態、Attack旧25DとMixed 31D候補、Candidate PolicyのMCTS訪問分布教師、Candidate Qのモデルベース2-stepと実行済みMC教師、State Vの完了ゲームのみの教師、`turn_aware`、`candidate_encoding_version`、`target_kind`。設定ファイルだけで互換性を保証しない。
+4. 実際の学習・評価コマンドでは、個々のスクリプトが受け付ける出力オプションを確認し、生成物を `artifacts/runs/<run_id>/outputs/` 配下に保存する。例として `scripts/train_micro.py` は `--output-dir` を受け付ける。指定を省略すると旧 `outputs/micro/` に出力して追跡済みモデルを上書きし得るため、**新しい学習では必ず出力先を明示する**。
 
-## Gitの管理ルール
+```bash
+# 書き込み先を指定する場合の例（実行前に学習条件を確認）
+python -m scripts.train_micro \
+  --output-dir artifacts/runs/<run_id>/outputs/micro \
+  --steps <steps>
+```
 
-| 管理する | 管理しない（ローカルに保存） |
-| --- | --- |
-| `src/`、`scripts/`、`tools/`、`tests/` | `artifacts/` 以下の生成物 |
-| `configs/` 内の設定テンプレート | `.pt`、`.pth`、`.npz` の新規生成物 |
-| `docs/`、README、`CMakeLists.txt` | 実験ログ、生成キャッシュ、個人情報を含むローカルデータ |
+このコマンドの `<run_id>`、`<steps>` は**置換用の説明表記**であり、そのまま実行しない。実行したコマンド・seed・チェックポイント・評価ログは `logs/` に別途保存する。
 
-旧 `outputs/micro/` にはGit追跡済みのモデル3件がある。 `.gitignore` は**既に追跡しているファイルを非追跡にはしない**ため、ここは別途判断する。監査済みの既存50件と退避済み107件を一括で移動・削除しない。
+## 6. ビルドとテストの扱い
 
-重要な実験は、設定・Gitコミット・seed・教師種別・チェックポイント出所・出力をセットで保管し、必要に応じて別媒体にバックアップする。 `artifacts/` はGitに含まれないため、GitHubへのpushだけではバックアップされない。
+- `libs/fastfiz` はサブモジュール。`CMakeLists.txt` にC++/pybind11・GSL等の依存がある。
+- **新しいクローンでビルドする際の基本形**（必要なC++依存が導入済みの場合）:
 
-## 次の移行フェーズ（未実施）
+```bash
+git submodule update --init --recursive
+cmake -S . -B build
+cmake --build build --parallel 2
+```
 
-- **Phase 2（主要部分完了）**: `src/pipelines/` に共通学習補助・チェックポイントローダー・Attack/Mixedファクトリの本体を移動。旧 `scripts/` importを維持。22件の関連pytestと、2026-11-09のCPU 1ターンsmokeで移動前と同一結果を確認。
-- **Phase 3（分類・指定テスト完了）**: 全8段階でテスト76/76ファイルをunit36・integration11・pipelines29に配置。最終段階の指定40テストも2026-11-09に全件PASSED（8.91秒）、Git作業ツリークリーン。全スイート一括検証・モデル性能評価とは区別する。
-- **Phase 4（保全監査・Makefile整理完了）**: 隔離CMakeビルドとFastFiz拡張importに成功。`build/Makefile` はGit追跡から解除・ignore追加、DGXの現物は検証済みコピーから復元しFastFizの回帰11件PASSED（0.37秒）、作業ツリークリーン。既存 `*.so` とGit追跡Micro3モデルは維持し、各モデルのtarバックアップとのSHA-256照合もMATCH。詳細は [PHASE4_ARTIFACT_AUDIT.md](PHASE4_ARTIFACT_AUDIT.md)。
+- 既存DGXではPhase 4で既存 `build/` を変更せず、別の `/tmp/` ディレクトリでconfigure → C++ビルド → Python 3.11で `billiard_env_cpp` importと `BilliardSimulator()` を確認済み。既存の `build/Makefile` はGit非追跡のまま利用可能。
+- `tests/` は **unit 36 / integration 11 / pipelines 29 = 計76ファイル**。テスト対象ファイルの分類は完了し、各段階の指定テストは通過済み。ただし**全テストスイート一括実行をしたと解釈しない**。
 
-各フェーズで、関連テストと少量の統合smokeを実行し、研究モデルの学習条件・探索・FastFizの挙動を変更しない。
+作業内容に応じて、例えば以下の範囲でテストする。
+
+```bash
+python -m pytest tests/unit/macro/ -v
+python -m pytest tests/pipelines/macro/ -v
+python -m pytest tests/integration/physics/test_fastfiz_simulator.py -q
+```
+
+詳細なテストファイルと段階別コマンドは `tests/README.md`。物理テストにはFastFizのPython拡張が必要で、長時間学習を検証のたびに回す必要はない。
+
+## 7. 現時点の整理の到達点と今後の更新
+
+- **Phase 1:** 実験設定と記録の基盤を作成。
+- **Phase 2:** `src/pipelines/` に共通処理を分離し、`scripts/` の互換APIを維持。関連テストと5モデルのCPU 1ターンsmokeで確認。
+- **Phase 3:** 76テストファイルを機能別に整理し、各段階の指定テストが成功。
+- **Phase 4:** 旧研究成果物を保全したまま、CMake生成物 `build/Makefile` をGitの追跡対象から除外。復元後のFastFiz回帰11件がPASS。Micro3モデルは追跡継続かつtarとSHA-256一致。
+
+この構造整理は現行ブランチで一区切り。**mainへのマージ、学習性能改善の実証、全スイート一括テストは未実施。** 今後の変更は研究ロジックの変更とファイル管理の変更を別コミットで扱い、実際のGit構成、`.gitignore`、出力先、バックアップとこの文書を同期する。
+
+研究全体の方針が変わる場合は `docs/RESEARCH_CONTEXT.md` も更新する。変更の技術的な経緯が必要な場合のみ `docs/REFACTORING_PLAN.md` / `docs/PHASE4_ARTIFACT_AUDIT.md` を参照する。
