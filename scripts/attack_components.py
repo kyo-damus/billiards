@@ -4,7 +4,7 @@ The original construction logic is moved here without changing its
 transition, Micro, goal-generator, or game-rule parameters.
 """
 
-from scripts.eval_position_residual import (
+from src.pipelines.checkpoint_loading import (
     load_base_agent,
     load_residual_network,
 )

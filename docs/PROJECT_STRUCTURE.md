@@ -63,7 +63,7 @@ python tools/prepare_run.py \
 
 ## 次の移行フェーズ（未実施）
 
-- **Phase 2（着手済み）**: `scripts/training_utils.py` の実装を `src/pipelines/training_utils.py` へ移し、既存importは再公開ラッパーで保持。次は `attack_components.py` の `scripts.eval_position_residual` 依存を調査してから、`mixed_components.py` とともに段階的に移行する。既存の `python -m scripts.<既存名>` は維持する。
+- **Phase 2（着手済み）**: `scripts/training_utils.py` の実装を `src/pipelines/training_utils.py` へ移し、旧importは再公開。続いて `scripts.eval_position_residual` にあった2つのチェックポイントローダーを `src/pipelines/checkpoint_loading.py` に移し、旧モジュールから再公開することで `scripts.attack_components` の評価CLI依存を解消。次は Attack/Mixedのファクトリ本体を移す。既存の `python -m scripts.<既存名>` は維持する。
 - **Phase 3**: `tests/` をunit/integration/pipelinesに分ける。import、pytest root、CLIテスト、外部ツール参照を先に棚卸しする。
 - **Phase 4**: CMakeの自動生成 `build/Makefile`、追跡済み`outputs/micro/`、過去の実験成果物と新しいルールの整合性を検証する。保全条件を満たすまで追跡解除・削除しない。
 

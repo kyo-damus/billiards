@@ -101,3 +101,11 @@
 - 新設 `tests/test_training_utils_compat.py` は同一の関数オブジェクトの再公開、状態グループをまたがない分割、`make_groups`、明示的CPU指定を確認する。
 - **他のスクリプト・モデル・dataset・設定の意味は変更しない。** `attack_components.py` をただちに移さない理由: `scripts.eval_position_residual` 内のモデル読み込みに依存しているため、依存ループを作らない抽出方法が必要。
 - ユーザー環境で対象pytestが通った後、ファクトリの切り出しを進める。実際の動作確認は未実施。
+
+## Phase 2: 評価CLIへの依存解消（2026-11-09・第2段階）
+
+- ユーザー報告: 共通学習ユーティリティ移動後の関連23テストが **すべてPASSED（6.58s）**。
+- `scripts/eval_position_residual.py` で定義していた `load_base_agent` と `load_residual_network` を **本文の処理を変えず** `src/pipelines/checkpoint_loading.py` へ移動し、元の評価CLIは旧名を再公開する。
+- `scripts/attack_components.py` は旧評価CLIではなく新しいローダーモジュールをimportする。これにより次のファクトリ移動時に `src/` が `scripts/` に依存しないよう準備。既存の `scripts.eval_position_residual_sweep` などの旧importも維持。
+- モデルの読み込み方法・チェックポイントキー・target critic optional処理・Residual checkpoint辞書の返し方を変えない。旧importのidentityと必須キー/optional critic targetの検証を追加。
+- **実装コードの入出力が変わっていないことは、ユーザーDGXでのテストと5モデル統合smokeで要確認**。元の `phase9-defense-v0`、checkpoint、データは変更しない。
