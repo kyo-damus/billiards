@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "experiment_type": "mixed_macro_policy_iteration",
+  "entrypoint": "scripts.iterate_mixed_macro_policy",
+  "seed": 94100,
+  "model_contract": {
+    "macro_state_dim": 12,
+    "candidate_dim": 31,
+    "candidate_encoding_version": 2,
+    "turn_aware": true,
+    "policy_teacher": "MCTS root visit distribution",
+    "q_teacher_note": "Initial checkpoint uses model-based two-step targets; optional critic updates use completed-game executed returns only."
+  },
+  "input_checkpoints": {
+    "micro_base": "goal_conditioned_micro_mixed_curriculum_100k.pt",
+    "micro_residual": "position_power_residual_mlp_2000.pt",
+    "candidate_policy": "macro_candidate_policy_mixed_v2.pt",
+    "candidate_q": "macro_candidate_value_mixed_v2.pt",
+    "state_value": "macro_state_value_mixed_v2.pt"
+  },
+  "cli_arguments": {
+    "iterations": 1,
+    "games_per_iteration": 2,
+    "start_seed": 94100,
+    "max_turns": 3,
+    "simulations": 10,
+    "update_critics": false,
+    "device": "cpu"
+  },
+  "note": "Record-only template. Current scripts do not parse this config automatically. Adjust actual CLI flags and output path when running."
+}

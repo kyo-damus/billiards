@@ -86,3 +86,10 @@
 - **最終確認を完了（2026-11-09、ユーザー実行ログ）:** `tools/audit_local_artifacts.py --output local_artifacts_post_quarantine.tsv` で成果物 **50件**（主要5、Git追跡3、その他モデル22、データ12、反復8）、完全一致SHA256重複0組。`git status --short --branch` は追跡ファイルの未コミット変更も未追跡ファイルの表示もないクリーンな状態。
 - **学習済み5モデルを使う実行smoke成功（CPU）:** `python -m scripts.smoke_mixed_hierarchical_rollout --base-checkpoint goal_conditioned_micro_mixed_curriculum_100k.pt --residual-checkpoint position_power_residual_mlp_2000.pt --candidate-value-checkpoint macro_candidate_value_mixed_v2.pt --candidate-policy-checkpoint macro_candidate_policy_mixed_v2.pt --state-value-checkpoint macro_state_value_mixed_v2.pt --max-turns 1 --simulations 1 --safety-top-k 1 --safety-powers 0.65 --safety-angles 0 --safety-tip-y-mm 0 --outcome-grid-size 3 --outcome-top-k 2 --device cpu`。seed=94000、手番0→0、選択 `attack/position_attack`（ball0、pocket5）、Macro local reward +1.250、score_delta=(1,0)、ポケット状態[-1,5,-1]、`stop reason=max_turns`、`game terminated=False`。これは**1盤面・1ターンの経路実行確認**。Defense候補の物理実行や性能向上の実証にはならない（Defenseは既存の単体・統合テストで確認）。
 - **本フェーズの完了判定:** 旧コード・テスト重複の整理、旧モデルのSHA256検証付き退避、Git無視設定、現行5モデルの読み込みを含む最小実行確認まで完了。元の `phase9-defense-v0` は改変せず、作業ブランチを維持。**全テストスイート未実行、mainへのマージ未実施、研究性能は未評価**。必要に応じてブランチ差分のレビュー後にマージを判断する。
+
+## フォルダ整理プロジェクト Phase 1（2026-11-09）
+
+- 追加: `docs/PROJECT_STRUCTURE.md`、`configs/macro/`・`configs/smoke/` の実験記録JSONテンプレート、`tools/prepare_run.py`、その単体テスト。
+- `artifacts/` をGit管理外の新規実験出力先とし、`artifacts/runs/<run_id>/` に設定・Git metadata・outputs/logsをまとめる。
+- **未変更:** 現行 `src/`・`scripts/`・`tests/` の既存ファイル配置、現行・過去の全チェックポイントとデータ、旧buildの退避先、学習・推論ロジック。現行CLIはJSONを読み込まない。
+- `python -m pytest tests/test_prepare_run.py -v` によるユーザー環境での検証待ち。合格後にPhase 2のコード移動へ進む。全スイートや実際のRL性能を再評価したことにはならない。

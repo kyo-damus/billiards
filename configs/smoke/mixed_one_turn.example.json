@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "experiment_type": "mixed_hierarchical_smoke",
+  "entrypoint": "scripts.smoke_mixed_hierarchical_rollout",
+  "seed": 94000,
+  "model_contract": {
+    "macro_state_dim": 12,
+    "candidate_dim": 31,
+    "candidate_encoding_version": 2,
+    "turn_aware": true
+  },
+  "input_checkpoints": {
+    "micro_base": "goal_conditioned_micro_mixed_curriculum_100k.pt",
+    "micro_residual": "position_power_residual_mlp_2000.pt",
+    "candidate_policy": "macro_candidate_policy_mixed_v2.pt",
+    "candidate_q": "macro_candidate_value_mixed_v2.pt",
+    "state_value": "macro_state_value_mixed_v2.pt"
+  },
+  "cli_arguments": {
+    "max_turns": 1,
+    "simulations": 1,
+    "safety_top_k": 1,
+    "safety_powers": [
+      0.65
+    ],
+    "safety_angles": [
+      0
+    ],
+    "safety_tip_y_mm": [
+      0
+    ],
+    "outcome_grid_size": 3,
+    "outcome_top_k": 2,
+    "device": "cpu"
+  },
+  "note": "Record-only template corresponding to the 2026-11-09 CPU one-turn smoke. No performance conclusion."
+}

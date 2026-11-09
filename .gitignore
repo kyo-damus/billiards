@@ -30,3 +30,6 @@ local_artifacts_audit_summary.txt
 outcome_finetune_direct_eval.txt
 outcome_finetune_eval.txt
 position_probability_gate_unseen_eval.txt
+
+# New experiment artifacts; keep configs/ and docs/ versioned
+/artifacts/

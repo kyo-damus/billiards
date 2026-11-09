@@ -210,3 +210,11 @@ sign = +1 (同じプレイヤー) / -1 (相手へ手番交代)
 - ローカル生成物157件/79.62MiBを監査。旧 `build/results/` 等の107件/29.12MiBは**現物・監査記録・tarバックアップのSHA-256全件一致後、2026-11-09に `~/billiards_refactor_quarantine_20261109/` に退避完了（削除なし）**。残る50件/約50.50MiB（主要モデル5、Git追跡3、他モデル22、データセット12、反復実験8）は保全。退避ファイルは `python tools/quarantine_legacy_build_artifacts.py --restore` で復元可。
 - 退避後の再監査で **Artifacts: 50**、Git作業ツリークリーンを確認。主要5チェックポイントを読み込むCPU 1ターン実行smoke（seed=94000、MCTS simulations=1）は `POSITION_ATTACK` を選択して正常終了（score=[1,0]、`max_turns`停止、ゲーム非終端）。**機能接続の確認のみで、性能改善の根拠ではない。** 直近の関連33テストも全件成功。全スイート未実行、mainへのマージ未実施。
 - 作業の詳細記録: [REFACTORING_PLAN.md](REFACTORING_PLAN.md)。リファクタリング後も現行科学的前提（25/31D、Macro 2-step QとMC return Q/Vの別、MCTS訪問教師、Defense物理候補）は変わらない。
+
+## 11. 2026-11-09 フォルダ・実験管理の整備（Phase 1）
+
+- `docs/PROJECT_STRUCTURE.md` に現状・目標ディレクトリとGit/実験管理ルールを記載。
+- `configs/` のJSONは現状**実験設定の記録用**で、既存CLIは自動で読み込まない。
+- `tools/prepare_run.py` は `artifacts/runs/<run_id>/` を新規作成し、設定のスナップショットとGitコミット・ブランチ等を記録する。既存runの上書きは禁止。**学習・評価は実行しない。**
+- 旧成果物157件のうち退避済み107件・残存50件、Git追跡済みの `outputs/micro/` 3件は、Phase 1では**一切移動・削除しない**。
+- Phase 2以降、`scripts/` 内の共通処理の `src/pipelines/` 化、`tests/` の分類、CMake生成物の管理を順に検討。既存 `python -m scripts.*` と旧import互換性を維持する。

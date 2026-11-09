@@ -1,0 +1,69 @@
+# 研究リポジトリの構成・ファイル管理ルール（Phase 1）
+
+更新: 2026-11-09。対象ブランチ: `refactor-phase9-preserve-20261109`。
+
+## 現状と目標
+
+現在のGit管理ファイルは `src/` 59、`scripts/` 53、`tests/` 72、`docs/` 4、`tools/` 3、`outputs/micro/` 3など。過去のモデル107件はGit管理外の `~/billiards_refactor_quarantine_20261109/` に移動済みであり、変更・削除しない。
+
+Phase 1は**新しい実験の保存方針と記録手段**を追加するのみ。既存の`src/`、`scripts/`、`tests/`、学習済みモデル、既存データの移動・削除はしない。
+
+```text
+billiards/
+├── src/                 # 現行のMacro/Micro/Goal/物理/Controller（未移動）
+├── scripts/             # 現行の起動CLI（互換性維持）
+├── configs/
+│   ├── macro/           # 人が読む実験設定
+│   └── smoke/           # 人が読む小規模検証設定
+├── tests/               # 現行配置。Phase 3でunit/integration等を検討
+├── tools/               # 監査、退避、実験ディレクトリ準備
+├── docs/                # 設計、引き継ぎ、保守記録
+├── artifacts/           # Git管理外。新しい実験時に生成
+│   └── runs/
+│       └── <run_id>/
+│           ├── config.json
+│           ├── metadata.json
+│           ├── outputs/
+│           └── logs/
+├── outputs/micro/       # 既存の追跡済みモデル3件。今は移動しない
+└── build/               # CMake生成物。今は構成変更しない
+```
+
+将来的には `artifacts/checkpoints/current/`、`artifacts/checkpoints/archive/`、`artifacts/datasets/` を設けてもよいが、**既存モデルへのパス依存を検証する前には移動しない**。
+
+## 新しい実験の記録
+
+1. `configs/` のテンプレートを編集・複製する。設定内容は記録用であり、現行CLIはJSONを自動読み込みしない。
+2. 一意の `run_id` を選ぶ。推奨 `YYYYMMDD_<目的>_<番号>`。例: `20261109_macro_visit_01`。日時、モデル版、seedを識別できる命名にする。
+3. 準備コマンドを実行する。ファイル・ディレクトリが既存なら上書きを拒否する。
+
+```bash
+python tools/prepare_run.py \
+  --config configs/smoke/mixed_one_turn.example.json \
+  --id 20261109_mixed_smoke_01
+```
+
+4. `artifacts/runs/<run_id>/outputs/` にスクリプトの出力先を明示指定し、実行した**正確なコマンド、コンソール出力、例外、学習結果**を `logs/` に保存する。例: `python -m scripts.iterate_mixed_macro_policy ... --output-dir artifacts/runs/<run_id>/outputs`。ここでの `...` は説明用であり、実際には必要な引数をすべて指定する。
+5. `metadata.json` には準備時点のGitコミット・ブランチ・作業ツリー変更有無、Python版、設定のSHA-256を自動保存する。これは**実験実行自体を記録するものではない**。実行直前に準備し、別途実行コマンドを残す。
+
+区別すべきデータ契約: Macroの12D状態、Attack旧25DとMixed 31D候補、Candidate PolicyのMCTS訪問分布教師、Candidate Qのモデルベース2-stepと実行済みMC教師、State Vの完了ゲームのみの教師、`turn_aware`、`candidate_encoding_version`、`target_kind`。設定ファイルだけで互換性を保証しない。
+
+## Gitの管理ルール
+
+| 管理する | 管理しない（ローカルに保存） |
+| --- | --- |
+| `src/`、`scripts/`、`tools/`、`tests/` | `artifacts/` 以下の生成物 |
+| `configs/` 内の設定テンプレート | `.pt`、`.pth`、`.npz` の新規生成物 |
+| `docs/`、README、`CMakeLists.txt` | 実験ログ、生成キャッシュ、個人情報を含むローカルデータ |
+
+旧 `outputs/micro/` にはGit追跡済みのモデル3件がある。 `.gitignore` は**既に追跡しているファイルを非追跡にはしない**ため、ここは別途判断する。監査済みの既存50件と退避済み107件を一括で移動・削除しない。
+
+重要な実験は、設定・Gitコミット・seed・教師種別・チェックポイント出所・出力をセットで保管し、必要に応じて別媒体にバックアップする。 `artifacts/` はGitに含まれないため、GitHubへのpushだけではバックアップされない。
+
+## 次の移行フェーズ（未実施）
+
+- **Phase 2**: `scripts/attack_components.py`、`scripts/mixed_components.py`、`scripts/training_utils.py` 等を `src/pipelines/` へ段階的に移し、`python -m scripts.<既存名>` や旧importを互換ラッパーで維持。個々の依存を精査してから行う。
+- **Phase 3**: `tests/` をunit/integration/pipelinesに分ける。import、pytest root、CLIテスト、外部ツール参照を先に棚卸しする。
+- **Phase 4**: CMakeの自動生成 `build/Makefile`、追跡済み`outputs/micro/`、過去の実験成果物と新しいルールの整合性を検証する。保全条件を満たすまで追跡解除・削除しない。
+
+各フェーズで、関連テストと少量の統合smokeを実行し、研究モデルの学習条件・探索・FastFizの挙動を変更しない。

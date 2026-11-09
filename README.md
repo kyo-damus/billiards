@@ -29,10 +29,14 @@
 - `src/controller/`: 階層型エージェント、複数ターン実行、経験ログ
 - `src/env/`: FastFiz連携、Micro環境
 - `src/game/`: 簡易GameRules
-- `scripts/`: データ生成、学習、診断、統合smoke
+- `scripts/`: データ生成、学習、診断、統合smoke（既存CLI互換性を維持）
+- `configs/`: 新しい実験の記録用設定テンプレート（現行CLIはJSONを自動読み込みしない）
+- `artifacts/`: 新しい実験の成果物保存先（Git管理外・準備ツール実行時に生成）
+- `tools/prepare_run.py`: 実験ディレクトリと設定・Gitメタデータの保存（学習は実行しない）
 - `tests/`: 関連機能の単体・結合テスト
 - [docs/defense_v0_design.md](docs/defense_v0_design.md): Defense v0と実装段階ごとの技術ログ
 - [docs/RESEARCH_CONTEXT.md](docs/RESEARCH_CONTEXT.md): **研究方針と引き継ぎ資料（主に更新する文書）**
+- [docs/PROJECT_STRUCTURE.md](docs/PROJECT_STRUCTURE.md): **実験データ・設定・フォルダ構成の管理ルール**
 - [docs/CHAT_HANDOFF_PROMPT.md](docs/CHAT_HANDOFF_PROMPT.md): **新しいChatGPTチャットを開始するときのコピー用プロンプト**
 
 実行方法・今後の優先事項は上記の引き継ぎ資料を参照してください。
