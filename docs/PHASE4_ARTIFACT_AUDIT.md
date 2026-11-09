@@ -215,3 +215,43 @@ git status --short --branch
 これは一時ディレクトリ内でオブジェクトと共有ライブラリを新規生成するので **読み取り専用コマンドではない**。ただし既存の `build/`・学習済み重みには書き込まず、同一リポジトリのCMake構成とソースを利用する。実機でビルド失敗ならログの診断を先に行い、既存環境を壊す「修復」はしない。
 
 `build/Makefile` のGit追跡解除は、隔離ビルド・importの正常性とpull時の現物保全手順を確認した**後**に検討する。
+
+## 隔離CMakeの実ビルド成功とMakefileのGit追跡解除（2026-11-09）
+
+### DGXでの隔離実ビルド（実行済み）
+
+- `/tmp/billiards-cmake-phase4.d3nMbc` に `cmake --build --parallel 2` で `[100%] Built target billiard_env_cpp` を確認した。
+- 実際に `/tmp/billiards-cmake-phase4.d3nMbc/billiard_env_cpp.cpython-311-x86_64-linux-gnu.so` をPython 3.11.15でimportし、`BilliardSimulator()` のコンストラクタ呼び出しまで成功（`Isolated native import and constructor: OK`）。
+- C++コンパイルでは、FastFiz由来の`-fpermissive`に関連する非致命的警告（static const double等）やfriend演算子の警告が発生した。**エラー・失敗ではなく、ライブラリの修正はしていない**。
+- 別コピー `~/billiards_refactor_safety_20261109/Makefile.original` との `cmp` は `Original Makefile unchanged`。Git作業ツリーはクリーン。
+- **確認範囲:** CMake configure、共有モジュールのコンパイル/リンク、隔離成果物のimportとコンストラクタ。隔離成果物での全物理テストやモデル性能比較は未実施。既存 `build/` のネイティブ拡張への書き込みはない。
+
+### このコミットの変更
+
+- Gitで追跡していた自動生成ファイル `build/Makefile` のみを**追跡対象から削除**し、ルート `.gitignore` に `/build/Makefile` を追加した。**物理計算や既存CLIのコードは未変更。**
+- `build/.gitignore`、`CMakeLists.txt`、FastFizサブモジュール、Git追跡中のMicro3モデルは維持する。ローカル `build/billiard_env_cpp*.so` とバックアップはGitHub操作では変更できず、保存対象として扱う。
+- **重要:** この追跡解除コミットをユーザーが `git pull` すると、以前追跡していた`build/Makefile`がローカルから消える可能性がある。事前検証済みのバックアップから**pull直後に復元**する手順を必ず使うこと。復元後のMakefileは無視対象となり、既存の`cmake --build build`を引き続き利用できる。
+
+```bash
+cd ~/research
+backup="$HOME/billiards_refactor_safety_20261109/Makefile.original"
+test -f "$backup" || { echo "STOP: backup missing"; exit 1; }
+cmp -s build/Makefile "$backup" || { echo "STOP: original Makefile differs from backup"; exit 1; }
+
+git pull --ff-only
+
+# Gitから追跡解除された際のローカルMakefileの削除を補う
+if [ ! -f build/Makefile ]; then
+  cp -p -- "$backup" build/Makefile
+fi
+
+cmp -s build/Makefile "$backup" || { echo "STOP: Makefile restore mismatch"; exit 1; }
+git check-ignore -v --no-index build/Makefile
+git ls-files -- build/Makefile
+python -m pytest tests/integration/physics/test_fastfiz_simulator.py -q
+git status --short --branch
+```
+
+`git ls-files -- build/Makefile` の出力が空なら追跡解除完了。`git check-ignore` にルート `.gitignore` の `/build/Makefile` が表示されればignoreが有効。`pytest` で既存ネイティブ拡張を使ったFastFizの最小回帰を確認する。
+
+**新しい環境でクローンするとき:** `build/Makefile` はGitに含まれないため、ローカルで `cmake -S . -B build` により生成してから `cmake --build build --parallel 2` を実行する。既存DGXでは今すぐ再生成・再ビルドする必要はない。追跡済みのMicro3モデル、その他の研究成果物、原ブランチには触れない。

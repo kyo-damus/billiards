@@ -225,3 +225,10 @@
 - ユーザーDGXで、既存 `build/Makefile` の `~/billiards_refactor_safety_20261109/Makefile.original` への保全コピーは `cmp` **MATCH**。
 - CMake 4.3.0、Python 3.11.15、GNU 14.3.0、pybind11 3.0.3、FastFiz submodule `6c6df412` で、`/tmp/billiards-cmake-phase4.d3nMbc` へのCMake configure/generateが成功。pybind11の `CMP0148` に非致命的な警告。Git作業ツリーはクリーン。
 - 次は隔離ディレクトリへの **C++コンパイルと拡張import・コンストラクタ** を確認する。従来の `build/`・FastFiz既存 `.so`・3モデルは一切変更しない。まだGit追跡解除を行わない。詳細: [PHASE4_ARTIFACT_AUDIT.md](PHASE4_ARTIFACT_AUDIT.md)。
+
+## Phase 4: 隔離FastFiz実ビルド成功、Makefileのみ追跡対象から除外（2026-11-09）
+
+- ユーザーDGXで `/tmp/billiards-cmake-phase4.d3nMbc` に `billiard_env_cpp` を **100%ビルド・Python 3.11による隔離 `.so` のimport・BilliardSimulator()生成まで成功**。FastFiz/C++の非致命的警告はあり。元の `build/Makefile` と退避コピーも `cmp` 一致。作業ツリークリーン。
+- CMakeで再生成できることと原本の別コピーが検証されたため、本コミットでは **Git追跡中の `build/Makefile` 1ファイルのみ追跡対象から削除**し、`.gitignore` に `/build/Makefile` を追加。`build/.gitignore`、CMakeLists、FastFizサブモジュール、Micro3モデルは保持。
+- **ユーザーの`git pull` でローカルのMakefileが消える可能性がある**ため、`docs/PHASE4_ARTIFACT_AUDIT.md` にpull前バックアップ照合→pull→復元→ignore/追跡状態→FastFiz targeted pytestの順を明記。ローカルでのpull・復元とpytestは**まだ実行されていない**。
+- この変更は研究実装・モデル形式・性能に関係しないビルド生成物のGit管理だけを変更する。詳細: [PHASE4_ARTIFACT_AUDIT.md](PHASE4_ARTIFACT_AUDIT.md)。

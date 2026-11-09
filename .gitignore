@@ -7,6 +7,8 @@ __pycache__/
 *.pth
 
 # C++ Build Artifacts
+# Regenerated locally by CMake; never version an environment-specific build file
+/build/Makefile
 *.so
 *.o
 CMakeCache.txt
