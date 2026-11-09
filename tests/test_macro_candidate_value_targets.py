@@ -320,3 +320,87 @@ def test_two_step_target_preserves_same_player_success():
         result.target,
         2.125,
     )
+
+
+def test_attack_dataset_reuses_factory_and_keeps_residual_metadata(
+    tmp_path, monkeypatch, capsys,
+):
+    """Keep the legacy 25-D dataset and residual checkpoint log intact."""
+    from types import SimpleNamespace
+
+    import scripts.build_macro_candidate_value_dataset as script
+    from src.common.types import GameState, MacroAction, Strategy
+    from src.goal.types import TacticalGoal, TacticalGoalType
+    from src.macro.candidate import MacroCandidate
+
+    candidate = MacroCandidate(
+        action=MacroAction(Strategy.ATTACK, target_ball=0, target_pocket=0),
+        goal=TacticalGoal(
+            TacticalGoalType.DIRECT_ATTACK,
+            target_ball=0,
+            target_pocket=0,
+        ),
+    )
+
+    class OneCandidate:
+        def generate(self, state):
+            return [candidate]
+
+    calls = []
+
+    def fake_components(args, device):
+        calls.append(device)
+        return (
+            (object(), OneCandidate(), OneCandidate()),
+            {"residual_mode": "power-only"},
+        )
+
+    monkeypatch.setattr(
+        script, "build_attack_components_with_metadata", fake_components
+    )
+    monkeypatch.setattr(script, "MacroCandidateGenerator", OneCandidate)
+    monkeypatch.setattr(script, "MicroBilliardEnv", lambda: object())
+    monkeypatch.setattr(
+        script, "random_state",
+        lambda env, seed: GameState(
+            ball_positions=np.array(
+                [[0.5, 0.3], [0.5, 0.8], [0.9, 1.5]],
+                dtype=np.float32,
+            ),
+            score=np.zeros(2, dtype=np.float32),
+            current_player=0,
+        ),
+    )
+    monkeypatch.setattr(
+        script,
+        "evaluate_two_step_candidate_target",
+        lambda **kwargs: SimpleNamespace(
+            target=0.75,
+            immediate_reward=0.5,
+            next_best_reward=0.25,
+            next_candidate_count=1,
+        ),
+    )
+    output = tmp_path / "attack_legacy.npz"
+    args = SimpleNamespace(
+        device="cpu",
+        states=1,
+        seed=11,
+        gamma=0.99,
+        turn_aware=False,
+        residual_scale=0.75,
+        log_interval=0,
+        output=str(output),
+    )
+
+    script.build_dataset(args)
+
+    assert calls == ["cpu"]
+    with np.load(output, allow_pickle=False) as data:
+        assert data["state"].shape == (1, 12)
+        assert data["candidate"].shape == (1, 25)
+        np.testing.assert_allclose(data["q_target"], [0.75])
+        np.testing.assert_allclose(data["immediate_reward"], [0.5])
+        assert data["state_id"].tolist() == [0]
+        assert not bool(data["turn_aware"])
+    assert "residual checkpoint mode: power-only" in capsys.readouterr().out

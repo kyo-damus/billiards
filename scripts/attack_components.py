@@ -24,7 +24,7 @@ from src.micro.fixed_scale_position_residual_policy import (
 from src.micro.position_residual_policy import PositionResidualMicroPolicy
 
 
-def make_components(
+def build_attack_components_with_metadata(
     args,
     device,
 ):
@@ -35,7 +35,7 @@ def make_components(
 
     (
         residual_network,
-        _,
+        residual_checkpoint,
     ) = load_residual_network(
         args.residual_checkpoint,
         device,
@@ -110,7 +110,16 @@ def make_components(
     )
 
     return (
-        transition,
-        root_generator,
-        direct_generator,
+        (
+            transition,
+            root_generator,
+            direct_generator,
+        ),
+        residual_checkpoint,
     )
+
+
+def make_components(args, device):
+    """Backward-compatible public factory: preserve the original 3-tuple."""
+    components, _ = build_attack_components_with_metadata(args, device)
+    return components
