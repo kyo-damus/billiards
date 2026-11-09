@@ -15,9 +15,7 @@ from scripts.build_macro_candidate_value_dataset import (
     random_state,
     resolve_device,
 )
-from scripts.build_mixed_candidate_value_dataset import (
-    make_mixed_components,
-)
+from scripts.mixed_components import make_mixed_components
 from src.common.types import Strategy
 from src.env.micro_billiard_env import MicroBilliardEnv
 from src.macro.candidate_value import (

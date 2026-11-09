@@ -11,9 +11,7 @@ from scripts.build_macro_candidate_value_dataset import (
     random_state,
     resolve_device,
 )
-from scripts.build_mixed_candidate_value_dataset import (
-    make_mixed_components,
-)
+from scripts.mixed_components import make_mixed_components
 from src.controller.hierarchical_agent import HierarchicalAgent
 from src.controller.mixed_hierarchical_rollout import (
     MixedHierarchicalRollout,
