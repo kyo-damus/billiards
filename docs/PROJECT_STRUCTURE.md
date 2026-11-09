@@ -1,4 +1,4 @@
-# 研究リポジトリの構成・ファイル管理ルール（Phase 1）
+# 研究リポジトリの構成・ファイル管理ルール
 
 更新: 2026-11-09。対象ブランチ: `refactor-phase9-preserve-20261109`。
 
@@ -6,7 +6,7 @@
 
 Phase 1開始前のGit管理ファイルは `src/` 59、`scripts/` 53、`tests/` 72、`docs/` 4、`tools/` 3、`outputs/micro/` 3など。Phase 3時点ではテストファイル76件（追加4件）の分類を進めている。過去のモデル107件はGit管理外の `~/billiards_refactor_quarantine_20261109/` に移動済みであり、変更・削除しない。
 
-Phase 1では**新しい実験の保存方針と記録手段**を追加し、既存の`src/`、`scripts/`、`tests/`、学習済みモデル、既存データは移動・削除しなかった。Phase 2の第1段階では、Macro学習の共通ユーティリティの実装だけを`src/pipelines/training_utils.py`へ移し、旧`script`モジュールを再公開用ラッパーとして維持する。
+Phase 1では**新しい実験の保存方針と記録手段**を追加し、既存の`src/`、`scripts/`、`tests/`、学習済みモデル、既存データは移動・削除しなかった。Phase 2の第1段階では、Macro学習の共通ユーティリティの実装だけを`src/pipelines/training_utils.py`へ移し、旧`scripts`モジュールを再公開用ラッパーとして維持する。
 
 ```text
 billiards/
@@ -16,7 +16,7 @@ billiards/
 ├── configs/
 │   ├── macro/           # 人が読む実験設定
 │   └── smoke/           # 人が読む小規模検証設定
-├── tests/               # テスト（Phase 3で段階的に分類）
+├── tests/               # テスト（Phase 3で76ファイル分類）
 │   ├── unit/            # 局所的な契約の検証
 │   │   ├── pipelines/   # 共通処理と旧import互換性
 │   │   ├── tools/       # 実験準備・管理ツール
@@ -28,15 +28,16 @@ billiards/
 │   │   ├── defense/     # 防御候補・相手脅威の単体評価
 │   │   └── env/         # ショット幾何などの純粋関数
 │   ├── integration/     # 実物理・階層構成を通した接続確認
-│   │   ├── physics/    # FastFizとMCTS/物理遷移
-│   │   ├── agent/      # 階層Agentの統合smoke
-│   │   └── defense/    # Defense物理ショットと遷移
+│   │   ├── physics/    # FastFiz・Micro環境・物理遷移
+│   │   ├── agent/      # 階層AgentとMixed rollout
+│   │   ├── defense/    # Defense物理ショットと遷移
+│   │   └── goal/       # 実環境でのGoal sampler
 │   ├── pipelines/       # Macro学習・rollout変換の処理契約
 │   │   ├── macro/      # Macroモデルの小規模学習・反復
 │   │   ├── rollout/    # 訪問分布・リターン教師生成
 │   │   ├── micro/      # Residual・Gateの教師データ/学習
 │   │   └── evaluation/ # 評価CLIヘルパー・集計
-│   └── test_*.py        # 未移動のテスト（安全確認まで維持）
+│   └── README.md        # テスト分類と実行方法
 ├── tools/               # 監査、退避、実験ディレクトリ準備
 ├── docs/                # 設計、引き継ぎ、保守記録
 ├── artifacts/           # Git管理外。新しい実験時に生成
@@ -84,7 +85,7 @@ python tools/prepare_run.py \
 ## 次の移行フェーズ（未実施）
 
 - **Phase 2（主要部分完了）**: `src/pipelines/` に共通学習補助・チェックポイントローダー・Attack/Mixedファクトリの本体を移動。旧 `scripts/` importを維持。22件の関連pytestと、2026-11-09のCPU 1ターンsmokeで移動前と同一結果を確認。
-- **Phase 3（第1〜7段階）**: 第6段階のPosition/Micro位置系41テストが全件成功（5.74秒）、作業ツリークリーン。第7段階ではMacro Q教師・Mixed候補dataset、Rollout収集/保存と評価CLIの13ファイルを内容変更なしで`tests/pipelines/`へ配置。累計67/76ファイル（unit34、integration6、pipelines27）。残り9ファイルは確認後の最終分類を予定。
+- **Phase 3（全8段階の配置変更完了、最終pytest待ち）**: 第7段階の評価・データ生成53テストまで成功（6.62秒、作業ツリークリーン）。第8段階で残り9ファイルを分類し、テストファイル76/76をunit36・integration11・pipelines29に再配置。**最終9ファイルはまだ新配置でpytest未実行。**
 - **Phase 4**: CMakeの自動生成 `build/Makefile`、追跡済み`outputs/micro/`、過去の実験成果物と新しいルールの整合性を検証する。保全条件を満たすまで追跡解除・削除しない。
 
 各フェーズで、関連テストと少量の統合smokeを実行し、研究モデルの学習条件・探索・FastFizの挙動を変更しない。

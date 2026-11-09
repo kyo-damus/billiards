@@ -8,16 +8,17 @@
 - `tests/unit/env/`: ショット幾何・環境の局所契約
 - `tests/unit/macro/`: Macro候補表現・Policy/Qネットワーク・局所評価
 - `tests/unit/macro/position/`: Position候補生成、到達可能性・feasibility
-- `tests/unit/micro/`: SAC・Position Residual、適応的Position Policy、ゲート処理
+- `tests/unit/micro/`: SAC・Goal-conditioned SAC・Curriculum・Position Residual・適応的Position Policy、ゲート処理
 - `tests/unit/goal/`: TacticalGoal・Goal条件付け・報酬・Safety Goal
 - `tests/unit/defense/`: 防御候補生成、相手脅威・仰角の局所評価
-- `tests/test_*.py`: 未移動のテスト。依存関係・fixtureを確認してから段階的に分類
-- `tests/integration/physics/`: FastFiz実物理とMCTSの結合動作を確認するテスト
-- `tests/integration/agent/`: 階層型Agentのエンドツーエンドsmoke
+- 2026-11-09のPhase 3第8段階で全76ファイルを分類。現在 `tests/test_*.py` の直下ファイルはなし
+- `tests/integration/physics/`: FastFiz実物理、MicroBilliardEnv、PhysicsMacroTransitionとMCTSの結合動作
+- `tests/integration/agent/`: 階層型Agentのsmoke、Mixed階層Rolloutの接続契約
 - `tests/integration/defense/`: FastFizを伴うDefenseショット・Macro遷移
+- `tests/integration/goal/`: MicroBilliardEnvを使用したGoal sampler、Outcome Goal sampler
 - `tests/pipelines/macro/`: Macro Candidate Policy/Q、State V、反復更新と2-step教師・Mixed候補dataset
 - `tests/pipelines/rollout/`: Rollout収集/保存、MCTS訪問分布教師とMC return教師の生成
-- `tests/pipelines/micro/`: Position Residual/Success・Probability Gateの教師・小規模学習契約
+- `tests/pipelines/micro/`: Position Residual/Gateの学習、Goal-conditioned SACのcheckpoint再開と並列Goal Sampling
 - `tests/pipelines/evaluation/`: Candidate Policy/Q・MCTS・Residual・Safety難盤面・Cue仰角の評価CLI契約
 
 ## 関連テストの実行例
@@ -34,7 +35,7 @@ python -m pytest \
   -v
 ```
 
-`python -m pytest tests/unit/pipelines/ -v` のように分類フォルダ単位の実行も可能。移動したファイルは旧パスで指定しても見つからないため**新パスを使うこと**。未移動のテストは従来のパスで実行する。FastFiz統合テスト4ファイルは上記の新しい場所を使い、従来通りネイティブ物理エンジンが必要。ファイルの内容・assertionは移動前から変更していない。
+`python -m pytest tests/unit/pipelines/ -v` のように分類フォルダ単位の実行も可能。移動したファイルは旧パスで指定しても見つからないため**新パスを使うこと**。第8段階の移動後、ルート直下の旧テストパスは存在しない。FastFiz統合テスト4ファイルは上記の新しい場所を使い、従来通りネイティブ物理エンジンが必要。ファイルの内容・assertionは移動前から変更していない。
 
 過去の検証ログや設計履歴のテストファイル名は、当時の記録としてそのまま保持する。
 
@@ -120,3 +121,29 @@ python -m pytest \
 ```
 
 第7段階の13ファイルは内容変更なしの移動。これらの評価関数・データ生成関数のテストは、新しい分類先で実行する。旧パスは存在しない。残る9ファイルは次段階に分類する。
+
+## Phase 3第8段階の実行例（最後の9ファイル）
+
+```bash
+python -m pytest \
+  tests/unit/micro/test_goal_conditioned_sac.py \
+  tests/unit/micro/test_goal_curriculum.py \
+  tests/pipelines/micro/test_goal_finetune.py \
+  tests/pipelines/micro/test_parallel_goal_sampling.py \
+  tests/integration/goal/ \
+  tests/integration/physics/test_micro_billiard_env.py \
+  tests/integration/physics/test_physics_transition.py \
+  tests/integration/agent/test_mixed_hierarchical_rollout.py \
+  -v
+```
+
+このコマンドは最終9ファイルの検証であり、全テストスイートの実行ではない。配置変更後の最終テスト完了は**ユーザー環境の結果を確認してから**判断する。
+
+### 普段の用途別実行
+
+- Macro候補・MCTSの小規模テスト: `python -m pytest tests/unit/macro/ -v`
+- Macro Policy/Q/V学習・ターゲット: `python -m pytest tests/pipelines/macro/ -v`
+- Microの学習・教師データ: `python -m pytest tests/pipelines/micro/ -v`
+- 実物理での接続: `python -m pytest tests/integration/physics/ -v`
+
+`tests/README.md` と `docs/PROJECT_STRUCTURE.md` の構成は2026-11-09現在。GitHub HEADとファイルツリーで実際の配置を確認すること。

@@ -41,3 +41,10 @@
 - 旧 `build/` MuZero/SAC Python 8件は作業ブランチから削除済み。現在の研究はFastFiz物理を使うモデルベースMCTSであり、MuZeroを学習済みと解釈しない。
 - ローカル現行主要5チェックポイントと関連Datasetは原則保護。旧build学習成果物107件/29.12MiBは、tarバックアップとSHA-256全件一致を確認して `~/billiards_refactor_quarantine_20261109/` に**退避完了**（削除0）。復元は `python tools/quarantine_legacy_build_artifacts.py --restore`。残る50件は現行・比較・再現性用として保全し、勝手に削除しない。
 - 退避後の再監査で50件を確認し、学習済み5モデルを使う1ターンの統合smokeに成功（seed=94000、POSITION_ATTACK、score=[1,0]）。2026-11-09の段階で**今回の保守的リファクタリングは一区切り**。全スイート未実行・性能未評価・main未マージ。次はGitHubの最新HEADと `docs/REFACTORING_PLAN.md` を確認し、マージの要否と次の研究開発課題を判断する。
+
+## 2026-11-09 Phase 3の構造整理（最新追記）
+
+- `src/pipelines/` が共通処理の実装、`scripts/` がCLI・旧import互換用。旧CLIの呼び出しは変更していない。
+- テスト76ファイルは `tests/unit/`・`tests/integration/`・`tests/pipelines/` に分類済み。個別の新ファイルパスは `tests/README.md`。**第8段階で移動した9ファイルの実行検証はまだ必要**。直下 `tests/test_*.py` を前提にコマンドを指定しない。
+- Git管理下のテストファイル数とテスト関数件数は別の指標。個々のpytestにPASSEDがあっても、全テストスイートを実行済みとみなさない。
+- Phase 4では `build/Makefile` 等の生成物と `outputs/micro/` の既存追跡3モデルを監査する。ローカルのモデル・バックアップ・退避先には勝手に手をつけない。

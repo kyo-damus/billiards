@@ -30,10 +30,12 @@
 - `src/env/`: FastFiz連携、Micro環境
 - `src/game/`: 簡易GameRules
 - `scripts/`: データ生成、学習、診断、統合smoke（既存CLI互換性を維持）
+- `src/pipelines/`: 共通学習補助、モデルローダー、Attack/Mixedファクトリの実装
 - `configs/`: 新しい実験の記録用設定テンプレート（現行CLIはJSONを自動読み込みしない）
 - `artifacts/`: 新しい実験の成果物保存先（Git管理外・準備ツール実行時に生成）
 - `tools/prepare_run.py`: 実験ディレクトリと設定・Gitメタデータの保存（学習は実行しない）
-- `tests/`: 関連機能の単体・結合テスト
+- `tests/`: 単体・統合・学習パイプラインのテスト（`unit/`、`integration/`、`pipelines/`）
+- [tests/README.md](tests/README.md): **機能別テスト配置・実行コマンド**
 - [docs/defense_v0_design.md](docs/defense_v0_design.md): Defense v0と実装段階ごとの技術ログ
 - [docs/RESEARCH_CONTEXT.md](docs/RESEARCH_CONTEXT.md): **研究方針と引き継ぎ資料（主に更新する文書）**
 - [docs/PROJECT_STRUCTURE.md](docs/PROJECT_STRUCTURE.md): **実験データ・設定・フォルダ構成の管理ルール**

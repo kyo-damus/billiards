@@ -182,3 +182,12 @@
 - Candidate Policy/Q評価、MCTS検索要約、Residual評価/集計、Mixed難盤面評価、Post-Safety難盤面評価、Cue仰角診断の9ファイルを `tests/pipelines/evaluation/` に移動。
 - **全13ファイルは既存Git blob SHAを再利用し、内容変更なしのパス移動**。ファイル内にテスト間相対import、`__file__`、`sys.path`、chdir等の依存がないことを確認。評価実行ロジックそのものは変更しない。
 - 累計**67/76ファイル**を分類（unit34、integration6、pipelines27）、残り9ファイル。移動後のpytestはユーザーDGX環境で検証待ち。学習済みモデル、成果物、ローカルの退避データは変更・削除しない。
+
+## Phase 3: テスト最終9ファイルの分類（2026-11-09・第8段階）
+
+- **ユーザー実行結果:** 第7段階のMacro候補/Q教師・Rollout・評価CLI関連53件がすべてPASSED（6.62秒）、Git作業ツリークリーン。
+- Goal-conditioned SAC/Curriculumの2ファイルを `tests/unit/micro/` に分類。MicroのFinetune checkpointと並列Goal Samplingの2ファイルは `tests/pipelines/micro/` に分類。
+- `MicroBilliardEnv` の実環境に依存するGoal sampler 2ファイルを `tests/integration/goal/`、Micro環境とPhysicsMacroTransitionの2ファイルを `tests/integration/physics/`、Mixed階層Rolloutの1ファイルを `tests/integration/agent/` へ分類。
+- **全9ファイルは既存Git blob SHAを再利用し内容変更ゼロで移動**。各ファイルの `tests.*` または相対import、`__file__`、`sys.path`、chdir依存がないことを検査済み。既存の `python -m scripts.*` CLIやMacro/Microの研究コードは一切変更しない。
+- Git管理下の76テストファイルは全て `unit` 36、`integration` 11、`pipelines` 29 へ分類。旧 `tests/test_*.py` は0ファイルとなる見込み（コミット後に検証）。**新配置のpytestはユーザーDGXでの実行待ちであり、Phase 3完了判定は結果確認後。**
+- 一括全スイートは実行していない。過去各段階のターゲットテスト成功と、これから行う最終テスト成功を区別する。

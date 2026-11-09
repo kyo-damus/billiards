@@ -218,3 +218,10 @@ sign = +1 (同じプレイヤー) / -1 (相手へ手番交代)
 - `tools/prepare_run.py` は `artifacts/runs/<run_id>/` を新規作成し、設定のスナップショットとGitコミット・ブランチ等を記録する。既存runの上書きは禁止。**学習・評価は実行しない。**
 - 旧成果物157件のうち退避済み107件・残存50件、Git追跡済みの `outputs/micro/` 3件は、Phase 1では**一切移動・削除しない**。
 - Phase 2以降、`scripts/` 内の共通処理の `src/pipelines/` 化、`tests/` の分類、CMake生成物の管理を順に検討。既存 `python -m scripts.*` と旧import互換性を維持する。
+
+## 12. 2026-11-09 フォルダとテスト構成（Phase 2/3）
+
+- Phase 2: 共通学習補助・checkpointローダー・Attack/Mixedファクトリを `src/pipelines/` へ集約。旧 `scripts/` のimportを互換ラッパーで維持し、`python -m scripts.*` のCLIを変更しない。ユーザーDGXで関連22テストがPASSED、5モデル・CPU 1ターン混合階層smokeは移動前と完全一致（POSITION_ATTACK、ball0/pocket5、Macro reward +1.250、score [1,0]）。
+- Phase 3: テスト全76ファイルを用途で `tests/unit/`（36）、`tests/integration/`（11）、`tests/pipelines/`（29）へ段階的に配置。最後の9ファイルの配置コミットが反映された段階であり、**最終段階のpytestは未実施**。第1〜7段階の個別ターゲットテストは全件PASSED。大規模学習・全スイート実行・性能評価をしたという意味ではない。
+- 具体的なテスト指定は `tests/README.md`、全体の構成・ファイル保全ルールは `docs/PROJECT_STRUCTURE.md` を参照。
+- **次の優先順:** DGX上で最終9ファイルのpytest確認 → `git status` と76ファイルの配置確認 → Phase 4のCMake生成物・追跡済み旧checkpoint等の管理を**削除・移動せずに監査**。既存157件監査のうち退避済み107件、残存50件は引き続き保全。
