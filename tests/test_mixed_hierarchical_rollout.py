@@ -80,6 +80,68 @@ class CountingTransition:
         )
 
 
+def test_hierarchical_agent_legacy_select_execute_and_step_contract():
+    """Preserve the separate public methods and legacy MacroAction path."""
+
+    class LegacyPlanner:
+        def __init__(self):
+            self.seen_states = []
+
+        def select_action(self, state):
+            self.seen_states.append(state)
+            return MacroAction(
+                strategy=Strategy.ATTACK,
+                target_ball=0,
+                target_pocket=2,
+            )
+
+    class LegacyTransition:
+        def __init__(self):
+            self.calls = []
+
+        def step(self, state, action):
+            self.calls.append((state, action))
+            return MacroTransitionResult(
+                next_state=make_state(),
+                reward=1.0,
+                terminated=False,
+            )
+
+    planner = LegacyPlanner()
+    transition = LegacyTransition()
+    agent = HierarchicalAgent(
+        mcts=planner, transition_model=transition
+    )
+    initial = make_state()
+
+    # Direct planning and physical execution remain public methods.
+    chosen = agent.select_macro_action(initial)
+    assert chosen.strategy == Strategy.ATTACK
+    assert chosen.target_ball == 0
+    assert chosen.target_pocket == 2
+
+    executed = agent.execute_macro_action(initial, chosen)
+    assert isinstance(executed, MacroTransitionResult)
+    assert executed.reward == 1.0
+    assert not executed.terminated
+
+    # Full step must compose exactly one additional plan and execution.
+    result = agent.step(initial)
+    assert isinstance(result, HierarchicalStepResult)
+    assert isinstance(result.macro_action, MacroAction)
+    assert result.macro_action.strategy == Strategy.ATTACK
+    assert result.macro_action.target_ball == 0
+    assert result.macro_action.target_pocket == 2
+    assert result.next_state.ball_positions.shape == (3, 2)
+    assert result.reward == 1.0
+    assert result.terminated is False
+    assert len(planner.seen_states) == 2
+    assert all(seen is initial for seen in planner.seen_states)
+    assert len(transition.calls) == 2
+    assert all(state is initial for state, _ in transition.calls)
+    assert all(action.target_pocket == 2 for _, action in transition.calls)
+
+
 def test_rollout_replans_from_executed_next_state():
     planner = CountingMCTS()
     transition = CountingTransition()

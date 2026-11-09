@@ -56,3 +56,10 @@
 - 元のテストの重要契約（ルート候補専用Generatorが1回、深部候補Generatorが1回、ルートに深部用候補が混入しない）を `tests/test_candidate_mcts.py::test_mcts_uses_separate_root_generator` に統合。ルート/深部で異なるポケットの候補を明示し、同様の挙動を確認。
 - テストファイル数74→73、テスト関数総数296→296（検証ケースの件数は維持）。ダミー実装を共通化したため重複コードを減らした。
 - 旧テストファイルは作業ブランチ上では削除したが、`phase9-defense-v0` とGit履歴には保存される。変更後のテストはユーザーDGX上で未実施。
+
+## 階層Agent単体テストの統合（2026-11-09・第3弾）
+
+- `tests/test_hierarchical_agent.py` の3件は同一のDummyMCTS/DummyTransitionを用いて、`select_macro_action`、`execute_macro_action`、`step` をそれぞれ検証していた。
+- `tests/test_mixed_hierarchical_rollout.py` に `test_hierarchical_agent_legacy_select_execute_and_step_contract` を追加し、**3種類の公開メソッド全てを維持して検証**。特に現行Mixed専用のMacroCandidateだけでなく、従来の`MacroAction`を通す経路を残す。
+- 元の3件を1件にまとめることでテストファイル73→72、テスト関数296→294件（見込み）。遷移回数、入力の同一性も新たに確認する。旧テストファイルは作業ブランチ上では削除し、分岐元・履歴から復元可能。
+- この変更はテストコードのみ。実装コード・チェックポイント・データは変更しない。テストはユーザーDGX上で未実施。
