@@ -7,11 +7,8 @@ import torch
 import torch.nn.functional as F
 from torch.optim import Adam
 
-from scripts.train_macro_candidate_value import (
-    load_dataset,
-    make_group_split,
-    resolve_device,
-)
+from scripts.train_macro_candidate_value import load_dataset
+from scripts.training_utils import make_group_split, resolve_device, make_groups
 from src.macro.candidate_encoding import (
     MACRO_CANDIDATE_DIM,
     MACRO_CANDIDATE_V2_DIM,
@@ -44,45 +41,6 @@ def target_policy_distribution(
         ),
         dim=0,
     )
-
-
-def make_groups(
-    indices,
-    state_ids,
-):
-    groups = []
-
-    selected_state_ids = np.unique(
-        state_ids[
-            indices
-        ]
-    )
-
-    index_set = set(
-        np.asarray(
-            indices,
-            dtype=np.int64,
-        ).tolist()
-    )
-
-    for state_id in selected_state_ids:
-        group = [
-            int(index)
-            for index in np.flatnonzero(
-                state_ids == state_id
-            )
-            if int(index) in index_set
-        ]
-
-        if group:
-            groups.append(
-                np.asarray(
-                    group,
-                    dtype=np.int64,
-                )
-            )
-
-    return groups
 
 
 def group_loss(

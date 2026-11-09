@@ -14,10 +14,7 @@ import torch
 import torch.nn.functional as F
 from torch.optim import Adam
 
-from scripts.train_macro_candidate_policy import make_groups
-from scripts.train_macro_candidate_value import (
-    make_group_split, resolve_device,
-)
+from scripts.training_utils import make_group_split, make_groups, resolve_device
 from src.macro.candidate_policy import MacroCandidatePolicyNetwork
 from src.macro.candidate_encoding import MACRO_CANDIDATE_V2_DIM
 from src.macro.encoding import MACRO_STATE_DIM

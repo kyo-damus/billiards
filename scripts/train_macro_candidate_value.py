@@ -7,6 +7,8 @@ import torch
 import torch.nn.functional as F
 from torch.optim import Adam
 
+from scripts.training_utils import make_group_split, resolve_device
+
 from src.macro.candidate_encoding import (
     MACRO_CANDIDATE_DIM,
     MACRO_CANDIDATE_V2_DIM,
@@ -25,19 +27,6 @@ REQUIRED_KEYS = (
     "q_target",
     "state_id",
 )
-
-
-def resolve_device(
-    requested,
-):
-    if requested == "auto":
-        return (
-            "cuda"
-            if torch.cuda.is_available()
-            else "cpu"
-        )
-
-    return requested
 
 
 def load_dataset(
@@ -138,70 +127,6 @@ def load_dataset(
         candidates,
         targets,
         state_ids,
-    )
-
-
-def make_group_split(
-    state_ids,
-    validation_fraction,
-    seed,
-):
-    unique_ids = np.unique(
-        state_ids
-    )
-
-    if len(unique_ids) < 2:
-        raise ValueError(
-            "At least two distinct states "
-            "are required."
-        )
-
-    rng = np.random.default_rng(
-        seed
-    )
-
-    shuffled = rng.permutation(
-        unique_ids
-    )
-
-    val_state_count = max(
-        1,
-        int(
-            round(
-                len(unique_ids)
-                * validation_fraction
-            )
-        ),
-    )
-    val_state_count = min(
-        val_state_count,
-        len(unique_ids) - 1,
-    )
-
-    val_ids = set(
-        shuffled[
-            :val_state_count
-        ].tolist()
-    )
-
-    val_mask = np.asarray(
-        [
-            state_id in val_ids
-            for state_id in state_ids
-        ],
-        dtype=bool,
-    )
-
-    train_indices = np.flatnonzero(
-        ~val_mask
-    )
-    val_indices = np.flatnonzero(
-        val_mask
-    )
-
-    return (
-        train_indices,
-        val_indices,
     )
 
 

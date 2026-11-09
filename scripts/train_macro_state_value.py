@@ -15,10 +15,7 @@ import torch
 import torch.nn.functional as F
 from torch.optim import Adam
 
-from scripts.train_macro_candidate_value import (
-    make_group_split,
-    resolve_device,
-)
+from scripts.training_utils import make_group_split, resolve_device
 from src.macro.encoding import MACRO_STATE_DIM
 from src.macro.value import MacroValueNetwork
 

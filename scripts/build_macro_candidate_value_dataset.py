@@ -2,7 +2,8 @@ import argparse
 from pathlib import Path
 
 import numpy as np
-import torch
+
+from scripts.training_utils import resolve_device
 
 from scripts.attack_components import build_attack_components_with_metadata
 
@@ -34,19 +35,6 @@ GOAL_TYPE_TO_ID = {
     TacticalGoalType.POSITION_ATTACK: 1,
     TacticalGoalType.SAFETY: 2,
 }
-
-
-def resolve_device(
-    requested,
-):
-    if requested == "auto":
-        return (
-            "cuda"
-            if torch.cuda.is_available()
-            else "cpu"
-        )
-
-    return requested
 
 
 def random_state(
