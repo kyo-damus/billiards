@@ -255,3 +255,17 @@ git status --short --branch
 `git ls-files -- build/Makefile` の出力が空なら追跡解除完了。`git check-ignore` にルート `.gitignore` の `/build/Makefile` が表示されればignoreが有効。`pytest` で既存ネイティブ拡張を使ったFastFizの最小回帰を確認する。
 
 **新しい環境でクローンするとき:** `build/Makefile` はGitに含まれないため、ローカルで `cmake -S . -B build` により生成してから `cmake --build build --parallel 2` を実行する。既存DGXでは今すぐ再生成・再ビルドする必要はない。追跡済みのMicro3モデル、その他の研究成果物、原ブランチには触れない。
+
+## 追跡解除後の復元・FastFiz回帰テスト完了（2026-11-09）
+
+ユーザーのDGXログにより、コミット `421696f` を `git pull --ff-only` でfast-forwardした後の検証が完了した。
+
+1. pull前に `~/billiards_refactor_safety_20261109/Makefile.original` と `build/Makefile` の `cmp` 一致を確認（`Backup verified`）。
+2. `build/Makefile` のGit削除後、退避コピーから復元し、再度 `cmp` 一致（`Makefile restored and verified`）。
+3. `git check-ignore -v --no-index build/Makefile` は `.gitignore:11:/build/Makefile` を表示。`git ls-files -- build/Makefile` が空であり、Git追跡解除を確認（`Makefile is no longer Git-tracked`）。
+4. 既存のビルド済みFastFizを使う `python -m pytest tests/integration/physics/test_fastfiz_simulator.py -q` は **11 passed in 0.37s**。
+5. `git status --short --branch` は `refactor-phase9-preserve-20261109...origin/refactor-phase9-preserve-20261109` で作業ツリークリーン。
+
+**Phase 4の保守整理は確認済み:** `build/Makefile` は現行DGXに残り、CMake自動生成物としてGit管理から除外された。既存 `build/` とPython 3.11用拡張 `*.so` は引き続き利用可能。Micro3モデルは追跡・保管を維持し、tarバックアップとのSHA-256一致も確認済み。107件の隔離保全と50件の残存成果物は変更していない。
+
+**範囲の限界:** 全pytestスイート一括実行、本実験、学習性能改善、追跡済みMicro3モデルの不要性確定、別マシンでの再現性、mainブランチへのマージはいずれも実施・確認していない。現行ブランチでの責務分離と保全中心のリファクタリングをここで一区切りとし、研究の次の実験/開発タスクは別途優先付けする。

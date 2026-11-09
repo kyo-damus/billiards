@@ -225,3 +225,12 @@ sign = +1 (同じプレイヤー) / -1 (相手へ手番交代)
 - Phase 3: テスト全76ファイルを用途で `tests/unit/`（36）、`tests/integration/`（11）、`tests/pipelines/`（29）へ分類済み。**最終第8段階の40テストもPASSED（8.91秒）**で各段階の指定テスト成功。全スイート一括実行・大規模学習・性能評価をしたという意味ではない。
 - 具体的なテスト指定は `tests/README.md`、全体の構成・ファイル保全ルールは `docs/PROJECT_STRUCTURE.md` を参照。
 - **次の優先順:** Phase 3完了確認済み。Phase 4のGit追跡と物理ビルド依存について [PHASE4_ARTIFACT_AUDIT.md](PHASE4_ARTIFACT_AUDIT.md) に静的監査記録を追加した。DGXローカルの `build/billiard_env_cpp*.so`、追跡済み3モデル、バックアップ・退避先を**読み取り専用で確認**。既存157件監査のうち退避済み107件、残存50件は保全を続ける。
+
+## 13. 2026-11-09 保守的リファクタリングの到達点（Phase 4完了）
+
+- **Phase 2:** 学習補助・Checkpoint loader・Attack/Mixedファクトリの責務を `src/pipelines/` に分離し、従来の `scripts/` APIをラッパーで保持。関連pytestとCPU 1ターンの5モデルsmokeの一致を確認。
+- **Phase 3:** 76のテストファイルを `unit` 36 / `integration` 11 / `pipelines` 29 に分類。各段階の対象テストが全件通過。**全スイート一括実行をしたという意味ではない**。
+- **Phase 4:** ローカルCMake 4.3.0 / Python 3.11.15で隔離ビルドに成功し、ビルドしたFastFiz拡張をimportしてコンストラクタを呼び出せた。`build/Makefile` はGit追跡を解除した一方、DGXでは退避コピーから復元して正常動作を維持。`git check-ignore` とFastFiz targeted pytest **11件PASSED**、作業ツリークリーンを確認。
+- 旧 `outputs/micro/` のGit追跡3モデルは手元とtarバックアップのSHA-256完全一致を確認し、**そのまま保持**。他のモデル・データ・バックアップ・隔離領域にも変更なし。生成物を追跡解除したことはデータ削除を意味しない。
+- このブランチ `refactor-phase9-preserve-20261109` での**仕様を保った保守的リファクタリングは一区切り**。変更範囲・検証結果の詳細は [REFACTORING_PLAN.md](REFACTORING_PLAN.md) と [PHASE4_ARTIFACT_AUDIT.md](PHASE4_ARTIFACT_AUDIT.md) を参照。
+- **次に検討すべき作業:** 検証済み作業ブランチのマージ方針を決めることと、Macro Policy/Q/V・探索・Defenseを含む研究実験の優先度を再整理すること。現時点でmainマージやゲーム勝率改善を実施・実証したとは記載しない。

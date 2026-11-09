@@ -232,3 +232,10 @@
 - CMakeで再生成できることと原本の別コピーが検証されたため、本コミットでは **Git追跡中の `build/Makefile` 1ファイルのみ追跡対象から削除**し、`.gitignore` に `/build/Makefile` を追加。`build/.gitignore`、CMakeLists、FastFizサブモジュール、Micro3モデルは保持。
 - **ユーザーの`git pull` でローカルのMakefileが消える可能性がある**ため、`docs/PHASE4_ARTIFACT_AUDIT.md` にpull前バックアップ照合→pull→復元→ignore/追跡状態→FastFiz targeted pytestの順を明記。ローカルでのpull・復元とpytestは**まだ実行されていない**。
 - この変更は研究実装・モデル形式・性能に関係しないビルド生成物のGit管理だけを変更する。詳細: [PHASE4_ARTIFACT_AUDIT.md](PHASE4_ARTIFACT_AUDIT.md)。
+
+## Phase 4: Git追跡解除後の復元・FastFiz回帰成功（2026-11-09）
+
+- ユーザーDGXの `git pull --ff-only` が `421696f` にfast-forwardし、Makefile退避コピーをpull前に照合（MATCH）、削除された現物をpull後に復元して再照合（MATCH）。
+- `git check-ignore` で `.gitignore:11:/build/Makefile` を確認、`git ls-files -- build/Makefile` は空。`python -m pytest tests/integration/physics/test_fastfiz_simulator.py -q` は **11 passed in 0.37s**、作業ツリークリーン。
+- **Phase 4の目的（CMake生成Makefileの安全な非追跡化、旧Micro3モデルの保全監査）は完了。** 既存モデルやFastFiz/C++ソースは不変更。モデルの追跡状態は維持する。その他の研究成果物も削除していない。
+- Phase 2/3/4の保守的リファクタリングは一区切り。**全テストの一括実行・大規模学習・性能改善の実証・mainへのマージは未実施**。変更点と確認範囲はこの履歴・[PHASE4_ARTIFACT_AUDIT.md](PHASE4_ARTIFACT_AUDIT.md)・[RESEARCH_CONTEXT.md](RESEARCH_CONTEXT.md) を参照。

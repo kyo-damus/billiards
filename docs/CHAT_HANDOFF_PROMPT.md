@@ -54,3 +54,10 @@
 - 第8段階の新配置9ファイルに対応する40テストも全件成功し、作業ツリークリーン。**テスト76ファイルの分類と各段階の対象テスト検証は完了**。全スイート一括PASSや学習性能向上の証拠ではない。
 - Phase 4では `docs/PHASE4_ARTIFACT_AUDIT.md` に従い `build/Makefile`・`outputs/micro/` 3モデル・FastFiz拡張の状態を**読み取り専用で監査**する。Git追跡解除・削除・再ビルドは未実施。
 - `build/Makefile` はCMake自動生成の絶対パス付きファイルだが、`src/env/fastfiz_simulator.py` は `build/` のネイティブ拡張を使う。ディレクトリごと消さないこと。`git rm --cached` のGitHubコミットをpullするとローカル現物が消え得ることにも注意。
+
+## 2026-11-09 Phase 4完了（現行引き継ぎの優先情報）
+
+- `build/Makefile` のGit追跡解除（`.gitignore`追加）がユーザーDGXに反映済み。Makefileは `~/billiards_refactor_safety_20261109/Makefile.original` から復元して現物を維持。追跡解除・無視設定を確認し、FastFiz最小回帰は **11 passed in 0.37s**。既存 `build/billiard_env_cpp*.so` は維持。
+- FastFizの隔離CMake configure・ビルド・Python 3.11での拡張import/コンストラクタは成功済み。FastFiz旧C++にコンパイル警告はあるが、この検証ではエラーなし。
+- 既存 `outputs/micro/` の3モデルは追跡維持かつtarバックアップとSHA-256一致。研究成果物を一括削除・モデル移動しない。
+- **Phase 2/3/4の保全リファクタリングは一区切り。** ユーザーにリファクタリング作業の再実施を要求せず、研究開発・実験計画とmainへの統合の要否を検討する。全スイート一括PASS・性能改善・mainマージは未実施。
