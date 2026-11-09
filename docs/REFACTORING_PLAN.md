@@ -66,18 +66,18 @@
 
 ## データ整理・安全監査（2026-11-09・第1段階）
 
-- ユーザー実施の最新確認: 2026-11-09、\`tests/test_mixed_hierarchical_rollout.py\` / \`test_hierarchical_smoke.py\` / \`test_candidate_mcts.py\` / \`test_defense_macro_transition.py\` / \`test_collect_mixed_rollouts.py\` の関連33件全件PASSED（6.03秒）。\`b21b18a\` 時点の範囲指定テストであり全スイートの合格は意味しない。
-- ユーザーは \`~/billiards_research_backup_20261109.tar.gz\` (105MB) を作成し、\`tar -tzf\` の一覧読み出しで \`Backup OK\` を確認。GitHubに存在しないモデル/データも当時の研究ディレクトリ内に含む可能性が高いが、**ファイル単位のバイト一致は未検証**。
-- 新設 \`tools/audit_local_artifacts.py\` はファイル名・SHA256・サイズ・Git追跡・過去のtarアーカイブ内の名前・Git文書/ソースの名前出現を一覧化する。**データを読み込む学習処理、削除・移動処理は一切実行しない。** バックアップとの照合はアーカイブ内の名前のみ。
-- 保護対象の候補は \`goal_conditioned_micro_mixed_curriculum_100k.pt\`、\`position_power_residual_mlp_2000.pt\`、\`macro_candidate_policy_mixed_v2.pt\`、\`macro_candidate_value_mixed_v2.pt\`、\`macro_state_value_mixed_v2.pt\` と、実験反復・選択済み行動MCリターンの関連成果物。
-- \`build/results/\`、\`build/results_muzero/\` の過去学習結果や同一SHA256の重複は、**削除確定ではなく移動・削減候補**。物理的なデータ削除は利用者による保存方針の確認とバックアップの照合の後だけ行う。
-- \`.gitignore\` とデータ保存先の設計は、一覧を確認してから決定する（現時点では変更しない）。
+- ユーザー実施の最新確認: 2026-11-09、`tests/test_mixed_hierarchical_rollout.py` / `test_hierarchical_smoke.py` / `test_candidate_mcts.py` / `test_defense_macro_transition.py` / `test_collect_mixed_rollouts.py` の関連33件全件PASSED（6.03秒）。`b21b18a` 時点の範囲指定テストであり全スイートの合格は意味しない。
+- ユーザーは `~/billiards_research_backup_20261109.tar.gz` (105MB) を作成し、`tar -tzf` の一覧読み出しで `Backup OK` を確認。GitHubに存在しないモデル/データも当時の研究ディレクトリ内に含む可能性が高いが、**ファイル単位のバイト一致は未検証**。
+- 新設 `tools/audit_local_artifacts.py` はファイル名・SHA256・サイズ・Git追跡・過去のtarアーカイブ内の名前・Git文書/ソースの名前出現を一覧化する。**データを読み込む学習処理、削除・移動処理は一切実行しない。** バックアップとの照合はアーカイブ内の名前のみ。
+- 保護対象の候補は `goal_conditioned_micro_mixed_curriculum_100k.pt`、`position_power_residual_mlp_2000.pt`、`macro_candidate_policy_mixed_v2.pt`、`macro_candidate_value_mixed_v2.pt`、`macro_state_value_mixed_v2.pt` と、実験反復・選択済み行動MCリターンの関連成果物。
+- `build/results/`、`build/results_muzero/` の過去学習結果や同一SHA256の重複は、**削除確定ではなく移動・削減候補**。物理的なデータ削除は利用者による保存方針の確認とバックアップの照合の後だけ行う。
+- `.gitignore` とデータ保存先の設計は、一覧を確認してから決定する（現時点では変更しない）。
 
 ## ローカル成果物157件の個別監査（2026-11-09）
 
-- ユーザー添付 \`local_artifacts_review.tsv\`（Git非追跡、ユーザー環境）の157件を調査。合計79.62 MiB、SHA-256で完全一致する別ファイルは0組。157件とも2026-11-09のtarアーカイブに同じ名前が存在（**内容一致は未確認**）。
+- ユーザー添付 `local_artifacts_review.tsv`（Git非追跡、ユーザー環境）の157件を調査。合計79.62 MiB、SHA-256で完全一致する別ファイルは0組。157件とも2026-11-09のtarアーカイブに同じ名前が存在（**内容一致は未確認**）。
 - 現行主要モデル5件/3.54MiB、Git追跡モデル3件/4.03MiB、他のモデル24件/42.50MiB、データセット12件/0.24MiB、反復実験8件/0.21MiB、旧build/results関連105件/29.10MiB。
-- **初期退避候補107件/29.12MiB**: \`build/results/sac_actor_ep1000.pth\`〜\`sac_actor_ep100000.pth\`（100件、1000ごと）、旧Actor/Critic finalの2件、\`build/results_muzero/*_net_latest.pth\`の3件に加え、\`build/mcts_experience.pt\`、\`build/policy_model.pth\`の2件。すべて削除済みの旧build Pythonスクリプトの成果物で、現行研究への名前参照が見つからない。
-- **退避保留**: 主要5モデル、反復Policy実験8件、Macro 25/31D教師データ、Residual/Goal-conditioned Micro学習済みモデル（比較実験・再現に使う可能性）。\`build/\` 以外の24モデルから旧2件を除いた22モデルは個別確認待ち。
-- \`tools/quarantine_legacy_build_artifacts.py\` を追加。**デフォルトは読み取り専用**で、監査TSVのサイズ・SHA256、現物のサイズ・SHA256、tar内の同じファイルの実バイトSHA256、107件の厳密なホワイトリストを照合。すべて一致する場合に限り \`--apply\` によってリポジトリ外の \`~/billiards_refactor_quarantine_20261109/\` に移動可能。\`--restore\` で上書きせず復元可能。削除は行わない。
+- **初期退避候補107件/29.12MiB**: `build/results/sac_actor_ep1000.pth`〜`sac_actor_ep100000.pth`（100件、1000ごと）、旧Actor/Critic finalの2件、`build/results_muzero/*_net_latest.pth`の3件に加え、`build/mcts_experience.pt`、`build/policy_model.pth`の2件。すべて削除済みの旧build Pythonスクリプトの成果物で、現行研究への名前参照が見つからない。
+- **退避保留**: 主要5モデル、反復Policy実験8件、Macro 25/31D教師データ、Residual/Goal-conditioned Micro学習済みモデル（比較実験・再現に使う可能性）。`build/` 以外の24モデルから旧2件を除いた22モデルは個別確認待ち。
+- `tools/quarantine_legacy_build_artifacts.py` を追加。**デフォルトは読み取り専用**で、監査TSVのサイズ・SHA256、現物のサイズ・SHA256、tar内の同じファイルの実バイトSHA256、107件の厳密なホワイトリストを照合。すべて一致する場合に限り `--apply` によってリポジトリ外の `~/billiards_refactor_quarantine_20261109/` に移動可能。`--restore` で上書きせず復元可能。削除は行わない。
 - 次はユーザーDGXで**デフォルトの照合のみ実行**して結果を確認した後、退避可否を判断する。アーカイブが存在するだけでは復元可能とは断言しない。

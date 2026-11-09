@@ -37,6 +37,6 @@
 
 ## 2026-11-09時点の引き継ぎ注意
 
-- 現行作業は**仕様を維持した責務分離と不要コード/データ整理**。最新のリファクタリング計画・テスト結果・未完了のローカル成果物整理を \`docs/REFACTORING_PLAN.md\` で確認する。
-- 旧 \`build/\` MuZero/SAC Python 8件は作業ブランチから削除済み。現在の研究はFastFiz物理を使うモデルベースMCTSであり、MuZeroを学習済みと解釈しない。
-- ローカルの現行主要5チェックポイントや関連DatasetはGit管理外であり、原則保護する。旧build学習成果物107件は未移動。退避する前に現物とtarのSHA256を一致させ、デフォルトでは読み取り専用の \`tools/quarantine_legacy_build_artifacts.py\` を利用する。
+- 現行作業は**仕様を維持した責務分離と不要コード/データ整理**。最新のリファクタリング計画・テスト結果・未完了のローカル成果物整理を `docs/REFACTORING_PLAN.md` で確認する。
+- 旧 `build/` MuZero/SAC Python 8件は作業ブランチから削除済み。現在の研究はFastFiz物理を使うモデルベースMCTSであり、MuZeroを学習済みと解釈しない。
+- ローカルの現行主要5チェックポイントや関連DatasetはGit管理外であり、原則保護する。旧build学習成果物107件は未移動。退避する前に現物とtarのSHA256を一致させ、デフォルトでは読み取り専用の `tools/quarantine_legacy_build_artifacts.py` を利用する。

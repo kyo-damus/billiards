@@ -203,9 +203,9 @@ sign = +1 (同じプレイヤー) / -1 (相手へ手番交代)
 
 ## 10. 2026-11-09 リファクタリングと現行ブランチ
 
-- 現行の開発作業ブランチ: \`refactor-phase9-preserve-20261109\`。分岐元 \`phase9-defense-v0\` の2026-11-09時点のHEAD \`39cee14c\` は無改変。ローカル研究ディレクトリは \`~/billiards_research_backup_20261109.tar.gz\`（約105MB）に退避済み。
-- 重複したAttack/mixedコンポーネント構築を \`scripts/attack_components.py\`、\`scripts/mixed_components.py\` に分離し、Macro学習補助関数を \`scripts/training_utils.py\` に集約。モデル次元・報酬・学習教師・FastFizの仕様は変更していない。
-- 旧 \`build/\` MuZero/SAC Python実装8ファイル（1333行）をGit管理ソースから削除。元ブランチとGit履歴から復元可能。現行のMuZero学習を実装したという意味ではない。
+- 現行の開発作業ブランチ: `refactor-phase9-preserve-20261109`。分岐元 `phase9-defense-v0` の2026-11-09時点のHEAD `39cee14c` は無改変。ローカル研究ディレクトリは `~/billiards_research_backup_20261109.tar.gz`（約105MB）に退避済み。
+- 重複したAttack/mixedコンポーネント構築を `scripts/attack_components.py`、`scripts/mixed_components.py` に分離し、Macro学習補助関数を `scripts/training_utils.py` に集約。モデル次元・報酬・学習教師・FastFizの仕様は変更していない。
+- 旧 `build/` MuZero/SAC Python実装8ファイル（1333行）をGit管理ソースから削除。元ブランチとGit履歴から復元可能。現行のMuZero学習を実装したという意味ではない。
 - MCTS・階層Agentの重複テストを統合。監査時点のテストファイル74→72、テスト関数300→294。ユーザー実行の最新関連33テストは**2026-11-09に全件PASS**。全スイートのPASSやモデル性能向上を意味しない。
-- ローカル生成物157件/79.62MiBを監査。現行主要5モデルは保護。旧 \`build/results/\` 等の107件/29.12MiBは**退避候補であり、現時点では未移動・未削除**。移動前に \`tools/quarantine_legacy_build_artifacts.py\` でtarバックアップの中身と実ファイルのSHA256照合が必要。
+- ローカル生成物157件/79.62MiBを監査。現行主要5モデルは保護。旧 `build/results/` 等の107件/29.12MiBは**退避候補であり、現時点では未移動・未削除**。移動前に `tools/quarantine_legacy_build_artifacts.py` でtarバックアップの中身と実ファイルのSHA256照合が必要。
 - 作業の詳細記録: [REFACTORING_PLAN.md](REFACTORING_PLAN.md)。リファクタリング後も現行科学的前提（25/31D、Macro 2-step QとMC return Q/Vの別、MCTS訪問教師、Defense物理候補）は変わらない。
