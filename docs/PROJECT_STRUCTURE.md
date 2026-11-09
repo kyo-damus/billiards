@@ -11,7 +11,7 @@ Phase 1では**新しい実験の保存方針と記録手段**を追加し、既
 ```text
 billiards/
 ├── src/                 # Macro/Micro/Goal/物理/Controller
-│   └── pipelines/       # 共通学習補助（Phase 2から段階的に移行）
+│   └── pipelines/       # 学習補助・チェックポイント読み込み・構築ファクトリ
 ├── scripts/             # 現行の起動CLI（互換性維持）
 ├── configs/
 │   ├── macro/           # 人が読む実験設定
@@ -63,7 +63,7 @@ python tools/prepare_run.py \
 
 ## 次の移行フェーズ（未実施）
 
-- **Phase 2（着手済み）**: `scripts/training_utils.py` の実装を `src/pipelines/training_utils.py` へ移し、旧importは再公開。続いて `scripts.eval_position_residual` にあった2つのチェックポイントローダーを `src/pipelines/checkpoint_loading.py` に移し、旧モジュールから再公開することで `scripts.attack_components` の評価CLI依存を解消。次は Attack/Mixedのファクトリ本体を移す。既存の `python -m scripts.<既存名>` は維持する。
+- **Phase 2（進行中）**: `src/pipelines/` に `training_utils.py` と `checkpoint_loading.py` を配置し、続いて `attack_components.py`・`mixed_components.py` のファクトリ実装を移行。旧 `scripts/` 同名モジュールは同一関数を再公開する互換ラッパーとして残す。既存の `python -m scripts.<既存名>` は維持する。次の責務分離は実装・テストと合わせて小さく進める。
 - **Phase 3**: `tests/` をunit/integration/pipelinesに分ける。import、pytest root、CLIテスト、外部ツール参照を先に棚卸しする。
 - **Phase 4**: CMakeの自動生成 `build/Makefile`、追跡済み`outputs/micro/`、過去の実験成果物と新しいルールの整合性を検証する。保全条件を満たすまで追跡解除・削除しない。
 

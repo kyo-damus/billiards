@@ -109,3 +109,12 @@
 - `scripts/attack_components.py` は旧評価CLIではなく新しいローダーモジュールをimportする。これにより次のファクトリ移動時に `src/` が `scripts/` に依存しないよう準備。既存の `scripts.eval_position_residual_sweep` などの旧importも維持。
 - モデルの読み込み方法・チェックポイントキー・target critic optional処理・Residual checkpoint辞書の返し方を変えない。旧importのidentityと必須キー/optional critic targetの検証を追加。
 - **実装コードの入出力が変わっていないことは、ユーザーDGXでのテストと5モデル統合smokeで要確認**。元の `phase9-defense-v0`、checkpoint、データは変更しない。
+
+## Phase 2: Attack/Mixed構築ファクトリの移動（2026-11-09・第3段階）
+
+- ユーザー報告: チェックポイントローダー移動後の関連16件のpytest **すべてPASSED（2.85秒）**。
+- `scripts/attack_components.py` の構築処理本体を `src/pipelines/attack_components.py`、`scripts/mixed_components.py` の構築処理本体を `src/pipelines/mixed_components.py` へ移行。Attackのcheckpoint取得・Residualスケール・候補生成器・物理Transition、MixedのDefense/Safetyパラメータと5要素の戻り値は同じ。
+- `src/pipelines/mixed_components.py` のAttack依存は `src.pipelines.attack_components` に変更し、`src/` から `scripts/` への逆向き依存を避ける。
+- `scripts/attack_components.py` と `scripts/mixed_components.py` は、既存import元が使えるよう元の関数と公開クラス名を再公開する互換ラッパーに置換。既存の呼び出し側のimport行は変更せず、従来のCLIも維持。
+- `tests/test_component_factories_compat.py` で旧/新import関数のidentity、Attackの3要素＋checkpoint metadataの契約、Mixedの5要素とSafety powers/angles/tip offsets等をモックで検証。既存モデル・学習済み重み・Dataset・前回退避データには触れない。
+- **テスト未実行。** ユーザーDGX上で関連pytestと必要ならCPU 1ターンの統合smokeの再実行結果を確認してから、次のファイル整理に進む。
