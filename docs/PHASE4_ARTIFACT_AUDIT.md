@@ -82,3 +82,53 @@ python tools/audit_local_artifacts.py \
 Makefile追跡解除は**まだ提案段階**。GitHubで追跡解除コミットを作り、そのままユーザーがpullすると `build/Makefile` の作業コピーが消える可能性があるため、**事前の退避と再生成手順の確認なしに変更しない**。`build/` と2種類の `*.so` は現状維持する。
 
 次の判断はユーザーによるDGX現物と参照先の報告を受けてから行う。
+
+## Git上の参照・tar内ファイル名の調査（2026-11-09）
+
+ユーザーが `git grep -n -F` を `src/`・`scripts/`・`configs/` に対して実施し、以下の結果を報告。作業ツリーはクリーン。
+
+- `scripts/eval_micro.py:85`: `--checkpoint` のデフォルトが `outputs/micro/micro_sac_final.pt`。
+- `scripts/train_micro.py:228`: `micro_sac_final.pt` を保存。ソースを追加確認すると、`--output-dir` のデフォルトが `outputs/micro`（277行付近）。
+- 同スクリプトは `--save-interval` （デフォルト10,000）ごとに `micro_sac_step_{step}.pt` を保存（217〜223行付近）。したがって `micro_sac_step_2500.pt` と `micro_sac_step_5000.pt` のリテラル文字列が検索で出てこないことは、未使用・不要を意味しない。
+- `tar -tzf` により `research/outputs/micro/micro_sac_final.pt`、`research/outputs/micro/micro_sac_step_2500.pt`、`research/outputs/micro/micro_sac_step_5000.pt` の**3件全てがtar内に名前として存在**することを確認。
+- **tar内と手元の3モデルの内容のSHA-256照合は未実施**。研究モデルの起源・用途や数値比較上の必要性も未確定。
+- 今後 `python -m scripts.train_micro` を新規実行すると、デフォルトでは追跡中の `outputs/micro/` に書き込む。現物を誤って上書きしないよう、新規学習では `--output-dir artifacts/runs/<run_id>/outputs/micro` 等の**新しい出力パスを明示する**。現行CLIのデフォルトは変更していない。
+- `eval_micro.py` は少なくとも従来の `micro_sac_final.pt` をデフォルトで使用するため、`outputs/micro/` にある3モデルのディレクトリ・ファイルは全て現状維持。追跡解除・削除は検討していない。
+
+### バックアップと現物のSHA-256照合（次の読み取り専用ステップ）
+
+以下は3モデルを**読み込むだけ**で、学習・保存・削除は行わない。tarと現物のSHA-256が一致したか結果を確認してから次の判断に進む。
+
+```bash
+cd ~/research
+python - <<'PY'
+from pathlib import Path
+import hashlib
+import tarfile
+
+names = ["micro_sac_final.pt", "micro_sac_step_2500.pt", "micro_sac_step_5000.pt"]
+archive_path = Path.home() / "billiards_research_backup_20261109.tar.gz"
+
+def sha256(stream):
+    h = hashlib.sha256()
+    for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+        h.update(chunk)
+    return h.hexdigest()
+
+with tarfile.open(archive_path, "r:gz") as archive:
+    for name in names:
+        file_path = Path("outputs/micro") / name
+        member = archive.getmember("research/" + file_path.as_posix())
+        if not member.isfile():
+            raise ValueError(f"not a file in tar: {member.name}")
+        with file_path.open("rb") as stream:
+            current_hash = sha256(stream)
+        with archive.extractfile(member) as stream:
+            backup_hash = sha256(stream)
+        print(f"{name}: {'MATCH' if current_hash == backup_hash else 'MISMATCH'}")
+PY
+
+git status --short --branch
+```
+
+`MISMATCH` は削除理由ではなく、バックアップ取得後にファイルが変わった可能性を含む**追加調査の合図**。現物は保持する。
