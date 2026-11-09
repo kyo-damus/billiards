@@ -92,162 +92,45 @@ def make_state():
     )
 
 
-def test_candidate_mcts_expands_candidates():
+def test_candidate_mcts_root_contract():
+    """A single search verifies root candidates, priors and diagnostics.
 
+    These assertions previously ran four additional identical one-step
+    MCTS searches, with the same seed and simulated transition.
+    """
     torch.manual_seed(0)
 
-    generator = (
-        ExpandedMacroCandidateGenerator()
-    )
-
-    policy = (
-        MacroCandidatePolicyNetwork()
-    )
-
-    value = MacroValueNetwork()
-
-    transition = (
-        DummyCandidateTransition()
-    )
-
+    transition = DummyCandidateTransition()
     mcts = MCTS(
-        policy_network=policy,
-        value_network=value,
-        action_generator=generator,
+        policy_network=MacroCandidatePolicyNetwork(),
+        value_network=MacroValueNetwork(),
+        action_generator=ExpandedMacroCandidateGenerator(),
         transition_model=transition,
         simulations=1,
         device="cpu",
         candidate_mode=True,
     )
 
-    root = mcts.search(
-        make_state()
-    )
+    root = mcts.search(make_state())
 
     assert len(root.children) > 0
-
     assert all(
-        isinstance(
-            choice,
-            MacroCandidate,
-        )
-        for choice in root.children
+        isinstance(candidate, MacroCandidate)
+        for candidate in root.children
     )
-
-
-def test_candidate_mcts_contains_goal_types():
-
-    torch.manual_seed(0)
-
-    mcts = MCTS(
-        policy_network=(
-            MacroCandidatePolicyNetwork()
-        ),
-        value_network=(
-            MacroValueNetwork()
-        ),
-        action_generator=(
-            ExpandedMacroCandidateGenerator()
-        ),
-        transition_model=(
-            DummyCandidateTransition()
-        ),
-        simulations=1,
-        device="cpu",
-        candidate_mode=True,
-    )
-
-    root = mcts.search(
-        make_state()
-    )
-
     goal_types = {
         candidate.goal.goal_type
         for candidate in root.children
     }
+    assert TacticalGoalType.DIRECT_ATTACK in goal_types
+    assert TacticalGoalType.POSITION_ATTACK in goal_types
 
-    assert (
-        TacticalGoalType.DIRECT_ATTACK
-        in goal_types
-    )
+    prior_sum = sum(child.prior for child in root.children.values())
+    assert np.isclose(prior_sum, 1.0, atol=1e-5)
 
-    assert (
-        TacticalGoalType.POSITION_ATTACK
-        in goal_types
-    )
+    assert isinstance(transition.last_choice, MacroCandidate)
+    assert mcts.last_root is root
 
-
-def test_candidate_priors_sum_to_one():
-
-    torch.manual_seed(0)
-
-    mcts = MCTS(
-        policy_network=(
-            MacroCandidatePolicyNetwork()
-        ),
-        value_network=(
-            MacroValueNetwork()
-        ),
-        action_generator=(
-            ExpandedMacroCandidateGenerator()
-        ),
-        transition_model=(
-            DummyCandidateTransition()
-        ),
-        simulations=1,
-        device="cpu",
-        candidate_mode=True,
-    )
-
-    root = mcts.search(
-        make_state()
-    )
-
-    prior_sum = sum(
-        child.prior
-        for child in root.children.values()
-    )
-
-    assert np.isclose(
-        prior_sum,
-        1.0,
-        atol=1e-5,
-    )
-
-
-def test_candidate_is_sent_to_transition():
-
-    torch.manual_seed(0)
-
-    transition = (
-        DummyCandidateTransition()
-    )
-
-    mcts = MCTS(
-        policy_network=(
-            MacroCandidatePolicyNetwork()
-        ),
-        value_network=(
-            MacroValueNetwork()
-        ),
-        action_generator=(
-            ExpandedMacroCandidateGenerator()
-        ),
-        transition_model=transition,
-        simulations=1,
-        device="cpu",
-        candidate_mode=True,
-    )
-
-    mcts.search(
-        make_state()
-    )
-
-    assert isinstance(
-        transition.last_choice,
-        MacroCandidate,
-    )
-    
 
 def test_force_evaluate_unvisited_prefers_unvisited_child():
 
@@ -309,35 +192,6 @@ def test_force_evaluate_unvisited_prefers_unvisited_child():
 
     assert selected_action == candidates[1]
     assert selected_child is unvisited
-
-
-def test_search_keeps_last_root_for_diagnostics():
-
-    torch.manual_seed(0)
-
-    mcts = MCTS(
-        policy_network=(
-            MacroCandidatePolicyNetwork()
-        ),
-        value_network=(
-            MacroValueNetwork()
-        ),
-        action_generator=(
-            ExpandedMacroCandidateGenerator()
-        ),
-        transition_model=(
-            DummyCandidateTransition()
-        ),
-        simulations=1,
-        device="cpu",
-        candidate_mode=True,
-    )
-
-    root = mcts.search(
-        make_state()
-    )
-
-    assert mcts.last_root is root
 
 
 def test_min_visits_prefers_less_visited_child():
