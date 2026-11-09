@@ -207,5 +207,5 @@ sign = +1 (同じプレイヤー) / -1 (相手へ手番交代)
 - 重複したAttack/mixedコンポーネント構築を `scripts/attack_components.py`、`scripts/mixed_components.py` に分離し、Macro学習補助関数を `scripts/training_utils.py` に集約。モデル次元・報酬・学習教師・FastFizの仕様は変更していない。
 - 旧 `build/` MuZero/SAC Python実装8ファイル（1333行）をGit管理ソースから削除。元ブランチとGit履歴から復元可能。現行のMuZero学習を実装したという意味ではない。
 - MCTS・階層Agentの重複テストを統合。監査時点のテストファイル74→72、テスト関数300→294。ユーザー実行の最新関連33テストは**2026-11-09に全件PASS**。全スイートのPASSやモデル性能向上を意味しない。
-- ローカル生成物157件/79.62MiBを監査。旧 `build/results/` 等の107件/29.12MiBは**現物・監査記録・tarバックアップのSHA-256全件一致後、2026-11-09に `~/billiards_refactor_quarantine_20261109/` に退避完了（削除なし）**。残る50件/約50.52MiB（主要モデル5、Git追跡3、他モデル22、データセット12、反復実験8）は保全。退避ファイルは `python tools/quarantine_legacy_build_artifacts.py --restore` で復元可。
+- ローカル生成物157件/79.62MiBを監査。旧 `build/results/` 等の107件/29.12MiBは**現物・監査記録・tarバックアップのSHA-256全件一致後、2026-11-09に `~/billiards_refactor_quarantine_20261109/` に退避完了（削除なし）**。残る50件/約50.50MiB（主要モデル5、Git追跡3、他モデル22、データセット12、反復実験8）は保全。退避ファイルは `python tools/quarantine_legacy_build_artifacts.py --restore` で復元可。
 - 作業の詳細記録: [REFACTORING_PLAN.md](REFACTORING_PLAN.md)。リファクタリング後も現行科学的前提（25/31D、Macro 2-step QとMC return Q/Vの別、MCTS訪問教師、Defense物理候補）は変わらない。
