@@ -4,7 +4,7 @@
 
 ## 現状と目標
 
-現在のGit管理ファイルは `src/` 59、`scripts/` 53、`tests/` 72、`docs/` 4、`tools/` 3、`outputs/micro/` 3など。過去のモデル107件はGit管理外の `~/billiards_refactor_quarantine_20261109/` に移動済みであり、変更・削除しない。
+Phase 1開始前のGit管理ファイルは `src/` 59、`scripts/` 53、`tests/` 72、`docs/` 4、`tools/` 3、`outputs/micro/` 3など。Phase 3時点ではテストファイル76件（追加4件）の分類を進めている。過去のモデル107件はGit管理外の `~/billiards_refactor_quarantine_20261109/` に移動済みであり、変更・削除しない。
 
 Phase 1では**新しい実験の保存方針と記録手段**を追加し、既存の`src/`、`scripts/`、`tests/`、学習済みモデル、既存データは移動・削除しなかった。Phase 2の第1段階では、Macro学習の共通ユーティリティの実装だけを`src/pipelines/training_utils.py`へ移し、旧`script`モジュールを再公開用ラッパーとして維持する。
 
@@ -84,7 +84,7 @@ python tools/prepare_run.py \
 ## 次の移行フェーズ（未実施）
 
 - **Phase 2（主要部分完了）**: `src/pipelines/` に共通学習補助・チェックポイントローダー・Attack/Mixedファクトリの本体を移動。旧 `scripts/` importを維持。22件の関連pytestと、2026-11-09のCPU 1ターンsmokeで移動前と同一結果を確認。
-- **Phase 3（第1〜6段階）**: 第5段階までの39ファイルは各段階の指定テストが成功。第6段階はPosition候補/到達可能性、Shot Geometry、GameRules、Micro位置Policy/Gate、Micro教師データ/学習・評価CLIヘルパーの15ファイルを内容変更なしで分類。累計54/76ファイル（unit34、integration6、pipelines14）。残り22ファイル。
+- **Phase 3（第1〜7段階）**: 第6段階のPosition/Micro位置系41テストが全件成功（5.74秒）、作業ツリークリーン。第7段階ではMacro Q教師・Mixed候補dataset、Rollout収集/保存と評価CLIの13ファイルを内容変更なしで`tests/pipelines/`へ配置。累計67/76ファイル（unit34、integration6、pipelines27）。残り9ファイルは確認後の最終分類を予定。
 - **Phase 4**: CMakeの自動生成 `build/Makefile`、追跡済み`outputs/micro/`、過去の実験成果物と新しいルールの整合性を検証する。保全条件を満たすまで追跡解除・削除しない。
 
 各フェーズで、関連テストと少量の統合smokeを実行し、研究モデルの学習条件・探索・FastFizの挙動を変更しない。

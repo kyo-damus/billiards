@@ -15,10 +15,10 @@
 - `tests/integration/physics/`: FastFiz実物理とMCTSの結合動作を確認するテスト
 - `tests/integration/agent/`: 階層型Agentのエンドツーエンドsmoke
 - `tests/integration/defense/`: FastFizを伴うDefenseショット・Macro遷移
-- `tests/pipelines/macro/`: Macro Candidate Policy/Q、State V、反復更新の小規模学習パイプライン
-- `tests/pipelines/rollout/`: MCTS訪問分布教師と完了軌跡のMC return教師の生成
+- `tests/pipelines/macro/`: Macro Candidate Policy/Q、State V、反復更新と2-step教師・Mixed候補dataset
+- `tests/pipelines/rollout/`: Rollout収集/保存、MCTS訪問分布教師とMC return教師の生成
 - `tests/pipelines/micro/`: Position Residual/Success・Probability Gateの教師・小規模学習契約
-- `tests/pipelines/evaluation/`: 評価スクリプトの設定値・出力変換の局所的契約
+- `tests/pipelines/evaluation/`: Candidate Policy/Q・MCTS・Residual・Safety難盤面・Cue仰角の評価CLI契約
 
 ## 関連テストの実行例
 
@@ -106,3 +106,17 @@ python -m pytest \
 ```
 
 上記15ファイルは**内容変更なし**の配置変更。元のルートのパスは廃止され、従来の `python -m scripts.*` の呼び出しは変更しない。
+
+## Phase 3第7段階の実行例
+
+```bash
+python -m pytest \
+  tests/pipelines/macro/test_build_mixed_candidate_value_dataset.py \
+  tests/pipelines/macro/test_macro_candidate_value_targets.py \
+  tests/pipelines/rollout/test_collect_mixed_rollouts.py \
+  tests/pipelines/rollout/test_mixed_rollout_dataset.py \
+  tests/pipelines/evaluation/ \
+  -v
+```
+
+第7段階の13ファイルは内容変更なしの移動。これらの評価関数・データ生成関数のテストは、新しい分類先で実行する。旧パスは存在しない。残る9ファイルは次段階に分類する。

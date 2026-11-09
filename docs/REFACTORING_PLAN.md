@@ -174,3 +174,11 @@
 - Adaptive Position Policy・Position Blend Gateを `tests/unit/micro/`、Position Success/Probability GateとOutcome Witness BCの小規模学習契約を `tests/pipelines/micro/`、Position Actor Blend・Position Goal Evalの評価CLIヘルパーを `tests/pipelines/evaluation/` に移動。
 - 計15ファイル。各ファイルは `__file__` や相対import等に依存しないことを検査し、Gitの既存blob SHAを再使用した**内容変更ゼロの移動**。これらのテストは既存の関数とassertionをそのまま保持する。
 - 累計**54/76ファイル**を分類（unit34、integration6、pipelines14）、未分類22ファイル。学習済みモデル、Macro/Micro/FastFiz実装、既存データ・成果物は移動も削除もしない。移動後の指定pytestは**ユーザーDGXで要確認**。
+
+## Phase 3: 評価CLIとMacro/Rolloutデータ生成テストの分類（2026-11-09・第7段階）
+
+- **ユーザー実行結果:** 第6段階の指定41テストが全件PASSED（5.74秒）、Git作業ツリークリーン。
+- Macro Qターゲット/31D Mixed候補データの2ファイルを `tests/pipelines/macro/`、Mixed rollout収集・エクスポートの2ファイルを `tests/pipelines/rollout/` に移動。
+- Candidate Policy/Q評価、MCTS検索要約、Residual評価/集計、Mixed難盤面評価、Post-Safety難盤面評価、Cue仰角診断の9ファイルを `tests/pipelines/evaluation/` に移動。
+- **全13ファイルは既存Git blob SHAを再利用し、内容変更なしのパス移動**。ファイル内にテスト間相対import、`__file__`、`sys.path`、chdir等の依存がないことを確認。評価実行ロジックそのものは変更しない。
+- 累計**67/76ファイル**を分類（unit34、integration6、pipelines27）、残り9ファイル。移動後のpytestはユーザーDGX環境で検証待ち。学習済みモデル、成果物、ローカルの退避データは変更・削除しない。
