@@ -191,3 +191,11 @@
 - **全9ファイルは既存Git blob SHAを再利用し内容変更ゼロで移動**。各ファイルの `tests.*` または相対import、`__file__`、`sys.path`、chdir依存がないことを検査済み。既存の `python -m scripts.*` CLIやMacro/Microの研究コードは一切変更しない。
 - Git管理下の76テストファイルは全て `unit` 36、`integration` 11、`pipelines` 29 へ分類。旧 `tests/test_*.py` は0ファイルとなる見込み（コミット後に検証）。**新配置のpytestはユーザーDGXでの実行待ちであり、Phase 3完了判定は結果確認後。**
 - 一括全スイートは実行していない。過去各段階のターゲットテスト成功と、これから行う最終テスト成功を区別する。
+
+## Phase 3完了確認とPhase 4の監査着手（2026-11-09）
+
+- **ユーザー報告:** 第8段階で配置した9ファイルの指定40テストは `40 passed in 8.91s`、`git status --short --branch` はクリーン。全76テストファイルのunit36/integration11/pipelines29の分類を完了。全スイート一括実行は行っていない。
+- **GitHub上の静的監査:** `build/Makefile`（12,902 B、CMake 4.3生成・絶対パス内包）と `build/.gitignore`（11 B）が追跡中。旧 `outputs/micro/` の3 `.pt` モデルも追跡中（合計4,230,521 B）。ルート `.gitignore` は追跡済みの重みに遡及しない。
+- `src/env/fastfiz_simulator.py` は `build/` 内の `billiard_env_cpp` を直接importするため、ビルド先を破壊する移動・削除は不可。GitHubだけでは実機の `*.so` が生きているか分からない。
+- **今回実施したのは監査記録とPhase 3完了ドキュメント更新のみ。** Git追跡解除、ローカルモデル削除・移動、CMakeの再実行は行わない。次はローカルのビルド拡張と旧モデル・バックアップを読み取り専用で確認。
+- 個別リスク・事実・確認手順・今後の判断条件: [PHASE4_ARTIFACT_AUDIT.md](PHASE4_ARTIFACT_AUDIT.md)。

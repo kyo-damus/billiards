@@ -85,7 +85,7 @@ python tools/prepare_run.py \
 ## 次の移行フェーズ（未実施）
 
 - **Phase 2（主要部分完了）**: `src/pipelines/` に共通学習補助・チェックポイントローダー・Attack/Mixedファクトリの本体を移動。旧 `scripts/` importを維持。22件の関連pytestと、2026-11-09のCPU 1ターンsmokeで移動前と同一結果を確認。
-- **Phase 3（全8段階の配置変更完了、最終pytest待ち）**: 第7段階の評価・データ生成53テストまで成功（6.62秒、作業ツリークリーン）。第8段階で残り9ファイルを分類し、テストファイル76/76をunit36・integration11・pipelines29に再配置。**最終9ファイルはまだ新配置でpytest未実行。**
-- **Phase 4**: CMakeの自動生成 `build/Makefile`、追跡済み`outputs/micro/`、過去の実験成果物と新しいルールの整合性を検証する。保全条件を満たすまで追跡解除・削除しない。
+- **Phase 3（分類・指定テスト完了）**: 全8段階でテスト76/76ファイルをunit36・integration11・pipelines29に配置。最終段階の指定40テストも2026-11-09に全件PASSED（8.91秒）、Git作業ツリークリーン。全スイート一括検証・モデル性能評価とは区別する。
+- **Phase 4（監査開始）**: [PHASE4_ARTIFACT_AUDIT.md](PHASE4_ARTIFACT_AUDIT.md) にGit追跡状態・CMake/ネイティブ拡張依存・ローカル保全手順を記載。`build/Makefile` と旧 `outputs/micro/` 3モデルは**削除・移動・追跡解除しない**。DGXの現物を読み取り確認してから次の処置を判断する。
 
 各フェーズで、関連テストと少量の統合smokeを実行し、研究モデルの学習条件・探索・FastFizの挙動を変更しない。

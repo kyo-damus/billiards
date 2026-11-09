@@ -222,6 +222,6 @@ sign = +1 (同じプレイヤー) / -1 (相手へ手番交代)
 ## 12. 2026-11-09 フォルダとテスト構成（Phase 2/3）
 
 - Phase 2: 共通学習補助・checkpointローダー・Attack/Mixedファクトリを `src/pipelines/` へ集約。旧 `scripts/` のimportを互換ラッパーで維持し、`python -m scripts.*` のCLIを変更しない。ユーザーDGXで関連22テストがPASSED、5モデル・CPU 1ターン混合階層smokeは移動前と完全一致（POSITION_ATTACK、ball0/pocket5、Macro reward +1.250、score [1,0]）。
-- Phase 3: テスト全76ファイルを用途で `tests/unit/`（36）、`tests/integration/`（11）、`tests/pipelines/`（29）へ段階的に配置。最後の9ファイルの配置コミットが反映された段階であり、**最終段階のpytestは未実施**。第1〜7段階の個別ターゲットテストは全件PASSED。大規模学習・全スイート実行・性能評価をしたという意味ではない。
+- Phase 3: テスト全76ファイルを用途で `tests/unit/`（36）、`tests/integration/`（11）、`tests/pipelines/`（29）へ分類済み。**最終第8段階の40テストもPASSED（8.91秒）**で各段階の指定テスト成功。全スイート一括実行・大規模学習・性能評価をしたという意味ではない。
 - 具体的なテスト指定は `tests/README.md`、全体の構成・ファイル保全ルールは `docs/PROJECT_STRUCTURE.md` を参照。
-- **次の優先順:** DGX上で最終9ファイルのpytest確認 → `git status` と76ファイルの配置確認 → Phase 4のCMake生成物・追跡済み旧checkpoint等の管理を**削除・移動せずに監査**。既存157件監査のうち退避済み107件、残存50件は引き続き保全。
+- **次の優先順:** Phase 3完了確認済み。Phase 4のGit追跡と物理ビルド依存について [PHASE4_ARTIFACT_AUDIT.md](PHASE4_ARTIFACT_AUDIT.md) に静的監査記録を追加した。DGXローカルの `build/billiard_env_cpp*.so`、追跡済み3モデル、バックアップ・退避先を**読み取り専用で確認**。既存157件監査のうち退避済み107件、残存50件は保全を続ける。

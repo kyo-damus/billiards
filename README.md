@@ -39,6 +39,7 @@
 - [docs/defense_v0_design.md](docs/defense_v0_design.md): Defense v0と実装段階ごとの技術ログ
 - [docs/RESEARCH_CONTEXT.md](docs/RESEARCH_CONTEXT.md): **研究方針と引き継ぎ資料（主に更新する文書）**
 - [docs/PROJECT_STRUCTURE.md](docs/PROJECT_STRUCTURE.md): **実験データ・設定・フォルダ構成の管理ルール**
+- [docs/PHASE4_ARTIFACT_AUDIT.md](docs/PHASE4_ARTIFACT_AUDIT.md): **CMakeビルド・追跡済み重み・保全条件の監査**
 - [docs/CHAT_HANDOFF_PROMPT.md](docs/CHAT_HANDOFF_PROMPT.md): **新しいChatGPTチャットを開始するときのコピー用プロンプト**
 
 実行方法・今後の優先事項は上記の引き継ぎ資料を参照してください。

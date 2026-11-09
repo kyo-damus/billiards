@@ -48,3 +48,9 @@
 - テスト76ファイルは `tests/unit/`・`tests/integration/`・`tests/pipelines/` に分類済み。個別の新ファイルパスは `tests/README.md`。**第8段階で移動した9ファイルの実行検証はまだ必要**。直下 `tests/test_*.py` を前提にコマンドを指定しない。
 - Git管理下のテストファイル数とテスト関数件数は別の指標。個々のpytestにPASSEDがあっても、全テストスイートを実行済みとみなさない。
 - Phase 4では `build/Makefile` 等の生成物と `outputs/micro/` の既存追跡3モデルを監査する。ローカルのモデル・バックアップ・退避先には勝手に手をつけない。
+
+## 2026-11-09 Phase 3完了・Phase 4監査開始
+
+- 第8段階の新配置9ファイルに対応する40テストも全件成功し、作業ツリークリーン。**テスト76ファイルの分類と各段階の対象テスト検証は完了**。全スイート一括PASSや学習性能向上の証拠ではない。
+- Phase 4では `docs/PHASE4_ARTIFACT_AUDIT.md` に従い `build/Makefile`・`outputs/micro/` 3モデル・FastFiz拡張の状態を**読み取り専用で監査**する。Git追跡解除・削除・再ビルドは未実施。
+- `build/Makefile` はCMake自動生成の絶対パス付きファイルだが、`src/env/fastfiz_simulator.py` は `build/` のネイティブ拡張を使う。ディレクトリごと消さないこと。`git rm --cached` のGitHubコミットをpullするとローカル現物が消え得ることにも注意。
