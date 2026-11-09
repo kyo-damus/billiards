@@ -9,10 +9,12 @@
 **最初にGitHubで以下の文書を読み、関連ソースやテストと照合してください。**
 
 - リポジトリ: https://github.com/kyo-damus/billiards
-- 作業ブランチ（2026-11-02時点）: `phase9-defense-v0`。現在のブランチが異なる場合はその旨を確認する。
-- 研究目的・全体設計・実装済み/未実装・研究方針・進捗・更新ルール: https://github.com/kyo-damus/billiards/blob/phase9-defense-v0/docs/RESEARCH_CONTEXT.md
-- 入口のREADME: https://github.com/kyo-damus/billiards/blob/phase9-defense-v0/README.md
-- 詳細な段階別実装ログ: https://github.com/kyo-damus/billiards/blob/phase9-defense-v0/docs/defense_v0_design.md
+- 作業ブランチ（2026-11-09時点）: `refactor-phase9-preserve-20261109`。元の `phase9-defense-v0` は保全済み。最新HEADはGitHubで確認する。
+- 研究目的・全体設計・実装済み/未実装・研究方針・進捗・更新ルール: https://github.com/kyo-damus/billiards/blob/refactor-phase9-preserve-20261109/docs/RESEARCH_CONTEXT.md
+- 入口のREADME: https://github.com/kyo-damus/billiards/blob/refactor-phase9-preserve-20261109/README.md
+- 詳細な段階別実装ログ: https://github.com/kyo-damus/billiards/blob/refactor-phase9-preserve-20261109/docs/defense_v0_design.md
+
+- リファクタリングの監査・保全・進行状況: https://github.com/kyo-damus/billiards/blob/refactor-phase9-preserve-20261109/docs/REFACTORING_PLAN.md
 
 **必ず保持してほしい前提:**
 
@@ -32,3 +34,9 @@
 - チャット移行時にGitHubの参照ができなければ、`docs/RESEARCH_CONTEXT.md` のコピーを添付してください。
 - 新しいブランチへ移った場合は、上のブランチ名とURLを置き換えてください。
 - 最新ローカル実行ログが文書の更新日より新しい場合は、それも続けて貼るとスムーズです。
+
+## 2026-11-09時点の引き継ぎ注意
+
+- 現行作業は**仕様を維持した責務分離と不要コード/データ整理**。最新のリファクタリング計画・テスト結果・未完了のローカル成果物整理を \`docs/REFACTORING_PLAN.md\` で確認する。
+- 旧 \`build/\` MuZero/SAC Python 8件は作業ブランチから削除済み。現在の研究はFastFiz物理を使うモデルベースMCTSであり、MuZeroを学習済みと解釈しない。
+- ローカルの現行主要5チェックポイントや関連DatasetはGit管理外であり、原則保護する。旧build学習成果物107件は未移動。退避する前に現物とtarのSHA256を一致させ、デフォルトでは読み取り専用の \`tools/quarantine_legacy_build_artifacts.py\` を利用する。
