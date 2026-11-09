@@ -4,7 +4,7 @@ This is the same factory formerly defined in the mixed Q-dataset CLI.
 The models, candidate generators and transition semantics are unchanged.
 """
 
-from scripts.eval_macro_candidate_value import make_components
+from scripts.attack_components import make_components
 from src.macro.defense_transition import (
     DefenseMacroTransitionModel,
     MixedStrategyMacroTransitionModel,
