@@ -11,7 +11,8 @@
 - `tests/test_*.py`: 未移動のテスト。依存関係・fixtureを確認してから段階的に分類
 - `tests/integration/physics/`: FastFiz実物理とMCTSの結合動作を確認するテスト
 - `tests/integration/agent/`: 階層型Agentのエンドツーエンドsmoke
-- 今後 `tests/pipelines/` を整備予定（現段階では未作成）
+- `tests/pipelines/macro/`: Macro Candidate Policy/Q、State V、反復更新の小規模学習パイプライン
+- `tests/pipelines/rollout/`: MCTS訪問分布教師と完了軌跡のMC return教師の生成
 
 ## 関連テストの実行例
 
@@ -53,3 +54,17 @@ python -m pytest \
 ```
 
 新配置の4ファイルは**内容未変更**。この分類は単体テストであることを主張するものではなく、FastFiz実物理や階層的な接続を検証する分類である。学習時間を要する本実験は含まれない。
+
+## Phase 3第4段階の実行例
+
+```bash
+python -m pytest \
+  tests/unit/macro/test_mcts.py \
+  tests/unit/macro/test_candidate_mcts.py \
+  tests/unit/macro/test_mixed_candidate_mcts.py \
+  tests/pipelines/macro/ \
+  tests/pipelines/rollout/ \
+  -v
+```
+
+9ファイルは関数・assertionの変更なしに移動した。単体MCTSのテストと学習パイプラインのテストを、物理統合テストとは別に選択できるようにした。既存のパスを直接指定していたコマンド・資料は移動後のパスに読み替えること。

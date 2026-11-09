@@ -149,3 +149,11 @@
   - `tests/test_hierarchical_smoke.py` → `tests/integration/agent/test_hierarchical_smoke.py`
 - これらはFastFiz実物理／MCTS-物理接続／階層Agentの結合smokeに関するテスト。内部の相対import、`__file__`、`sys.path`、作業ディレクトリ変更への依存がないことを確認。**移動先でのpytestは未実行。** 実行環境は従来通りFastFizネイティブライブラリが必要。
 - Phase 3累計は20ファイルを分類（単体16、統合4）。計76ファイル自体は減らしていない。研究ソース、モデル、データセット、チェックポイント、MCTSの仕様には手を触れていない。残り56ファイルは引き続きrootにあり、依存を確認して段階的に分類する。
+
+## Phase 3: MCTS契約と学習・Rolloutパイプラインの分類（2026-11-09・第4段階）
+
+- **ユーザー報告:** 第3段階の `tests/integration/physics/` と `tests/integration/agent/` の全14テストがPASSED（6.12秒）。 `git status` クリーン。
+- Mock/DummyモデルでMCTSの選択・候補・31D mixed契約を検証する3ファイル（`test_mcts.py`, `test_candidate_mcts.py`, `test_mixed_candidate_mcts.py`）を `tests/unit/macro/` へ移動。
+- 小規模のCandidate Policy/Q/State V学習とmixed policy iterationの4ファイルを `tests/pipelines/macro/` へ、実行済み軌跡からMCTS訪問分布・MC return教師を作成する2ファイルを `tests/pipelines/rollout/` へ移動。訓練方法・教師種別の違いは保持。
+- **9ファイルともGit blob SHAを再利用した内容変更ゼロのパス移動**。各ファイルの相対import、`__file__`、`sys.path`、chdirなどのパス依存がないことを確認。元の古いパスは指定できなくなるので新パスを指定。
+- Phase 3累計は29/76ファイルを分類（unit19、integration4、pipelines6）。残る47ファイルはrootの`tests/test_*.py`に残す。研究コード・学習済みモデル・checkpoint・データセットは未変更。**今回の移動後のpytestはまだ未実施**。

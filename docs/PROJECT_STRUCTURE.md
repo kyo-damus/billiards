@@ -27,6 +27,9 @@ billiards/
 │   ├── integration/     # 実物理・階層構成を通した接続確認
 │   │   ├── physics/    # FastFizとMCTS/物理遷移
 │   │   └── agent/      # 階層Agentの統合smoke
+│   ├── pipelines/       # Macro学習・rollout変換の処理契約
+│   │   ├── macro/      # Macroモデルの小規模学習・反復
+│   │   └── rollout/    # 訪問分布・リターン教師生成
 │   └── test_*.py        # 未移動のテスト（安全確認まで維持）
 ├── tools/               # 監査、退避、実験ディレクトリ準備
 ├── docs/                # 設計、引き継ぎ、保守記録
@@ -75,7 +78,7 @@ python tools/prepare_run.py \
 ## 次の移行フェーズ（未実施）
 
 - **Phase 2（主要部分完了）**: `src/pipelines/` に共通学習補助・チェックポイントローダー・Attack/Mixedファクトリの本体を移動。旧 `scripts/` importを維持。22件の関連pytestと、2026-11-09のCPU 1ターンsmokeで移動前と同一結果を確認。
-- **Phase 3（第1〜3段階）**: 第1段階で単体5ファイルを分類（関連27件PASSED）、第2段階でMacro5・Micro3・Goal3ファイルを分類（49件PASSED）。第3段階は実物理を使うFastFiz/MCTS統合テスト3ファイルと階層Agentのsmoke1ファイルを`tests/integration/`へ内容変更なしで移動。学習パイプラインや他の統合テストは未分類で、今後段階的に整理する。
+- **Phase 3（第1〜4段階）**: 単体テスト16ファイル、実物理・階層統合テスト4ファイルを分類し、関連テストは成功。第4段階は物理を使わないMCTS契約3ファイルを`tests/unit/macro/`へ、Macro学習・反復とrollout教師生成6ファイルを`tests/pipelines/{macro,rollout}/`へ移動。計29/76ファイル分類。残り47ファイルは未移動。
 - **Phase 4**: CMakeの自動生成 `build/Makefile`、追跡済み`outputs/micro/`、過去の実験成果物と新しいルールの整合性を検証する。保全条件を満たすまで追跡解除・削除しない。
 
 各フェーズで、関連テストと少量の統合smokeを実行し、研究モデルの学習条件・探索・FastFizの挙動を変更しない。
