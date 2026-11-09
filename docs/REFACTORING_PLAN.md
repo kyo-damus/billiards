@@ -157,3 +157,12 @@
 - 小規模のCandidate Policy/Q/State V学習とmixed policy iterationの4ファイルを `tests/pipelines/macro/` へ、実行済み軌跡からMCTS訪問分布・MC return教師を作成する2ファイルを `tests/pipelines/rollout/` へ移動。訓練方法・教師種別の違いは保持。
 - **9ファイルともGit blob SHAを再利用した内容変更ゼロのパス移動**。各ファイルの相対import、`__file__`、`sys.path`、chdirなどのパス依存がないことを確認。元の古いパスは指定できなくなるので新パスを指定。
 - Phase 3累計は29/76ファイルを分類（unit19、integration4、pipelines6）。残る47ファイルはrootの`tests/test_*.py`に残す。研究コード・学習済みモデル・checkpoint・データセットは未変更。**今回の移動後のpytestはまだ未実施**。
+
+## Phase 3: Defense/Safety・Micro学習の分類（2026-11-09・第5段階）
+
+- **ユーザー実行結果:** 第4段階で移動したMCTS/Macro/rolloutの関連51件が全件PASSED（6.25秒）、Git作業ツリーもクリーン。
+- 物理実行の契約を含む`test_defense_macro_transition.py`と`test_defense_shot.py`を`tests/integration/defense/`へ移動。前者は実物理FastFiz統合ケースも含むので、丸ごとunit扱いしない。
+- 相手DIRECT脅威・仰角診断・Safety候補生成の4ファイルを`tests/unit/defense/`へ、`test_safety_goal.py`を`tests/unit/goal/`へ移動。
+- `test_train_position_residual.py`、`test_train_position_residual_scale_gate.py`、`test_position_residual_dataset.py`を`tests/pipelines/micro/`へ移動。Residualモデルの訓練・教師データ検証は実験本体ではなく小規模契約テスト。
+- 今回の10ファイルは全てGitの既存blob SHAを再利用し、**テスト内容に変更なし**。ファイル内の相対import、`__file__`、`sys.path`、chdir等のパス依存がないことを確認済み。旧パスで指定せず新パスでpytestを実行すること。
+- Phase 3累計**39/76ファイル**（unit24、integration6、pipelines9）。残る37ファイルは未分類。研究ロジック・訓練済みモデル・成果物・データの移動や削除はしていない。**移動後のpytestは未実行。**

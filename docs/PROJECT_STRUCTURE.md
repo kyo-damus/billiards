@@ -23,13 +23,16 @@ billiards/
 │   │   ├── game/        # ゲームルールのデータ型
 │   │   ├── macro/       # Macro候補・Policy/Q・局所評価
 │   │   ├── micro/       # SAC・Residualの単体動作
-│   │   └── goal/        # TacticalGoalと目標条件付け
+│   │   ├── goal/        # TacticalGoalと目標条件付け
+│   │   └── defense/     # 防御候補・相手脅威の単体評価
 │   ├── integration/     # 実物理・階層構成を通した接続確認
 │   │   ├── physics/    # FastFizとMCTS/物理遷移
-│   │   └── agent/      # 階層Agentの統合smoke
+│   │   ├── agent/      # 階層Agentの統合smoke
+│   │   └── defense/    # Defense物理ショットと遷移
 │   ├── pipelines/       # Macro学習・rollout変換の処理契約
 │   │   ├── macro/      # Macroモデルの小規模学習・反復
-│   │   └── rollout/    # 訪問分布・リターン教師生成
+│   │   ├── rollout/    # 訪問分布・リターン教師生成
+│   │   └── micro/      # Residualの教師データ・学習
 │   └── test_*.py        # 未移動のテスト（安全確認まで維持）
 ├── tools/               # 監査、退避、実験ディレクトリ準備
 ├── docs/                # 設計、引き継ぎ、保守記録
@@ -78,7 +81,7 @@ python tools/prepare_run.py \
 ## 次の移行フェーズ（未実施）
 
 - **Phase 2（主要部分完了）**: `src/pipelines/` に共通学習補助・チェックポイントローダー・Attack/Mixedファクトリの本体を移動。旧 `scripts/` importを維持。22件の関連pytestと、2026-11-09のCPU 1ターンsmokeで移動前と同一結果を確認。
-- **Phase 3（第1〜4段階）**: 単体テスト16ファイル、実物理・階層統合テスト4ファイルを分類し、関連テストは成功。第4段階は物理を使わないMCTS契約3ファイルを`tests/unit/macro/`へ、Macro学習・反復とrollout教師生成6ファイルを`tests/pipelines/{macro,rollout}/`へ移動。計29/76ファイル分類。残り47ファイルは未移動。
+- **Phase 3（第1〜5段階）**: 第4段階までの29ファイルは移動後テストがすべて成功。第5段階はDefenseの局所契約4ファイル・Safety Goal1ファイル・実物理Defense統合2ファイル・Micro Residualのdataset/学習3ファイルを内容変更なしで分類。計39/76ファイル分類（単体24、統合6、パイプライン9）。残り37ファイルは未移動。
 - **Phase 4**: CMakeの自動生成 `build/Makefile`、追跡済み`outputs/micro/`、過去の実験成果物と新しいルールの整合性を検証する。保全条件を満たすまで追跡解除・削除しない。
 
 各フェーズで、関連テストと少量の統合smokeを実行し、研究モデルの学習条件・探索・FastFizの挙動を変更しない。

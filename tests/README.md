@@ -7,12 +7,15 @@
 - `tests/unit/game/`: ゲームルールのデータ型・インターフェース
 - `tests/unit/macro/`: Macro候補表現・Policy/Qネットワーク・局所評価
 - `tests/unit/micro/`: SAC・Position Residualとゲート処理
-- `tests/unit/goal/`: TacticalGoal・Goal条件付け・報酬
+- `tests/unit/goal/`: TacticalGoal・Goal条件付け・報酬・Safety Goal
+- `tests/unit/defense/`: 防御候補生成、相手脅威・仰角の局所評価
 - `tests/test_*.py`: 未移動のテスト。依存関係・fixtureを確認してから段階的に分類
 - `tests/integration/physics/`: FastFiz実物理とMCTSの結合動作を確認するテスト
 - `tests/integration/agent/`: 階層型Agentのエンドツーエンドsmoke
+- `tests/integration/defense/`: FastFizを伴うDefenseショット・Macro遷移
 - `tests/pipelines/macro/`: Macro Candidate Policy/Q、State V、反復更新の小規模学習パイプライン
 - `tests/pipelines/rollout/`: MCTS訪問分布教師と完了軌跡のMC return教師の生成
+- `tests/pipelines/micro/`: Position Residual教師データと小規模学習契約
 
 ## 関連テストの実行例
 
@@ -68,3 +71,16 @@ python -m pytest \
 ```
 
 9ファイルは関数・assertionの変更なしに移動した。単体MCTSのテストと学習パイプラインのテストを、物理統合テストとは別に選択できるようにした。既存のパスを直接指定していたコマンド・資料は移動後のパスに読み替えること。
+
+## Phase 3第5段階の実行例
+
+```bash
+python -m pytest \
+  tests/unit/defense/ \
+  tests/unit/goal/test_safety_goal.py \
+  tests/integration/defense/ \
+  tests/pipelines/micro/ \
+  -v
+```
+
+10ファイルの内容は変更していない。`tests/integration/defense/` の実物理ケースはFastFizライブラリに依存する。既存の`tests/unit/goal/`全体は第2段階で検証済みのため、ここでは移した`test_safety_goal.py`だけを指定する。
