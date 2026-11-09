@@ -33,3 +33,12 @@
 - ショットの物理パラメータやモデルの入力次元が変わる処理は、リファクタリングとは別に承認を得る。
 - 安全に変更を進められる単位ごとに必要なテストコマンドを示し、ユーザーのDGX上での実行結果を確認して進む。
 - ローカルとGitHubのブランチ名/HEADが食い違う場合は、現物の保全と差分確認を優先する。
+
+## 監査結果と初回削除（2026-11-09）
+
+- ローカル監査結果: Git追跡Python 194、テストファイル74・テスト関数300、AST構文エラー0。 `src/micro/policy.py` は未参照のProtocolだが、設計上のインターフェースとして残す（削除保留）。
+- GitHub上の `build/` には過去のMuZero/SAC学習用Pythonスクリプト8件がある。これらは `src/`、`scripts/`、`tests/` の現在の実装から静的importされておらず、`CMakeLists.txt` のビルド対象でもない。Pythonスクリプト群は相互に依存する過去の別実装。
+- **削除対象（Git追跡ソースのみ）:** `build/custom_env.py`, `build/eval_policy.py`, `build/fine_tune_policy.py`, `build/muzero_buffer.py`, `build/muzero_models.py`, `build/test_mcts.py`, `build/train_muzero.py`, `build/train_policy.py`。現在のMacro/Micro/FastFizの構築・学習・推論系には含まれないため、古い実装の混在防止を目的に作業ブランチで削除。過去コードは分岐元の `phase9-defense-v0` とGit履歴に残る。
+- **削除しない:** `build/Makefile`（既存のローカルビルドに必要な可能性）、`build/.gitignore`、`CMakeLists.txt`、`cpp_simulator.cpp`、`libs/fastfiz`、全学習済みモデル（`.pt`/`.pth`）・データ（`.npz`）・ログ。ファイル削除後のテスト完走をユーザー環境で確認するまで、ほかの削除は進めない。
+- **注意:** 過去の `python build/train_muzero.py` 等の起動は対象外。これらを使った歴史的な実験の再現性が必要な場合は元ブランチから復元する。現在の研究成果の再現に必要なローカル重みは保持。
+- **テスト削減:** 1～2件しかテストを含まないファイルは23件あるが、それだけで不要とは判定しない。テストの意味・重複・境界条件を比較してから統合。
