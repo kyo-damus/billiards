@@ -62,3 +62,23 @@ python tools/audit_local_artifacts.py \
 4. 保全・再現に問題がないことと利用者の判断を経てから、追跡解除やディレクトリ整備を個別コミットで実施。原ブランチ・履歴・研究成果物は引き続き保護する。
 
 **監査時点の結論:** 冗長な追跡対象は存在するが、現時点で無条件に消してよいファイルは確定していない。
+
+## DGXでの現物確認（2026-11-09・ユーザー実行）
+
+ユーザーが `git pull --ff-only` 後、読み取り専用コマンドの結果を報告した。
+
+- ブランチ `refactor-phase9-preserve-20261109`、リモートと同期済み、作業ツリークリーン（`git status --short --branch`）。
+- Git追跡中: `build/.gitignore`、`build/Makefile`、`outputs/micro/micro_sac_final.pt`、`outputs/micro/micro_sac_step_2500.pt`、`outputs/micro/micro_sac_step_5000.pt`。
+- `build/billiard_env_cpp.cpython-311-x86_64-linux-gnu.so`: 299K、2026-11-01 21:51。現用の `bill_sub1`（Python 3.11）に対応する拡張として配置されている。
+- `build/billiard_env_cpp.cpython-313-x86_64-linux-gnu.so`: 657K、2026-06-15 15:18。Python 3.13用の別ABI拡張が共存。**容量・更新日が異なることは重複・不要の証拠にならない**。保全継続。
+- Git追跡3モデル: 各 `ls -lh` で約1.4M、2026-08-25更新。存在と追跡を確認したが、どの実験で使うか、現行ソースから参照されるか、バックアップにバイト単位で含まれるかは**まだ未確認**。
+- `~/billiards_research_backup_20261109.tar.gz` はファイルとして存在、`~/billiards_refactor_quarantine_20261109/` はディレクトリとして存在。`test -f` / `test -d` は内容・整合性・SHA-256を検証するものではない。
+- 今回、再ビルド・削除・移動・追跡解除を実施していない。
+
+### 次の読み取り専用調査
+
+現在の `src/`・`scripts/`・`configs/` のコードや設定に、追跡3モデルと `outputs/micro/` への**直接の文字列参照**があるか `git grep` で確認する。結果0件でも動的に参照される可能性は残る。ローカルの既存tarがそれらを含むかファイル名一覧を確認し、バックアップの内容一致は別途SHA-256で検証する。
+
+Makefile追跡解除は**まだ提案段階**。GitHubで追跡解除コミットを作り、そのままユーザーがpullすると `build/Makefile` の作業コピーが消える可能性があるため、**事前の退避と再生成手順の確認なしに変更しない**。`build/` と2種類の `*.so` は現状維持する。
+
+次の判断はユーザーによるDGX現物と参照先の報告を受けてから行う。

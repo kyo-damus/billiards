@@ -199,3 +199,9 @@
 - `src/env/fastfiz_simulator.py` は `build/` 内の `billiard_env_cpp` を直接importするため、ビルド先を破壊する移動・削除は不可。GitHubだけでは実機の `*.so` が生きているか分からない。
 - **今回実施したのは監査記録とPhase 3完了ドキュメント更新のみ。** Git追跡解除、ローカルモデル削除・移動、CMakeの再実行は行わない。次はローカルのビルド拡張と旧モデル・バックアップを読み取り専用で確認。
 - 個別リスク・事実・確認手順・今後の判断条件: [PHASE4_ARTIFACT_AUDIT.md](PHASE4_ARTIFACT_AUDIT.md)。
+
+## Phase 4: ローカル現物確認（2026-11-09）
+
+- ユーザーの読み取り専用確認で、追跡中の `build/Makefile`、`build/.gitignore`、`outputs/micro/` の3モデルが実在し、作業ツリーがクリーンであることを確認。
+- `build/` にはPython 3.11用FastFiz拡張299K（11月1日更新）とPython 3.13用拡張657K（6月15日更新）が共存。既存モデル3件は各約1.4M。研究バックアップtarと旧成果物の退避先の**存在のみ**確認。現物のバイト一致・参照の有無・再ビルド可能性は未確認。
+- 詳細は [PHASE4_ARTIFACT_AUDIT.md](PHASE4_ARTIFACT_AUDIT.md)。**今回もGit追跡解除、既存物の削除・移動、ビルドの実行は行わない。**
