@@ -138,3 +138,14 @@
 - Macro5件（candidate / networks / candidate_policy / candidate_value / local_evaluation）、Micro3件（sac / position_residual_policy / position_residual_scale_gate）、Goal3件（goal_reward / goal_conditioning / tactical_goal）をそれぞれ `tests/unit/macro/`、`unit/micro/`、`unit/goal/` に移動。計11ファイル。
 - Git blob SHAを再利用した**テスト内容変更ゼロのパス移動**。ファイル内に他テストへの相対importや `__file__` / `sys.path` / chdirのパス依存がないことを確認。研究コード・テスト関数・成果物・チェックポイントは不変更。
 - 次のユーザー検証では `python -m pytest tests/unit/macro/ tests/unit/micro/ tests/unit/goal/ -v` を使用。新ディレクトリでのpytestは未実行。FastFizの物理統合や大量の学習処理はこの分類変更に含めない。
+
+## Phase 3: FastFiz・MCTS・階層Agent統合テストの分類（2026-11-09・第3段階）
+
+- **ユーザー報告:** 第2段階で移した`tests/unit/macro/`・`unit/micro/`・`unit/goal/`の**49件全件PASSED（5.72秒）**。 `git status` はクリーン。
+- 以下4ファイルをテスト内容を変えず配置変更（blob SHAを再利用、元ファイルの削除はGitのrenameとして追跡可能）。
+  - `tests/test_fastfiz_simulator.py` → `tests/integration/physics/test_fastfiz_simulator.py`
+  - `tests/test_mcts_physics_integration.py` → `tests/integration/physics/test_mcts_physics_integration.py`
+  - `tests/test_candidate_mcts_physics_integration.py` → `tests/integration/physics/test_candidate_mcts_physics_integration.py`
+  - `tests/test_hierarchical_smoke.py` → `tests/integration/agent/test_hierarchical_smoke.py`
+- これらはFastFiz実物理／MCTS-物理接続／階層Agentの結合smokeに関するテスト。内部の相対import、`__file__`、`sys.path`、作業ディレクトリ変更への依存がないことを確認。**移動先でのpytestは未実行。** 実行環境は従来通りFastFizネイティブライブラリが必要。
+- Phase 3累計は20ファイルを分類（単体16、統合4）。計76ファイル自体は減らしていない。研究ソース、モデル、データセット、チェックポイント、MCTSの仕様には手を触れていない。残り56ファイルは引き続きrootにあり、依存を確認して段階的に分類する。

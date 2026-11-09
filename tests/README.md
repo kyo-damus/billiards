@@ -9,7 +9,9 @@
 - `tests/unit/micro/`: SAC・Position Residualとゲート処理
 - `tests/unit/goal/`: TacticalGoal・Goal条件付け・報酬
 - `tests/test_*.py`: 未移動のテスト。依存関係・fixtureを確認してから段階的に分類
-- 今後 `tests/integration/` と `tests/pipelines/` を整備予定（現段階では未作成）
+- `tests/integration/physics/`: FastFiz実物理とMCTSの結合動作を確認するテスト
+- `tests/integration/agent/`: 階層型Agentのエンドツーエンドsmoke
+- 今後 `tests/pipelines/` を整備予定（現段階では未作成）
 
 ## 関連テストの実行例
 
@@ -25,7 +27,7 @@ python -m pytest \
   -v
 ```
 
-`python -m pytest tests/unit/pipelines/ -v` のように分類フォルダ単位の実行も可能。移動したファイルは旧パスで指定しても見つからないため**新パスを使うこと**。未移動のテストやFastFizに依存する統合テストは従来どおり実行する。ファイルの内容・assertionは移動前から変更していない。
+`python -m pytest tests/unit/pipelines/ -v` のように分類フォルダ単位の実行も可能。移動したファイルは旧パスで指定しても見つからないため**新パスを使うこと**。未移動のテストは従来のパスで実行する。FastFiz統合テスト4ファイルは上記の新しい場所を使い、従来通りネイティブ物理エンジンが必要。ファイルの内容・assertionは移動前から変更していない。
 
 過去の検証ログや設計履歴のテストファイル名は、当時の記録としてそのまま保持する。
 
@@ -40,3 +42,14 @@ python -m pytest \
 ```
 
 Macro5・Micro3・Goal3ファイルの内容は変更していない。元の単体テストは移動後のパスで参照する。既存のテストシナリオは増減していない。
+
+## Phase 3第3段階の実行例
+
+```bash
+python -m pytest \
+  tests/integration/physics/ \
+  tests/integration/agent/ \
+  -v
+```
+
+新配置の4ファイルは**内容未変更**。この分類は単体テストであることを主張するものではなく、FastFiz実物理や階層的な接続を検証する分類である。学習時間を要する本実験は含まれない。
