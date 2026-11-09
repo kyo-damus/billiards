@@ -4,9 +4,12 @@ import torch.nn as nn
 
 from src.common.types import (
     GameState,
+    MacroAction,
+    Strategy,
 )
 
 from src.goal.types import (
+    TacticalGoal,
     TacticalGoalType,
 )
 
@@ -130,6 +133,56 @@ def test_candidate_mcts_root_contract():
 
     assert isinstance(transition.last_choice, MacroCandidate)
     assert mcts.last_root is root
+
+
+def test_mcts_uses_separate_root_generator():
+    """The first expansion uses root candidates, deeper search uses tree candidates."""
+
+    class RecordingGenerator:
+        def __init__(self, candidate):
+            self.candidate = candidate
+            self.calls = 0
+
+        def generate(self, state):
+            self.calls += 1
+            return [self.candidate]
+
+    def direct_candidate(pocket):
+        return MacroCandidate(
+            action=MacroAction(
+                strategy=Strategy.ATTACK,
+                target_ball=0,
+                target_pocket=pocket,
+            ),
+            goal=TacticalGoal(
+                goal_type=TacticalGoalType.DIRECT_ATTACK,
+                target_ball=0,
+                target_pocket=pocket,
+            ),
+        )
+
+    root_choice = direct_candidate(0)
+    next_choice = direct_candidate(1)
+    root_generator = RecordingGenerator(root_choice)
+    tree_generator = RecordingGenerator(next_choice)
+
+    mcts = MCTS(
+        policy_network=MacroCandidatePolicyNetwork(),
+        value_network=MacroValueNetwork(),
+        action_generator=tree_generator,
+        root_action_generator=root_generator,
+        transition_model=DummyCandidateTransition(),
+        simulations=1,
+        device="cpu",
+        candidate_mode=True,
+    )
+    root = mcts.search(make_state())
+
+    assert root_generator.calls == 1
+    assert tree_generator.calls == 1
+    assert list(root.children) == [root_choice]
+    assert root_choice.action.target_pocket == 0
+    assert next_choice not in root.children
 
 
 def test_force_evaluate_unvisited_prefers_unvisited_child():

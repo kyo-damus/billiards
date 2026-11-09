@@ -49,3 +49,10 @@
 - これらを `test_candidate_mcts_root_contract` の1件に統合した。**5項目のassertionは全て保持**。MCTSの値推定・探索優先順位・手番反転など独立したテストはそのまま残す。
 - 統合で `tests/test_candidate_mcts.py` は15件→11件、全テスト関数数は300→296件の見込み。**テスト結果はユーザーDGX上で要確認**。
 - 1件のテストが複数条件を検証するようになるため、最初の失敗以降のassertionは実行されない点は留意。今回の統合対象は同一のroot契約に限定した。
+
+## テストファイル統合（2026-11-09・第2弾）
+
+- `tests/test_mcts_root_generator.py` は1テスト・137行で、現在の `tests/test_candidate_mcts.py` と同じMCTS、Candidate Policy/Value、GameState、ダミー遷移を独立に定義していた。
+- 元のテストの重要契約（ルート候補専用Generatorが1回、深部候補Generatorが1回、ルートに深部用候補が混入しない）を `tests/test_candidate_mcts.py::test_mcts_uses_separate_root_generator` に統合。ルート/深部で異なるポケットの候補を明示し、同様の挙動を確認。
+- テストファイル数74→73、テスト関数総数296→296（検証ケースの件数は維持）。ダミー実装を共通化したため重複コードを減らした。
+- 旧テストファイルは作業ブランチ上では削除したが、`phase9-defense-v0` とGit履歴には保存される。変更後のテストはユーザーDGX上で未実施。
