@@ -6,11 +6,12 @@
 
 現在のGit管理ファイルは `src/` 59、`scripts/` 53、`tests/` 72、`docs/` 4、`tools/` 3、`outputs/micro/` 3など。過去のモデル107件はGit管理外の `~/billiards_refactor_quarantine_20261109/` に移動済みであり、変更・削除しない。
 
-Phase 1は**新しい実験の保存方針と記録手段**を追加するのみ。既存の`src/`、`scripts/`、`tests/`、学習済みモデル、既存データの移動・削除はしない。
+Phase 1では**新しい実験の保存方針と記録手段**を追加し、既存の`src/`、`scripts/`、`tests/`、学習済みモデル、既存データは移動・削除しなかった。Phase 2の第1段階では、Macro学習の共通ユーティリティの実装だけを`src/pipelines/training_utils.py`へ移し、旧`script`モジュールを再公開用ラッパーとして維持する。
 
 ```text
 billiards/
-├── src/                 # 現行のMacro/Micro/Goal/物理/Controller（未移動）
+├── src/                 # Macro/Micro/Goal/物理/Controller
+│   └── pipelines/       # 共通学習補助（Phase 2から段階的に移行）
 ├── scripts/             # 現行の起動CLI（互換性維持）
 ├── configs/
 │   ├── macro/           # 人が読む実験設定
@@ -62,7 +63,7 @@ python tools/prepare_run.py \
 
 ## 次の移行フェーズ（未実施）
 
-- **Phase 2**: `scripts/attack_components.py`、`scripts/mixed_components.py`、`scripts/training_utils.py` 等を `src/pipelines/` へ段階的に移し、`python -m scripts.<既存名>` や旧importを互換ラッパーで維持。個々の依存を精査してから行う。
+- **Phase 2（着手済み）**: `scripts/training_utils.py` の実装を `src/pipelines/training_utils.py` へ移し、既存importは再公開ラッパーで保持。次は `attack_components.py` の `scripts.eval_position_residual` 依存を調査してから、`mixed_components.py` とともに段階的に移行する。既存の `python -m scripts.<既存名>` は維持する。
 - **Phase 3**: `tests/` をunit/integration/pipelinesに分ける。import、pytest root、CLIテスト、外部ツール参照を先に棚卸しする。
 - **Phase 4**: CMakeの自動生成 `build/Makefile`、追跡済み`outputs/micro/`、過去の実験成果物と新しいルールの整合性を検証する。保全条件を満たすまで追跡解除・削除しない。
 

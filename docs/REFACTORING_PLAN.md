@@ -93,3 +93,11 @@
 - `artifacts/` をGit管理外の新規実験出力先とし、`artifacts/runs/<run_id>/` に設定・Git metadata・outputs/logsをまとめる。
 - **未変更:** 現行 `src/`・`scripts/`・`tests/` の既存ファイル配置、現行・過去の全チェックポイントとデータ、旧buildの退避先、学習・推論ロジック。現行CLIはJSONを読み込まない。
 - `python -m pytest tests/test_prepare_run.py -v` によるユーザー環境での検証待ち。合格後にPhase 2のコード移動へ進む。全スイートや実際のRL性能を再評価したことにはならない。
+
+## Phase 2: scriptsとsrcの責務分離（2026-11-09・第1段階）
+
+- `scripts/training_utils.py` の実装3関数（`resolve_device`、`make_group_split`、`make_groups`）を変更せず `src/pipelines/training_utils.py` に移す。
+- 旧 `scripts.training_utils` は3関数をそのまま再公開する薄い互換ラッパーとして残す。既存のCLI、テスト、従来のインポートパスは維持する。
+- 新設 `tests/test_training_utils_compat.py` は同一の関数オブジェクトの再公開、状態グループをまたがない分割、`make_groups`、明示的CPU指定を確認する。
+- **他のスクリプト・モデル・dataset・設定の意味は変更しない。** `attack_components.py` をただちに移さない理由: `scripts.eval_position_residual` 内のモデル読み込みに依存しているため、依存ループを作らない抽出方法が必要。
+- ユーザー環境で対象pytestが通った後、ファクトリの切り出しを進める。実際の動作確認は未実施。
