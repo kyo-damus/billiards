@@ -171,3 +171,47 @@ git status --short --branch
 一時ディレクトリのconfigureでエラーが出ても既存buildは触らず、**エラーログを先に確認してから**対応する。成功しても実際のビルドと `*.so` の再生成はまだ確認したことにならない。安全なバックアップとconfigure検証を経てから `build/Makefile` の追跡方針を改めて判断する。
 
 **注意:** 追跡解除コミットをGitHubで先に作成すると、その後のpullでローカルのMakefileが削除される可能性がある。既存buildと追跡済み重みは現状維持。
+
+## 隔離CMake Configureの実行結果（2026-11-09）
+
+ユーザーDGX上の結果:
+
+- リポジトリ外 `~/billiards_refactor_safety_20261109/Makefile.original` と現行 `build/Makefile` が `cmp` で **MATCH**。オリジナルMakefileの別媒体コピーが確保された（既存tarとの照合とは別）。
+- CMake **4.3.0**、Python **3.11.15**、GNU C/C++ 14.3.0、pybind11 **3.0.3** を検出。FastFizサブモジュール `libs/fastfiz` は `6c6df412c8eed82fc6a70732aeffe9b64c8eaa38` （`heads/main`）でチェックアウト済み。
+- 作成された隔離ビルドディレクトリは **`/tmp/billiards-cmake-phase4.d3nMbc`**。 `cmake -S . -B ...` は `Configuring done` / `Generating done` で終了した。
+- `pybind11` 経由の `CMP0148` / `FindPythonInterp`・`FindPythonLibs` に関する開発・非推奨警告が出た。**configureを止めるエラーではなかった**。将来のCMake/pybind11更新時には対処の余地があるが、現行の研究仕様変更と混ぜない。
+- `git status` はクリーン。既存 `build/` および追跡モデルは変更していない。
+- **検証範囲はConfigure/Generateまで**。実物のC++コンパイル、隔離領域で生成される `billiard_env_cpp` のimport、FastFiz物理動作は未確認。
+
+### 次の段階: 隔離ディレクトリのC++ビルドとimport
+
+先ほど作った一時ディレクトリのみを対象にビルドする。現在の `build/` は変更しない。対象が存在しないときには**新たな生成先を勝手に置き換えず中止**する。
+
+```bash
+cd ~/research
+scratch=/tmp/billiards-cmake-phase4.d3nMbc
+test -f "$scratch/CMakeCache.txt" || { echo "Isolated cache missing"; exit 1; }
+
+cmake --build "$scratch" --parallel 2
+
+python - "$scratch" <<'PY'
+from pathlib import Path
+import sys
+
+scratch = Path(sys.argv[1]).resolve()
+sys.path.insert(0, str(scratch))
+import billiard_env_cpp
+loaded = Path(billiard_env_cpp.__file__).resolve()
+print("Loaded:", loaded)
+assert loaded.parent == scratch, f"Wrong extension loaded: {loaded}"
+billiard_env_cpp.BilliardSimulator()
+print("Isolated native import and constructor: OK")
+PY
+
+cmp -s build/Makefile ~/billiards_refactor_safety_20261109/Makefile.original && echo "Original Makefile unchanged"
+git status --short --branch
+```
+
+これは一時ディレクトリ内でオブジェクトと共有ライブラリを新規生成するので **読み取り専用コマンドではない**。ただし既存の `build/`・学習済み重みには書き込まず、同一リポジトリのCMake構成とソースを利用する。実機でビルド失敗ならログの診断を先に行い、既存環境を壊す「修復」はしない。
+
+`build/Makefile` のGit追跡解除は、隔離ビルド・importの正常性とpull時の現物保全手順を確認した**後**に検討する。

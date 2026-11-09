@@ -219,3 +219,9 @@
 - 3モデルのバックアップとの内容一致は確認できたが、研究上の要不要や既存 `outputs/micro/` の維持方針は別途判断する。現時点で3件すべて保持する。
 - 次の安全な作業は、`build/Makefile` をリポジトリ外に保全し、`/tmp` の隔離ディレクトリでCMake configure可能か確認すること。**現在のbuild/Makefile、`*.so`、重みの削除・Git追跡解除・再ビルドは未実施**。
 - 詳細: [PHASE4_ARTIFACT_AUDIT.md](PHASE4_ARTIFACT_AUDIT.md)。
+
+## Phase 4: Makefileの保全と隔離Configure成功（2026-11-09）
+
+- ユーザーDGXで、既存 `build/Makefile` の `~/billiards_refactor_safety_20261109/Makefile.original` への保全コピーは `cmp` **MATCH**。
+- CMake 4.3.0、Python 3.11.15、GNU 14.3.0、pybind11 3.0.3、FastFiz submodule `6c6df412` で、`/tmp/billiards-cmake-phase4.d3nMbc` へのCMake configure/generateが成功。pybind11の `CMP0148` に非致命的な警告。Git作業ツリーはクリーン。
+- 次は隔離ディレクトリへの **C++コンパイルと拡張import・コンストラクタ** を確認する。従来の `build/`・FastFiz既存 `.so`・3モデルは一切変更しない。まだGit追跡解除を行わない。詳細: [PHASE4_ARTIFACT_AUDIT.md](PHASE4_ARTIFACT_AUDIT.md)。
