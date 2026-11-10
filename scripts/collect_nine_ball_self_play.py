@@ -241,6 +241,11 @@ def parse_args(argv=None):
     p.add_argument("--agent-kind", choices=("geometry", "micro_sac", "micro_mcts"), default="geometry")
     p.add_argument("--micro-checkpoint", type=Path)
     p.add_argument("--macro-policy-checkpoint", type=Path)
+    p.add_argument("--state-value-checkpoint", type=Path)
+    p.add_argument("--mcts-simulations", type=int, default=24)
+    p.add_argument("--mcts-max-depth", type=int, default=2)
+    p.add_argument("--mcts-c-puct", type=float, default=1.5)
+    p.add_argument("--mcts-root-min-visits", type=int, default=1)
     p.add_argument("--device", choices=("cpu", "cuda"), default="cpu")
     return p.parse_args(argv)
 
