@@ -238,7 +238,7 @@ def parse_args(argv=None):
     p.add_argument("--start-seed", type=int, default=310000)
     p.add_argument("--max-shots-per-rack", type=int, default=60)
     p.add_argument("--output-dir", type=Path, required=True)
-    p.add_argument("--agent-kind", choices=("geometry", "micro_sac"), default="geometry")
+    p.add_argument("--agent-kind", choices=("geometry", "micro_sac", "micro_mcts"), default="geometry")
     p.add_argument("--micro-checkpoint", type=Path)
     p.add_argument("--macro-policy-checkpoint", type=Path)
     p.add_argument("--device", choices=("cpu", "cuda"), default="cpu")
