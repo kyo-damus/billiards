@@ -157,3 +157,23 @@ def test_terminal_rack_physical_evidence_survives_rack_replacement():
     row = result["trajectory"][0]
     assert row["physical"]["first_contact_ball"] == 1
     assert row["physical"]["events"][0]["kind"] == "BALL_COLLISION"
+
+
+
+def test_learned_agent_trajectories_are_not_mislabeled_as_geometry(tmp_path):
+    class FakeLearnedAgent(GeometryNineBallAgent):
+        pass
+    folder = tmp_path / "learned"
+    outcome = collect_matches(
+        matches=1, race_to=1, start_seed=400,
+        max_shots_per_rack=2, output_dir=folder,
+        agent_factory=FakeLearnedAgent,
+        match_factory=lambda seed: OneRackFakeMatch(seed),
+    )
+    assert outcome["run_type"] == "learned_micro_self_play"
+    assert outcome["per_match"][0]["players"] == [
+        "FakeLearnedAgent", "FakeLearnedAgent",
+    ]
+    import json
+    payload = json.loads((folder / "match_seed_400.json").read_text())
+    assert payload["run_type"] == "learned_micro_self_play"

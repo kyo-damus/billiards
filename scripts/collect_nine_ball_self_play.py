@@ -157,6 +157,11 @@ def collect_matches(
         raise FileExistsError(f"Refusing to reuse output directory: {output_dir}")
     output_dir.mkdir(parents=True, exist_ok=False)
     agents = (agent_factory(), agent_factory())
+    players = [type(agent).__name__ for agent in agents]
+    if players == ["GeometryNineBallAgent", "GeometryNineBallAgent"]:
+        run_type = "nonlearned_geometry_self_play"
+    else:
+        run_type = "learned_micro_self_play"
     summaries = []
     for index in range(matches):
         # Reserve 2*race_to seeds per match. A race-to-N lasts at most
@@ -179,11 +184,11 @@ def collect_matches(
         )
         payload = {
             "format_version": 1,
-            "run_type": "nonlearned_geometry_self_play",
+            "run_type": run_type,
             "seed": seed,
             "race_to": race_to,
             "max_shots_per_rack": max_shots_per_rack,
-            "players": [type(agent).__name__ for agent in agents],
+            "players": players,
             **outcome,
         }
         file = output_dir / f"match_seed_{seed}.json"
@@ -201,7 +206,7 @@ def collect_matches(
             f"shots={outcome['shots']} fouls={outcome['fouls']}"
         )
     result = {
-        "run_type": "nonlearned_geometry_self_play",
+        "run_type": run_type,
         "matches": matches,
         "finished_matches": sum(s["match_finished"] for s in summaries),
         "unfinished_matches": sum(not s["match_finished"] for s in summaries),
@@ -210,8 +215,8 @@ def collect_matches(
         "fouls": sum(s["fouls"] for s in summaries),
         "per_match": summaries,
         "note": (
-            "Nonlearned geometric placeholders on partial nine-ball rules. "
-            "This does not measure hierarchical RL performance or official win rate."
+            "Partial nine-ball rules. Model kind is recorded in run_type/players. "
+            "Do not infer final hierarchical-RL performance or official win rate."
         ),
     }
     with (output_dir / "summary.json").open("x", encoding="utf-8") as stream:
@@ -263,7 +268,7 @@ if __name__ == "__main__":
         agent_factory=agent_factory,
     )
     print(
-        "=== Completed heuristic nine-ball data collection ===\n"
+        "=== Completed nine-ball data collection ===\n"
         f"finished={summary['finished_matches']}/{summary['matches']} "
         f"unfinished={summary['unfinished_matches']} "
         f"racks={summary['racks_completed']} shots={summary['shots']}"

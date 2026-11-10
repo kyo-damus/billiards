@@ -44,7 +44,10 @@ def load_training_states(rollout_dir: Path) -> tuple[TrainingSample, ...]:
     for path in files:
         with path.open(encoding="utf-8") as stream:
             data = json.load(stream)
-        if data.get("run_type") != "nonlearned_geometry_self_play":
+        if data.get("run_type") not in (
+            "nonlearned_geometry_self_play",
+            "learned_micro_self_play",
+        ):
             raise ValueError(f"Unexpected rollout kind in {path}")
         for row in data.get("trajectory", []):
             raw = row["state"]

@@ -90,3 +90,15 @@ def test_training_defaults_are_cpu_and_separate_output():
     assert args.steps == 5000
     assert args.device == "cpu"
     assert args.output_dir == Path("fresh_output")
+
+
+
+def test_training_loader_accepts_new_micro_self_play_source(tmp_path):
+    folder = tmp_path / "matches"
+    _rollout(folder)
+    path = folder / "match_seed_0.json"
+    payload = json.loads(path.read_text())
+    payload["run_type"] = "learned_micro_self_play"
+    path.write_text(json.dumps(payload))
+    samples = load_training_states(folder)
+    assert len(samples) == 1
