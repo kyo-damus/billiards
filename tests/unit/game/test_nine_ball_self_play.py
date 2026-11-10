@@ -203,3 +203,41 @@ def test_exact_versioned_chosen_macro_goal_is_logged():
     np.testing.assert_allclose(
         chosen["goal_v3"], encode_goal_v3(NineBallGoal("BREAK", 1)),
     )
+
+
+def test_search_root_visits_saved_with_executed_goal():
+    from dataclasses import replace
+    from src.game.nine_ball_encoding_v3 import NineBallGoal, encode_goal_v3
+
+    goal = NineBallGoal("BREAK", target_ball=1)
+    diagnostics = {
+        "simulations": 2,
+        "max_depth": 1,
+        "root_candidates": 1,
+        "chosen_index": 0,
+        "root_visits": [2],
+        "root_priors": [1.0],
+        "root_empirical_q": [0.0],
+        "goal_v3": [encode_goal_v3(goal).tolist()],
+        "uses_learned_state_v": False,
+        "uses_selected_action_q": False,
+    }
+
+    class FakeMCTSAgent(GeometryNineBallAgent):
+        def choose_shot(self, state, context=None):
+            return replace(
+                super().choose_shot(state, context),
+                macro_goal=goal,
+                macro_search=diagnostics,
+                goal_label="BREAK_MCTS_V3",
+            )
+
+    result = play_match(
+        OneRackFakeMatch(),
+        (FakeMCTSAgent(), FakeMCTSAgent()),
+        max_shots_per_rack=1,
+    )
+    row = result["trajectory"][0]["chosen_action"]
+    assert row["macro_search"] == diagnostics
+    assert row["goal_v3"] == encode_goal_v3(goal).tolist()
+    assert row["macro_search"]["chosen_index"] == 0
