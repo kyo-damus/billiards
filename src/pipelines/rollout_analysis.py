@@ -240,6 +240,50 @@ def read_root_diagnostics(path):
         return results
 
 
+def summarize_root_ties(paths):
+    """Aggregate saved per-root visit tie statistics, without simulation."""
+    paths = [Path(p) for p in paths]
+    if not paths:
+        raise ValueError("At least one saved rollout file is required.")
+    if len({path.resolve() for path in paths}) != len(paths):
+        raise ValueError("Duplicate rollout paths are not allowed.")
+
+    total = 0
+    with_tie = 0
+    tie_at_one = 0
+    non_first_winners = 0
+    root_candidates = 0
+    max_candidate_visits = 0
+    selected_goal_counts = Counter({name: 0 for name in GOAL_NAMES})
+    for path in paths:
+        for root in read_root_diagnostics(path):
+            total += 1
+            tied = root["max_visit_tie_count"] > 1
+            with_tie += int(tied)
+            tie_at_one += int(tied and root["max_candidate_visits"] == 1)
+            non_first_winners += int(
+                not root["selected_is_first_visit_max"]
+            )
+            root_candidates += int(root["candidate_count"])
+            max_candidate_visits += int(root["max_candidate_visits"])
+            selected_goal_counts[root["selected_goal"]] += 1
+
+    return {
+        "recorded_roots": total,
+        "roots_with_max_visit_tie": with_tie,
+        "max_visit_tie_rate": (with_tie / total if total else None),
+        "roots_tied_at_one_visit": tie_at_one,
+        "roots_selected_not_first_visit_max": non_first_winners,
+        "mean_candidate_count_per_root": (
+            root_candidates / total if total else None
+        ),
+        "mean_max_candidate_visits": (
+            max_candidate_visits / total if total else None
+        ),
+        "selected_goal_counts": dict(selected_goal_counts),
+    }
+
+
 def summarize_rollouts(paths):
     """Aggregate per-file observed statistics; rates are descriptive only."""
     paths = [Path(p) for p in paths]

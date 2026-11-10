@@ -226,3 +226,15 @@ python -m scripts.compare_mixed_rollout_modes \
 対象テスト: `tests/pipelines/evaluation/test_compare_mixed_rollout_modes.py`。
 
 補足: `scripts.compare_mixed_rollout_modes` は初手の物理的的球入球数に加え、Attack系候補のエンコード済みの目標球/目標ポケットと実際の次状態のポケットIDを照合し、**狙ったポケットへの入球**を区別する。SAFETYや目標ポケットのない候補は `N/A` とし、失敗には数えない。Macro局所報酬にはwrong-pocket減点、POSITION加点、次ショット可能性の加点が含まれるため、スコアだけでなくこの物理的結果も確認する。
+
+### 最大訪問数の同点率をまとめる（2026-11-10）
+
+`--root-summary` は `--per-root` と異なり、入力したRollout全体について以下を短く出力する。全て**保存済みデータの読み取りのみ**。
+
+```bash
+python -m scripts.analyze_mixed_rollouts \
+  --rollout-dir artifacts/runs/<run_id>/outputs/budget_10/first \
+  --root-summary
+```
+
+出力には記録root数、個別候補の最高訪問数が同点だったrootの件数・割合、最大visit数が1だった同点rootの件数、登録順で最初の最高visit数候補とは異なる候補が選ばれたroot件数、平均候補数・平均最大訪問数、選択戦術の件数を含む。**探索予算50で同点がどれだけ残るか**を検証するための指標であり、モデル性能の指標ではない。実験の4条件それぞれを指定して比較する。

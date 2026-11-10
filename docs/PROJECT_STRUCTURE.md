@@ -203,3 +203,7 @@ python -m pytest tests/integration/physics/test_fastfiz_simulator.py -q
 ## 9. Phase 5: 複数seedのpaired比較
 
 新たに `scripts/compare_mixed_rollout_modes.py` を追加。既存のRollout `rollout_seed_*.npz` を読み取ってseedと初期状態の一致を検証し、`first` / `empirical_q` の初手選択・局所報酬、完了件数、スコア、スクラッチをまとめる。保存先は `artifacts/runs/<run_id>/outputs/` を推奨し、方式ごとに別ディレクトリを用いる。テストは `tests/pipelines/evaluation/test_compare_mixed_rollout_modes.py`。既存モデルや学習処理は変更しない。詳細は [tests/README.md](../tests/README.md)。
+
+## 10. Phase 5: root同点率の短い集計
+
+`src/pipelines/rollout_analysis.py` に `summarize_root_ties`、`scripts/analyze_mixed_rollouts.py` に `--root-summary` を追加。大量のRolloutを出力1root1行にせず、最大visit数が同点のroot割合・平均候補数・選択戦術数を集計する。例は [tests/README.md](../tests/README.md) を参照。初期seedを揃えた96ゲーム比較の結果と解釈上の限界は [RESEARCH_CONTEXT.md](RESEARCH_CONTEXT.md) §15に記載。

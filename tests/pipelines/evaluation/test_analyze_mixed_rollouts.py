@@ -8,6 +8,7 @@ import pytest
 from scripts.analyze_mixed_rollouts import (
     format_summary,
     format_root_diagnostics,
+    format_root_tie_summary,
     main,
     parse_args,
     resolve_paths,
@@ -15,6 +16,7 @@ from scripts.analyze_mixed_rollouts import (
 from src.pipelines.rollout_analysis import (
     read_rollout,
     read_root_diagnostics,
+    summarize_root_ties,
     summarize_rollouts,
 )
 
@@ -301,4 +303,61 @@ def test_cli_per_root_prints_diagnostic_without_writing(tmp_path, capsys):
     assert "MCTS root choices" in shown
     assert "first-max=True" in shown
     assert "selected-predicted-Q=N/A" in shown
+    assert sorted(p.name for p in tmp_path.iterdir()) == [path.name]
+
+
+def test_root_summary_counts_true_max_ties_and_nonfirst_winners(tmp_path):
+    path = _write(
+        tmp_path / "rollout_seed_9.npz",
+        goals=("DIRECT_ATTACK", "POSITION_ATTACK", "SAFETY"),
+        root_turn=[0, 0, 1, 1, 2, 2],
+        root_visits=[1, 1, 3, 1, 2, 2],
+        root_selected=[True, False, True, False, False, True],
+        root_candidate=np.stack([
+            _choice("DIRECT_ATTACK"), _choice("SAFETY"),
+            _choice("POSITION_ATTACK"), _choice("DIRECT_ATTACK"),
+            _choice("DIRECT_ATTACK"), _choice("SAFETY"),
+        ]),
+    )
+    summary = summarize_root_ties([path])
+    assert summary["recorded_roots"] == 3
+    assert summary["roots_with_max_visit_tie"] == 2
+    assert summary["max_visit_tie_rate"] == pytest.approx(2 / 3)
+    assert summary["roots_tied_at_one_visit"] == 1
+    assert summary["roots_selected_not_first_visit_max"] == 1
+    assert summary["mean_candidate_count_per_root"] == pytest.approx(2)
+    assert summary["mean_max_candidate_visits"] == pytest.approx(2)
+    assert summary["selected_goal_counts"] == {
+        "DIRECT_ATTACK": 1, "POSITION_ATTACK": 1, "SAFETY": 1,
+    }
+    shown = format_root_tie_summary(summary)
+    assert "2/3 (66.7%)" in shown
+    assert "selected candidate NOT first" in shown
+
+
+def test_root_summary_handles_saved_rollout_without_roots(tmp_path):
+    path = _write(
+        tmp_path / "empty.npz", goals=(), stop="no_feasible_macro_candidates"
+    )
+    summary = summarize_root_ties([path])
+    assert summary["recorded_roots"] == 0
+    assert summary["max_visit_tie_rate"] is None
+    assert "N/A (no roots)" in format_root_tie_summary(summary)
+
+
+def test_root_summary_cli_works_without_writing(tmp_path, capsys):
+    path = _write(
+        tmp_path / "rollout_seed_9.npz",
+        goals=("DIRECT_ATTACK",),
+        root_turn=[0, 0],
+        root_candidate=np.stack([
+            _choice("DIRECT_ATTACK"), _choice("SAFETY"),
+        ]),
+        root_visits=[1, 1],
+        root_selected=[True, False],
+    )
+    main(parse_args(["--rollout", str(path), "--root-summary"]))
+    output = capsys.readouterr().out
+    assert "roots with tied highest candidate visits: 1/1 (100.0%)" in output
+    assert "mean candidates per root: 2.00" in output
     assert sorted(p.name for p in tmp_path.iterdir()) == [path.name]

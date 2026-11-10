@@ -7,7 +7,11 @@ import argparse
 import json
 from pathlib import Path
 
-from src.pipelines.rollout_analysis import read_root_diagnostics, summarize_rollouts
+from src.pipelines.rollout_analysis import (
+    read_root_diagnostics,
+    summarize_root_ties,
+    summarize_rollouts,
+)
 
 
 def resolve_paths(*, rollouts=(), directories=(), recursive=False):
@@ -113,6 +117,34 @@ def format_root_diagnostics(details):
     return "\n".join(lines)
 
 
+def format_root_tie_summary(summary):
+    """Short aggregate: tie prevalence, not an MCTS performance estimate."""
+    roots = summary["recorded_roots"]
+    rate = summary["max_visit_tie_rate"]
+    rate_text = f"{rate:.1%}" if rate is not None else "N/A (no roots)"
+    mean_candidates = summary["mean_candidate_count_per_root"]
+    mean_max_visits = summary["mean_max_candidate_visits"]
+    return "\n".join([
+        "=== MCTS root maximum-visit tie summary ===",
+        f"recorded roots: {roots}",
+        f"roots with tied highest candidate visits: "
+        f"{summary['roots_with_max_visit_tie']}/{roots} ({rate_text})",
+        f"of which max visits=1: {summary['roots_tied_at_one_visit']}",
+        f"selected candidate NOT first in highest-visit tie: "
+        f"{summary['roots_selected_not_first_visit_max']}",
+        "mean candidates per root: "
+        + ("N/A" if mean_candidates is None else f"{mean_candidates:.2f}"),
+        "mean highest candidate visits per root: "
+        + ("N/A" if mean_max_visits is None else f"{mean_max_visits:.2f}"),
+        "selected goals: " + ", ".join(
+            f"{name}={count}"
+            for name, count in summary["selected_goal_counts"].items()
+        ),
+        "Note: a first-max mismatch is expected when empirical_q "
+        "resolves an exact visit tie; it does not by itself indicate a bug.",
+    ])
+
+
 def parse_args(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--rollout", type=Path, nargs="+", default=[])
@@ -124,6 +156,10 @@ def parse_args(argv=None):
     parser.add_argument(
         "--per-root", action="store_true",
         help="Print chosen candidate visits, ties and per-goal visits per MCTS root."
+    )
+    parser.add_argument(
+        "--root-summary", action="store_true",
+        help="Print aggregated maximum-visit tie rates without per-root detail."
     )
     return parser.parse_args(argv)
 
@@ -140,6 +176,8 @@ def main(args):
             detail for path in paths for detail in read_root_diagnostics(path)
         ]
         print(format_root_diagnostics(details))
+    if args.root_summary:
+        print(format_root_tie_summary(summarize_root_ties(paths)))
     if args.json_output is not None:
         output = args.json_output
         output.parent.mkdir(parents=True, exist_ok=True)
