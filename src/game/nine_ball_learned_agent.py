@@ -132,6 +132,7 @@ class NineBallMicroSACAgent(GeometryNineBallAgent):
                 shot=goal.explicit_shot,
                 goal_label=f"{goal.kind}_EXPLICIT",
                 target_pocket=goal.target_pocket,
+                macro_goal=goal,
             )
         observation = conditioned_observation_v3(state, goal, context)
         state_tensor = torch.from_numpy(observation).to(self.device).unsqueeze(0)
