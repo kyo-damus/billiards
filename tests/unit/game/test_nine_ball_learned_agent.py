@@ -43,6 +43,8 @@ def test_pretrained_micro_format_loads_and_shoots_all_five_parameters(tmp_path):
     shot = agent.choose_shot(regular)
     assert shot.target_ball == 1
     assert "MICRO_SAC5D" in shot.goal_label
+    assert shot.macro_goal is not None
+    assert shot.macro_goal.target_ball == shot.target_ball
     physical = shot.shot.to_fastfiz_kwargs()
     assert set(physical) == {
         "power", "angle", "cue_elevation_deg", "tip_x_mm", "tip_y_mm"
