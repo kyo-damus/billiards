@@ -17,7 +17,9 @@ from scripts.compare_mixed_rollout_modes import (
 def write_rollout(folder, seed, *, goal="DIRECT_ATTACK", reward=0.0,
                   initial_state=None, score0=0.0, score1=0.0,
                   completed=False, stop="max_turns",
-                  target_pocket=None, actual_pocket=None):
+                  target_pocket=None, actual_pocket=None,
+                  first_root_candidates=None, first_root_visits=None,
+                  first_root_selected=None):
     path = folder / f"rollout_seed_{seed}.npz"
     path.parent.mkdir(parents=True, exist_ok=True)
     state = (
@@ -34,6 +36,14 @@ def write_rollout(folder, seed, *, goal="DIRECT_ATTACK", reward=0.0,
     after = before.copy()
     if actual_pocket is not None:
         after[0, 1] = actual_pocket
+    if first_root_candidates is None:
+        first_root_candidates = chosen.reshape(1, 31)
+    if first_root_visits is None:
+        first_root_visits = np.ones(len(first_root_candidates), dtype=np.int32)
+    if first_root_selected is None:
+        first_root_selected = np.asarray(
+            [True] + [False] * (len(first_root_candidates) - 1), dtype=np.bool_
+        )
     np.savez_compressed(
         path,
         format_version=np.asarray(1),
@@ -50,10 +60,10 @@ def write_rollout(folder, seed, *, goal="DIRECT_ATTACK", reward=0.0,
         macro_local_reward=np.asarray([reward], dtype=np.float32),
         player_before=np.asarray([0], dtype=np.int32),
         player_after=np.asarray([0], dtype=np.int32),
-        root_turn_index=np.asarray([0], dtype=np.int32),
-        root_candidate=chosen.reshape(1, 31),
-        root_visit_count=np.asarray([1], dtype=np.int32),
-        root_selected=np.asarray([True], dtype=np.bool_),
+        root_turn_index=np.zeros(len(first_root_visits), dtype=np.int32),
+        root_candidate=np.asarray(first_root_candidates, dtype=np.float32),
+        root_visit_count=np.asarray(first_root_visits, dtype=np.int32),
+        root_selected=np.asarray(first_root_selected, dtype=np.bool_),
     )
     return path
 
@@ -165,3 +175,72 @@ def test_first_turn_safety_has_no_target_pocket(tmp_path):
     assert report["summary"]["first_target_pot_observed_first"] == 0
     assert report["summary"]["first_target_pot_observed_empirical_q"] == 1
     assert report["per_seed"][0]["first_target_pot_first"] is None
+
+
+
+def test_matched_first_root_ties_identical_search_but_different_winner(tmp_path):
+    """A paired initial board is the fair denominator, not all later roots."""
+    base = tmp_path / "first"
+    alt = tmp_path / "empirical"
+    direct = np.zeros(31, dtype=np.float32)
+    direct[0] = direct[2] = 1.0
+    position = np.zeros(31, dtype=np.float32)
+    position[0] = position[3] = 1.0
+    roots = np.stack([direct, position])
+    write_rollout(
+        base, 95000, goal="DIRECT_ATTACK", reward=0.0,
+        first_root_candidates=roots, first_root_visits=[1, 1],
+        first_root_selected=[True, False],
+    )
+    write_rollout(
+        alt, 95000, goal="POSITION_ATTACK", reward=1.25,
+        first_root_candidates=roots, first_root_visits=[1, 1],
+        first_root_selected=[False, True],
+    )
+    report = compare_paired_rollouts(base, alt)
+    s = report["summary"]
+    assert s["matched_initial_roots"] == 1
+    assert s["matched_initial_roots_with_same_search"] == 1
+    assert s["initial_root_ties_first"] == 1
+    assert s["initial_root_ties_empirical_q"] == 1
+    assert s["initial_root_tied_both"] == 1
+    assert s["initial_root_nonfirst_winner_empirical_q"] == 1
+    assert s["first_action_changed"] == 1
+    assert report["per_seed"][0]["first_root_candidate_count_first"] == 2
+    assert report["per_seed"][0]["first_root_tie_count_empirical_q"] == 2
+    assert "same-root-search=True" in format_comparison(report)
+
+
+def test_detects_different_first_root_search_without_claiming_same_search(tmp_path):
+    base = tmp_path / "first"
+    alt = tmp_path / "empirical"
+    direct = np.zeros(31, dtype=np.float32)
+    direct[0] = direct[2] = 1.0
+    position = np.zeros(31, dtype=np.float32)
+    position[0] = position[3] = 1.0
+    write_rollout(base, 9, goal="DIRECT_ATTACK")
+    write_rollout(
+        alt, 9, goal="DIRECT_ATTACK",
+        first_root_candidates=np.stack([direct, position]),
+        first_root_visits=[1, 1], first_root_selected=[True, False],
+    )
+    report = compare_paired_rollouts(base, alt)
+    assert report["summary"]["matched_initial_roots"] == 1
+    assert report["summary"]["matched_initial_roots_with_same_search"] == 0
+    assert report["summary"]["initial_root_ties_first"] == 0
+    assert report["summary"]["initial_root_ties_empirical_q"] == 1
+
+
+def test_first_root_absent_is_reported_not_imputed(tmp_path):
+    base = tmp_path / "first"
+    alt = tmp_path / "empirical"
+    write_rollout(
+        base, 9, first_root_candidates=np.zeros((0, 31)),
+        first_root_visits=[], first_root_selected=[],
+    )
+    write_rollout(alt, 9)
+    report = compare_paired_rollouts(base, alt)
+    assert report["summary"]["matched_initial_roots"] == 0
+    assert report["summary"]["initial_root_ties_first"] == 0
+    assert report["per_seed"][0]["first_root_search_identical"] is None
+    assert report["per_seed"][0]["first_root_tie_count_first"] is None

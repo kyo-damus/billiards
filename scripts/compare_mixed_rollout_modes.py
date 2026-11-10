@@ -38,6 +38,35 @@ def discover_seeded_rollouts(directory):
     return by_seed
 
 
+def _first_root(path, data):
+    """Return first-decision search diagnostic, plus private candidate arrays.
+
+    Compare this root before trajectories diverge. Do not confuse root
+    visits aggregated across different post-action states with paired data.
+    """
+    turns = np.asarray(data["root_turn_index"])
+    indexes = np.flatnonzero(turns == 0)
+    if not len(indexes):
+        return None
+    visits = np.asarray(data["root_visit_count"])[indexes]
+    candidates = np.asarray(data["root_candidate"])[indexes]
+    selected = np.asarray(data["root_selected"])[indexes]
+    if int(np.count_nonzero(selected)) != 1:
+        raise ValueError(f"{path}: first MCTS root must have one selected row.")
+    max_count = int(np.max(visits))
+    return {
+        "candidate_count": int(len(indexes)),
+        "max_candidate_visits": max_count,
+        "max_visit_tie_count": int(np.count_nonzero(visits == max_count)),
+        "selected_is_first_visit_max": bool(
+            int(np.flatnonzero(selected)[0]) == int(np.argmax(visits))
+        ),
+        # Private, never placed in JSON report.
+        "_candidates": candidates,
+        "_visits": visits,
+    }
+
+
 def _episode(path, seed):
     """Use the strict rollout decoder, then extract matched-run outcomes."""
     info = read_rollout(path)
@@ -90,6 +119,7 @@ def _episode(path, seed):
             "first_action": first_action,
             "first_goal": first_goal,
             "first_reward": float(rewards[0]) if len(rewards) else None,
+            "first_root": _first_root(path, f),
             "first_pocketed_count": first_pocketed_count,
             "first_scratch": first_scratch,
             "first_target_pot": first_target_pot,
@@ -133,8 +163,50 @@ def compare_paired_rollouts(first_dir, empirical_dir):
         if a["first_action"] is not None and b["first_action"] is not None:
             changed = not np.array_equal(a["first_action"], b["first_action"])
             differences.append(b["first_reward"] - a["first_reward"])
+        root_a = a["first_root"]
+        root_b = b["first_root"]
+        roots_present = root_a is not None and root_b is not None
+        same_root_search = (
+            bool(
+                np.array_equal(root_a["_candidates"], root_b["_candidates"])
+                and np.array_equal(root_a["_visits"], root_b["_visits"])
+            )
+            if roots_present else None
+        )
         rows.append({
             "seed": seed,
+            "first_root_both_recorded": roots_present,
+            "first_root_search_identical": same_root_search,
+            "first_root_tied_first": (
+                root_a["max_visit_tie_count"] > 1 if root_a else None
+            ),
+            "first_root_tied_empirical_q": (
+                root_b["max_visit_tie_count"] > 1 if root_b else None
+            ),
+            "first_root_tie_count_first": (
+                root_a["max_visit_tie_count"] if root_a else None
+            ),
+            "first_root_tie_count_empirical_q": (
+                root_b["max_visit_tie_count"] if root_b else None
+            ),
+            "first_root_candidate_count_first": (
+                root_a["candidate_count"] if root_a else None
+            ),
+            "first_root_candidate_count_empirical_q": (
+                root_b["candidate_count"] if root_b else None
+            ),
+            "first_root_max_visit_first": (
+                root_a["max_candidate_visits"] if root_a else None
+            ),
+            "first_root_max_visit_empirical_q": (
+                root_b["max_candidate_visits"] if root_b else None
+            ),
+            "first_root_nonfirst_winner_first": (
+                not root_a["selected_is_first_visit_max"] if root_a else None
+            ),
+            "first_root_nonfirst_winner_empirical_q": (
+                not root_b["selected_is_first_visit_max"] if root_b else None
+            ),
             "first_goal_first": a["first_goal"],
             "first_goal_empirical_q": b["first_goal"],
             "first_candidate_changed": changed,
@@ -161,8 +233,33 @@ def compare_paired_rollouts(first_dir, empirical_dir):
             "game_local_reward_first": a["local_reward_sum"],
             "game_local_reward_empirical_q": b["local_reward_sum"],
         })
+    matched_roots = [
+        row for row in rows if row["first_root_both_recorded"]
+    ]
     summary = {
         "paired_seeds": len(rows),
+        "matched_initial_roots": len(matched_roots),
+        "matched_initial_roots_with_same_search": sum(
+            row["first_root_search_identical"] is True
+            for row in matched_roots
+        ),
+        "initial_root_ties_first": sum(
+            row["first_root_tied_first"] is True
+            for row in matched_roots
+        ),
+        "initial_root_ties_empirical_q": sum(
+            row["first_root_tied_empirical_q"] is True
+            for row in matched_roots
+        ),
+        "initial_root_tied_both": sum(
+            row["first_root_tied_first"] is True
+            and row["first_root_tied_empirical_q"] is True
+            for row in matched_roots
+        ),
+        "initial_root_nonfirst_winner_empirical_q": sum(
+            row["first_root_nonfirst_winner_empirical_q"] is True
+            for row in matched_roots
+        ),
         "pairs_with_first_actions": len(differences),
         "first_action_changed": sum(
             row["first_candidate_changed"] is True for row in rows
@@ -225,6 +322,15 @@ def format_comparison(report):
         f"paired seeds: {s['paired_seeds']} "
         f"first-turn observations: {s['pairs_with_first_actions']} "
         f"first candidate changed: {s['first_action_changed']}",
+        f"matched first-decision MCTS roots: {s['matched_initial_roots']} "
+        f"(identical candidate+visit arrays: "
+        f"{s['matched_initial_roots_with_same_search']})",
+        f"first-root max-visit ties: "
+        f"first={s['initial_root_ties_first']} "
+        f"empirical_q={s['initial_root_ties_empirical_q']} "
+        f"both={s['initial_root_tied_both']}; "
+        f"empirical_q chose nonfirst max: "
+        f"{s['initial_root_nonfirst_winner_empirical_q']}",
         f"first-turn Macro LOCAL reward mean: first={s['mean_first_reward_first']} "
         f"empirical_q={s['mean_first_reward_empirical_q']} "
         f"mean paired difference (new-old)={s['mean_paired_first_reward_difference']}",
@@ -252,6 +358,9 @@ def format_comparison(report):
             f" seed={x['seed']}: "
             f"{x['first_goal_first']} -> {x['first_goal_empirical_q']} "
             f"changed={x['first_candidate_changed']} "
+            f"first-root-ties=({x['first_root_tie_count_first']}, "
+            f"{x['first_root_tie_count_empirical_q']}) "
+            f"same-root-search={x['first_root_search_identical']} "
             f"first-local=({x['first_local_reward_first']}, "
             f"{x['first_local_reward_empirical_q']}) "
             f"target-pot=({x['first_target_pot_first']}, "

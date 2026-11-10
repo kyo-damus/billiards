@@ -238,3 +238,15 @@ python -m scripts.analyze_mixed_rollouts \
 ```
 
 出力には記録root数、個別候補の最高訪問数が同点だったrootの件数・割合、最大visit数が1だった同点rootの件数、登録順で最初の最高visit数候補とは異なる候補が選ばれたroot件数、平均候補数・平均最大訪問数、選択戦術の件数を含む。**探索予算50で同点がどれだけ残るか**を検証するための指標であり、モデル性能の指標ではない。実験の4条件それぞれを指定して比較する。
+
+### 初手rootのseed対応の同点診断（2026-11-10）
+
+既存の `scripts.compare_mixed_rollout_modes` は、各ペアで初手（`root_turn_index=0`）のroot候補行列・visit配列が一致するかを調べ、初手同点数、同点root件数、同点時に先頭以外を選んだ件数を出力する。両方式の**初期盤面が同じ時点のroot**を比較するため、分岐後の全rootをまとめた同点率より直接的な比較となる。初手rootログ欠損は`None`とし、集計の分母から除外する。保存済みNPZの再読取のみでシミュレーションはしない。
+
+```bash
+python -m scripts.compare_mixed_rollout_modes \
+  --first-dir artifacts/runs/<run_id>/outputs/budget_10/first \
+  --empirical-dir artifacts/runs/<run_id>/outputs/budget_10/empirical_q
+```
+
+`matched first-decision MCTS roots`、`identical candidate+visit arrays`、`first-root max-visit ties` の3項目を確認。**訪問数が同じで候補配列まで同一のペア**でのみ、最終同点処理の比較として厳密に扱うことができる。
