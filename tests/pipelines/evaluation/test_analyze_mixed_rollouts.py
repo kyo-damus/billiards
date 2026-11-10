@@ -163,3 +163,68 @@ def test_cli_summary_json_and_no_overwrite(tmp_path, capsys):
     assert json.loads(output.read_text(encoding="utf-8")) == report
     with pytest.raises(FileExistsError, match="Refusing to overwrite"):
         main(args)
+
+def test_root_availability_separates_candidate_generation_from_choice(tmp_path):
+    path = _write(
+        tmp_path / "offered.npz",
+        goals=("DIRECT_ATTACK", "DIRECT_ATTACK", "DIRECT_ATTACK"),
+        root_turn=[0, 0, 1, 1, 2, 2],
+        root_visits=[3, 1, 7, 0, 2, 2],
+        root_selected=[True, False, True, False, True, False],
+        root_candidate=np.stack([
+            _choice("DIRECT_ATTACK"), _choice("POSITION_ATTACK"),
+            _choice("DIRECT_ATTACK"), _choice("SAFETY"),
+            _choice("DIRECT_ATTACK"), _choice("DIRECT_ATTACK"),
+        ]),
+    )
+    summary = summarize_rollouts([path])
+    assert summary["goal_counts"] == {
+        "DIRECT_ATTACK": 3, "POSITION_ATTACK": 0, "SAFETY": 0,
+    }
+    assert summary["root_candidate_counts"] == {
+        "DIRECT_ATTACK": 4, "POSITION_ATTACK": 1, "SAFETY": 1,
+    }
+    assert summary["root_goal_available_turns"] == {
+        "DIRECT_ATTACK": 3, "POSITION_ATTACK": 1, "SAFETY": 1,
+    }
+    assert summary["root_goal_visit_totals"] == {
+        "DIRECT_ATTACK": 14, "POSITION_ATTACK": 1, "SAFETY": 0,
+    }
+    assert summary["roots_with_non_direct_available"] == 2
+    assert summary["roots_direct_chosen_with_non_direct_available"] == 2
+    assert summary["roots_non_direct_chosen"] == 0
+    assert summary["mcts_roots"] == summary["policy_usable_roots"] == 3
+    output = format_summary(summary)
+    assert "MCTS roots offering each goal" in output
+    assert "DIRECT chosen despite alternative: 2" in output
+
+
+def test_root_counts_include_selected_safety_and_missing_root(tmp_path):
+    path = _write(
+        tmp_path / "safety.npz",
+        goals=("SAFETY", "DIRECT_ATTACK"),
+        root_turn=[0, 0],
+        root_visits=[1, 5],
+        root_selected=[False, True],
+        root_candidate=np.stack([
+            _choice("DIRECT_ATTACK"), _choice("SAFETY"),
+        ]),
+    )
+    summary = summarize_rollouts([path])
+    assert summary["mcts_roots"] == 1
+    assert summary["roots_with_non_direct_available"] == 1
+    assert summary["roots_non_direct_chosen"] == 1
+    assert summary["roots_direct_chosen_with_non_direct_available"] == 0
+    assert summary["root_goal_available_turns"]["SAFETY"] == 1
+    assert summary["root_candidate_counts"]["SAFETY"] == 1
+
+
+def test_rejects_corrupt_root_candidate_encoding(tmp_path):
+    path = _write(
+        tmp_path / "invalid_root.npz",
+        goals=("DIRECT_ATTACK",),
+        root_turn=[0], root_visits=[1], root_selected=[True],
+        root_candidate=np.zeros((1, 31), dtype=np.float32),
+    )
+    with pytest.raises(ValueError, match="one-hot"):
+        read_rollout(path)

@@ -171,3 +171,15 @@ python -m scripts.analyze_mixed_rollouts \
 **指標の注意点:** `completed_games` は `rollout_terminated=True` と `stop_reason=game_terminated` を満たす件数（勝率ではない）。ポケット数は、物理状態の的球ポケットフラグが新しく立った回数（狙ったポケットへの成功率ではない）。スクラッチは手球のポケットフラグから算出。局所報酬とゲームスコア差分は別集計。新規の学習・勝敗評価・全pytestスイート実行は含まない。
 
 実装本体: `src/pipelines/rollout_analysis.py`、CLI: `scripts/analyze_mixed_rollouts.py`、関連テスト: `tests/pipelines/evaluation/test_analyze_mixed_rollouts.py`。
+
+### 候補が生成されたか・選ばれたかの分離（2026-11-10）
+
+`analyze_mixed_rollouts` はMCTS rootの `root_candidate`、`root_visit_count`、`root_selected` を使い、DIRECT / POSITION / SAFETYについて候補数、候補が存在したroot数、訪問回数を集計する。**実際に選択された戦術**と区別して表示する。
+
+- `MCTS root candidates`: rootに渡された31D候補の総行数。1rootに同種候補が複数存在できる。
+- `MCTS roots offering each goal`: その種別が1つ以上現れたrootの数（生成回数ではない）。
+- `MCTS visits by goal`: 候補へのroot訪問数の合計（勝率ではない）。
+- `roots offering POSITION or SAFETY`: 非DIRECT候補があるroot数。
+- `DIRECT chosen despite alternative`: 非DIRECT候補も存在したのにDIRECTを実行したroot数。
+
+全rootが記録されている保証のない過去データでは `MCTS roots recorded` と実行ターン数の差にも注意。**候補0件なら生成器が候補を出さなかった/事前に除外された可能性**があるが、それだけで原因を確定できない。候補が存在してDIRECT選択なら、その盤面・そのモデル・そのMCTS設定でDIRECTになった事実を確認できる。学習による改善を示すものではない。

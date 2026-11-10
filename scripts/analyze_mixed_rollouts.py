@@ -47,6 +47,23 @@ def format_summary(summary):
         + str(summary["score_delta_by_player"]),
         f"MCTS roots recorded: {summary['mcts_roots']} "
         f"(usable Policy-visit roots: {summary['policy_usable_roots']})",
+        "MCTS root candidates (candidate rows): " + ", ".join(
+            f"{name}={count}"
+            for name, count in summary["root_candidate_counts"].items()
+        ),
+        "MCTS roots offering each goal: " + ", ".join(
+            f"{name}={count}"
+            for name, count in summary["root_goal_available_turns"].items()
+        ),
+        "MCTS visits by goal (raw counts): " + ", ".join(
+            f"{name}={count}"
+            for name, count in summary["root_goal_visit_totals"].items()
+        ),
+        f"roots offering POSITION or SAFETY: "
+        f"{summary['roots_with_non_direct_available']}  "
+        f"(DIRECT chosen despite alternative: "
+        f"{summary['roots_direct_chosen_with_non_direct_available']}; "
+        f"non-DIRECT chosen: {summary['roots_non_direct_chosen']})",
         "stop reasons: " + (", ".join(
             f"{reason}={count}" for reason, count in summary["stop_reasons"].items()
         )),

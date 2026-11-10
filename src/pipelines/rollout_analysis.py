@@ -32,6 +32,15 @@ def _one_hot_index(vector, *, path, field):
     return index
 
 
+def _goal_name(row, *, path, field):
+    """Decode one 31-D Macro candidate without inferring physical success."""
+    strategy = _one_hot_index(row[:2], path=path, field=f"strategy[{field}]")
+    goal = _one_hot_index(row[2:5], path=path, field=f"goal[{field}]")
+    if (strategy == 1) != (goal == 2):
+        raise ValueError(f"{path}: inconsistent strategy and goal[{field}].")
+    return GOAL_NAMES[goal]
+
+
 def read_rollout(path):
     """Return counters for one versioned NPZ; never modify it."""
     path = Path(path)
@@ -86,18 +95,44 @@ def read_rollout(path):
             raise ValueError(f"{path}: invalid pocket indices.")
 
         goals = Counter({name: 0 for name in GOAL_NAMES})
+        selected_goals = []
         for i, row in enumerate(choice):
-            strategy = _one_hot_index(row[:2], path=path, field=f"strategy[{i}]")
-            goal = _one_hot_index(row[2:5], path=path, field=f"goal[{i}]")
-            if (strategy == 1) != (goal == 2):
-                raise ValueError(f"{path}: inconsistent strategy and goal[{i}].")
-            goals[GOAL_NAMES[goal]] += 1
+            name = _goal_name(row, path=path, field=f"selected-{i}")
+            selected_goals.append(name)
+            goals[name] += 1
 
+        # An MCTS root contains the candidates that were actually offered
+        # to the search. Their presence must not be conflated with selection.
+        root_candidates_by_goal = Counter({name: 0 for name in GOAL_NAMES})
+        root_available_by_goal = Counter({name: 0 for name in GOAL_NAMES})
+        root_visits_by_goal = Counter({name: 0 for name in GOAL_NAMES})
+        non_direct_available_roots = 0
+        direct_chosen_with_non_direct_available = 0
+        non_direct_chosen_roots = 0
         usable_roots = 0
         for index in np.unique(root_turn):
             rows = root_turn == index
             if int(np.count_nonzero(root_selected[rows])) != 1:
                 raise ValueError(f"{path}: MCTS root {index} needs one selected candidate.")
+            offered = set()
+            for j, (candidate, visits) in enumerate(
+                zip(root_candidate[rows], root_visits[rows])
+            ):
+                name = _goal_name(
+                    candidate, path=path, field=f"root-{index}-{j}"
+                )
+                root_candidates_by_goal[name] += 1
+                root_visits_by_goal[name] += int(visits)
+                offered.add(name)
+            for name in offered:
+                root_available_by_goal[name] += 1
+            has_non_direct = bool(offered - {"DIRECT_ATTACK"})
+            non_direct_available_roots += int(has_non_direct)
+            chosen_name = selected_goals[int(index)]
+            direct_chosen_with_non_direct_available += int(
+                has_non_direct and chosen_name == "DIRECT_ATTACK"
+            )
+            non_direct_chosen_roots += int(chosen_name != "DIRECT_ATTACK")
             if np.count_nonzero(rows) >= 2 and np.sum(root_visits[rows]) > 0:
                 usable_roots += 1
 
@@ -116,6 +151,14 @@ def read_rollout(path):
             "score_delta": np.sum(delta, axis=0, dtype=np.float64).tolist(),
             "mcts_roots": int(len(np.unique(root_turn))),
             "policy_usable_roots": usable_roots,
+            "root_candidate_counts": dict(root_candidates_by_goal),
+            "root_goal_available_turns": dict(root_available_by_goal),
+            "root_goal_visit_totals": dict(root_visits_by_goal),
+            "roots_with_non_direct_available": non_direct_available_roots,
+            "roots_direct_chosen_with_non_direct_available": (
+                direct_chosen_with_non_direct_available
+            ),
+            "roots_non_direct_chosen": non_direct_chosen_roots,
         }
 
 
@@ -134,8 +177,14 @@ def summarize_rollouts(paths):
         "turn_switches": 0, "macro_local_reward_sum": 0.0,
         "score_delta_by_player": [0.0, 0.0],
         "mcts_roots": 0, "policy_usable_roots": 0,
+        "roots_with_non_direct_available": 0,
+        "roots_direct_chosen_with_non_direct_available": 0,
+        "roots_non_direct_chosen": 0,
     }
     goals = Counter({name: 0 for name in GOAL_NAMES})
+    root_candidates_by_goal = Counter({name: 0 for name in GOAL_NAMES})
+    root_available_by_goal = Counter({name: 0 for name in GOAL_NAMES})
+    root_visits_by_goal = Counter({name: 0 for name in GOAL_NAMES})
     stops = Counter()
     for path in paths:
         game = read_rollout(path)
@@ -143,6 +192,9 @@ def summarize_rollouts(paths):
         totals["completed_games"] += int(game["completed"])
         totals["total_turns"] += game["turns"]
         goals.update(game["goals"])
+        root_candidates_by_goal.update(game["root_candidate_counts"])
+        root_available_by_goal.update(game["root_goal_available_turns"])
+        root_visits_by_goal.update(game["root_goal_visit_totals"])
         for target, source in (
             ("pocketed_object_balls", "pocketed_object_balls"),
             ("turns_with_pocket", "turns_with_pocket"),
@@ -150,6 +202,12 @@ def summarize_rollouts(paths):
             ("turn_switches", "turn_switches"),
             ("mcts_roots", "mcts_roots"),
             ("policy_usable_roots", "policy_usable_roots"),
+            ("roots_with_non_direct_available", "roots_with_non_direct_available"),
+            (
+                "roots_direct_chosen_with_non_direct_available",
+                "roots_direct_chosen_with_non_direct_available",
+            ),
+            ("roots_non_direct_chosen", "roots_non_direct_chosen"),
             ("macro_local_reward_sum", "local_reward_sum"),
         ):
             totals[target] += game[source]
@@ -164,5 +222,8 @@ def summarize_rollouts(paths):
         totals["macro_local_reward_sum"] / turns if turns else None
     )
     totals["goal_counts"] = dict(goals)
+    totals["root_candidate_counts"] = dict(root_candidates_by_goal)
+    totals["root_goal_available_turns"] = dict(root_available_by_goal)
+    totals["root_goal_visit_totals"] = dict(root_visits_by_goal)
     totals["stop_reasons"] = dict(sorted(stops.items()))
     return totals
