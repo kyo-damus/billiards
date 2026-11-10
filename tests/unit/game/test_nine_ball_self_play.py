@@ -82,6 +82,7 @@ def test_one_completed_match_is_logged_with_actual_winner():
     assert result["shots"] == 1
     assert result["trajectory"][0]["chosen_action"]["target_ball"] == 1
     assert result["trajectory"][0]["state"]["ball_numbers"] == list(range(10))
+    assert "rule_context" in result["trajectory"][0]
 
 
 def test_turn_limit_keeps_unfinished_match_without_fabricated_winner():

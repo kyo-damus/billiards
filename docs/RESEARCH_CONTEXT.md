@@ -333,3 +333,7 @@ sign = +1 (同じプレイヤー) / -1 (相手へ手番交代)
 - 複数ラックの`NineBallMatchSession.step()`はラック勝利後すぐ次の`NineBallRackSession`に置き換えるため、最終ショットの`last_physical`が失われる可能性があった。`MatchSession.last_physical`に毎ショットの物理結果を保存し、JSON収集器はこちらを読むよう修正。ユニット回帰テストを追加。
 - `--matches`で連続試合を収集する際にラックseedが重複しないよう、各試合のseedを`start_seed + index * (2*race_to)`に変更。Race-to-Nは最大`2N-1`ラックなので非重複。
 - 実Nativeの自律ショット統合テストに`precondition_code`のイベント根拠を追加。ユーザーDGXでの実行は未確認。
+
+## 26. 自己対戦データのルール文脈を記録
+
+- Macroの学習時に現在の盤面だけでは合法手・3ファウル等の判断が不足するため、収集JSONの各ターンに`rule_context`（反則連続回数/プッシュアウト可能フラグ）と`next_rule_context`も出力する。モデル側のObservationとしての使用は**まだ未実装**。

@@ -62,6 +62,11 @@ def play_match(
             if cue_placement is None:
                 raise RuntimeError("No valid cue placement found for ball-in-hand.")
         state = match.state
+        context = getattr(match.rack, "context", None)
+        context_before = {
+            "consecutive_fouls": list(context.consecutive_fouls),
+            "push_out_available": bool(context.push_out_available),
+        } if context is not None else None
         plan = agent.choose_shot(state)
         result = match.step(target_ball=plan.target_ball, shot=plan.shot)
         physical = getattr(
@@ -73,6 +78,7 @@ def play_match(
                 - (1 if result.rack_winner is not None else 0),
             "player": player,
             "state": rack_state_json(state),
+            "rule_context": context_before,
             "cue_placement": cue_placement,
             "chosen_action": {
                 "goal_label": plan.goal_label,
@@ -105,6 +111,13 @@ def play_match(
                 "turn_changed": bool(result.turn_changed),
             },
             "next_state": rack_state_json(result.next_state),
+            "next_rule_context": (
+                {
+                    "consecutive_fouls": list(result.next_context.consecutive_fouls),
+                    "push_out_available": bool(result.next_context.push_out_available),
+                }
+                if hasattr(result, "next_context") else None
+            ),
         })
         rack_shots += 1
         if result.rack_winner is not None:
