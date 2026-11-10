@@ -199,3 +199,7 @@ python -m pytest tests/integration/physics/test_fastfiz_simulator.py -q
 - **指標:** ゲーム完了率（勝率ではない）、停止理由、DIRECT/POSITION/SAFETYの選択数、実際の的球ポケット数、手球スクラッチ、手番交代、Macro局所報酬とゲームスコア差分、MCTS root数/Policy訪問教師に使えるroot数。
 - **テスト:** `tests/pipelines/evaluation/test_analyze_mixed_rollouts.py` に6件を追加し、作成時に軽量なローカル検証が成功。**DGX上での新配置テストと既存の実データ集計は未確認**。
 - 詳しいCLI例は [tests/README.md](../tests/README.md) を参照。新たな実験結果を性能向上や実際の勝率として表現しない。
+
+## 9. Phase 5: 複数seedのpaired比較
+
+新たに `scripts/compare_mixed_rollout_modes.py` を追加。既存のRollout `rollout_seed_*.npz` を読み取ってseedと初期状態の一致を検証し、`first` / `empirical_q` の初手選択・局所報酬、完了件数、スコア、スクラッチをまとめる。保存先は `artifacts/runs/<run_id>/outputs/` を推奨し、方式ごとに別ディレクトリを用いる。テストは `tests/pipelines/evaluation/test_compare_mixed_rollout_modes.py`。既存モデルや学習処理は変更しない。詳細は [tests/README.md](../tests/README.md)。

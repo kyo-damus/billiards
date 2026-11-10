@@ -234,3 +234,11 @@ sign = +1 (同じプレイヤー) / -1 (相手へ手番交代)
 - 旧 `outputs/micro/` のGit追跡3モデルは手元とtarバックアップのSHA-256完全一致を確認し、**そのまま保持**。他のモデル・データ・バックアップ・隔離領域にも変更なし。生成物を追跡解除したことはデータ削除を意味しない。
 - このブランチ `refactor-phase9-preserve-20261109` での**仕様を保った保守的リファクタリングは一区切り**。変更範囲・検証結果の詳細は [REFACTORING_PLAN.md](REFACTORING_PLAN.md) と [PHASE4_ARTIFACT_AUDIT.md](PHASE4_ARTIFACT_AUDIT.md) を参照。
 - **次に検討すべき作業:** 検証済み作業ブランチのマージ方針を決めることと、Macro Policy/Q/V・探索・Defenseを含む研究実験の優先度を再整理すること。現時点でmainマージやゲーム勝率改善を実施・実証したとは記載しない。
+
+## 14. 2026-11-10 Phase 5: MCTSルート同点の検出と選択方式の比較
+
+- Phase 5で保存済みMixed Rolloutのreadonly集計を実装。DIRECT/POSITION/SAFETYの候補数・rootごとの有無・訪問数、選択された戦術、終了理由、ゲームスコア差分とMacro局所報酬、最大visitの同点数を分離して集計。
+- ユーザーDGXで新しい分析関連テスト16件PASSED（3.49秒）し、MCTSの同点処理をデフォルト`first`を保ちながら任意の`empirical_q`へ切り替え可能にした。後者は**訪問数最大で同点かつ訪問済みの候補**を観測遷移からの`reward + gamma * turn_sign * child.value`で比較する。これに関するMacro指定31テストPASSED（4.61秒）。現行ルールと重みの仕様は不変更。
+- 既存の反復smoke 2ゲーム（5ターン）ではDIRECT 5回選択。全5 rootで最大visit数1が10候補同点。候補行数はDIRECT48 / POSITION32 / SAFETY20、訪問数合計はDIRECT14 / POSITION32 / SAFETY4。これだけではCandidate PolicyやPOSITIONの強弱は確定できない。
+- **単一seed=94100、初手1ターン、探索10回のpaired結果:** firstではDIRECT選択・Macro LOCAL reward -0.5・簡易スコア +1・的球1個・スクラッチ0。empirical_qではPOSITION選択・Macro LOCAL reward +1.25・同スコア +1・的球1個・スクラッチ0。新方式の初手局所報酬差は +1.75。両方式とも非完了（max_turns=1）。rootの候補数・訪問数分布は同一。これは**1盤面の挙動差**であり、ゲーム勝率や総合性能の改善を示す結果ではない。
+- ユーザーは今後、計算時間・計算量を以前ほど制約しないと明言した。次は学習なしで**複数seed・複数ターン・探索予算10と50のpaired比較**を行う。seed対応を検証するCLI `scripts/compare_mixed_rollout_modes.py` を追加。実機評価はこれから。

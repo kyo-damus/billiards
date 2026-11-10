@@ -207,3 +207,20 @@ python -m scripts.analyze_mixed_rollouts \
 - `scripts/smoke_mixed_hierarchical_rollout.py`、`scripts/collect_mixed_rollouts.py`、`scripts/iterate_mixed_macro_policy.py` にオプションを追加。**指定しなければ旧動作**であり、学習済みモデル・報酬・教師データ定義は変更しない。
 - 比較時は同じcheckpoint・初期seed・探索回数・候補生成条件を指定し、**出力先は必ず別にする**。rootに同点がない場合、両方式の結果は一致する。特定の設定で選択が改善しても性能改善とは言わない。
 - 対象テスト: `tests/unit/macro/test_mixed_candidate_mcts.py`（デフォルト互換・手番符号・visit優先・Q/ prior同点）＋既存MCTS契約テスト。長時間学習は不要。
+
+## 2026-11-10: seedを揃えたMCTS方式の比較
+
+既存の `scripts.collect_mixed_rollouts` で **同じseed集合・同じcheckpoint・同じsimulations・同じmax-turns** を使い、`--root-tie-breaker first` と `--root-tie-breaker empirical_q` のRolloutを**別々のディレクトリ**に保存する。
+
+```bash
+python -m scripts.compare_mixed_rollout_modes \
+  --first-dir artifacts/runs/<run_id>/outputs/first \
+  --empirical-dir artifacts/runs/<run_id>/outputs/empirical_q \
+  --json-output artifacts/runs/<run_id>/outputs/paired_summary.json
+```
+
+比較CLIはread-onlyで、seed集合・NPZの内部seed・初期12D状態の一致を検証する。不一致ならエラーにし、欠損seedを勝手に除外しない。主な指標は、**同じ初期盤面における最初の実行Macro候補と初手の局所報酬差**、ゲーム完了件数、SimplifiedGameRulesのプレイヤー別累積スコア差分、スクラッチ回数。ペアごとの記録をJSONにも保存できる（既存ファイルは上書き拒否）。
+
+**注意:** ゲーム完了率は勝率ではない（スクラッチでも簡易ルール上の終了となる）。異なる政策の軌跡長が違えば累積のMacro局所報酬を単純に優劣へ結びつけられない。探索回数10と50などの予算を変える比較では、予算ごとに分けて上記のseed対応比較を実行する。実行後の性能結論はユーザーDGXログを確認してから記録する。
+
+対象テスト: `tests/pipelines/evaluation/test_compare_mixed_rollout_modes.py`。
