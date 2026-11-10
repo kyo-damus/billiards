@@ -307,3 +307,40 @@ def test_empirical_q_tie_breaker_preserves_visit_primary_and_prior_secondary():
 def test_root_tie_breaker_rejects_invalid_name():
     with pytest.raises(ValueError, match="root_tie_breaker"):
         make_mcts(root_tie_breaker="unknown")
+
+
+def test_select_action_resolves_real_search_visit_tie_without_fastfiz():
+    """End-to-end search selects later Safety only in opt-in mode."""
+    attack, safety = make_candidates()
+
+    class FavorSafetyTransition:
+        def step(self, state, candidate):
+            return MacroTransitionResult(
+                next_state=make_state(player=1),
+                reward=0.8 if candidate == safety else 0.1,
+                terminated=True,
+            )
+
+    def search_choice(mode):
+        mcts = MCTS(
+            policy_network=None,
+            value_network=ZeroValue(),
+            action_generator=FixedGenerator([]),
+            root_action_generator=FixedGenerator([attack, safety]),
+            transition_model=FavorSafetyTransition(),
+            simulations=2,
+            candidate_mode=True,
+            candidate_encoding_version=2,
+            uniform_candidate_priors=True,
+            turn_aware=True,
+            root_min_visits_before_puct=1,
+            root_tie_breaker=mode,
+            device="cpu",
+        )
+        choice = mcts.select_action(make_state())
+        visits = [child.visit_count for child in mcts.last_root.children.values()]
+        assert visits == [1, 1]
+        return choice
+
+    assert search_choice("first") == attack
+    assert search_choice("empirical_q") == safety
