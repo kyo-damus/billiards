@@ -15,10 +15,9 @@ def test_alternate_break_and_race_to_three():
     assert s2.rack_wins == (1, 1)
     assert s2.next_breaker == 0
     m.finish_rack(1)
-    m.finish_rack(1)
     end = m.finish_rack(1)
     assert end.rack_wins == (1, 3)
-    assert end.racks_completed == 5
+    assert end.racks_completed == 4
     assert end.finished
     assert end.match_winner == 1
     assert end.next_breaker is None
