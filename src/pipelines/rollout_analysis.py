@@ -162,6 +162,84 @@ def read_rollout(path):
         }
 
 
+def read_root_diagnostics(path):
+    """Inspect the actual per-candidate MCTS decision, without simulating.
+
+    The selection algorithm chooses the *first* root candidate tied for
+    the maximum individual visit count, not the most-visited goal category.
+    A recorded discrepancy is flagged rather than silently repaired.
+    """
+    path = Path(path)
+    read_rollout(path)  # Verify the version, shapes, selection and encoding.
+    with np.load(path, allow_pickle=False) as data:
+        turns = np.asarray(data["root_turn_index"])
+        candidates = np.asarray(data["root_candidate"])
+        visits = np.asarray(data["root_visit_count"])
+        selected = np.asarray(data["root_selected"])
+        priors = (
+            np.asarray(data["root_prior"])
+            if "root_prior" in data else None
+        )
+        predictions = (
+            np.asarray(data["root_predicted_q"])
+            if "root_predicted_q" in data else None
+        )
+
+        if priors is not None and priors.shape != visits.shape:
+            raise ValueError(f"{path}: invalid root_prior shape.")
+        if predictions is not None and predictions.shape != visits.shape:
+            raise ValueError(f"{path}: invalid root_predicted_q shape.")
+
+        results = []
+        for turn in np.unique(turns):
+            indices = np.flatnonzero(turns == turn)
+            local_visits = visits[indices]
+            selected_indices = np.flatnonzero(selected[indices])
+            if len(selected_indices) != 1:
+                raise ValueError(f"{path}: invalid root selection for turn {turn}.")
+            chosen_index = int(selected_indices[0])
+            first_max_index = int(np.argmax(local_visits))
+            max_visits = int(local_visits[first_max_index])
+            tied = int(np.count_nonzero(local_visits == max_visits))
+            selected_row = int(indices[chosen_index])
+
+            counts = Counter({name: 0 for name in GOAL_NAMES})
+            visit_totals = Counter({name: 0 for name in GOAL_NAMES})
+            for candidate, count in zip(candidates[indices], local_visits):
+                name = _goal_name(candidate, path=path, field=f"root-{turn}")
+                counts[name] += 1
+                visit_totals[name] += int(count)
+
+            chosen_name = _goal_name(
+                candidates[selected_row], path=path, field=f"chosen-root-{turn}"
+            )
+            predicted = (
+                None if predictions is None
+                else float(predictions[selected_row])
+            )
+            if predicted is not None and not np.isfinite(predicted):
+                predicted = None
+            results.append({
+                "path": str(path),
+                "turn_index": int(turn),
+                "selected_goal": chosen_name,
+                "selected_visits": int(local_visits[chosen_index]),
+                "max_candidate_visits": max_visits,
+                "max_visit_tie_count": tied,
+                "selected_is_first_visit_max": bool(
+                    chosen_index == first_max_index
+                ),
+                "candidate_count": len(indices),
+                "candidate_counts_by_goal": dict(counts),
+                "visits_by_goal": dict(visit_totals),
+                "selected_prior": (
+                    None if priors is None else float(priors[selected_row])
+                ),
+                "selected_predicted_q": predicted,
+            })
+        return results
+
+
 def summarize_rollouts(paths):
     """Aggregate per-file observed statistics; rates are descriptive only."""
     paths = [Path(p) for p in paths]

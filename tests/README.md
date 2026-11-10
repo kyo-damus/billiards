@@ -183,3 +183,16 @@ python -m scripts.analyze_mixed_rollouts \
 - `DIRECT chosen despite alternative`: 非DIRECT候補も存在したのにDIRECTを実行したroot数。
 
 全rootが記録されている保証のない過去データでは `MCTS roots recorded` と実行ターン数の差にも注意。**候補0件なら生成器が候補を出さなかった/事前に除外された可能性**があるが、それだけで原因を確定できない。候補が存在してDIRECT選択なら、その盤面・そのモデル・そのMCTS設定でDIRECTになった事実を確認できる。学習による改善を示すものではない。
+
+### rootごとの最終決定・訪問数同点の確認（2026-11-10）
+
+`src/macro/mcts.py` の `select_action` は**戦術ごとの訪問数合計ではなく、各候補の訪問数が最大の行動**を選ぶ。`max` の同点はrootの候補登録順で最初のものが選ばれる。未訪問候補の探索を優先する設定と少数simulationsの組み合わせでは、この同点が起こり得る。
+
+```bash
+python -m scripts.analyze_mixed_rollouts \
+  --rollout-dir macro_policy_iteration_smoke --recursive --per-root
+```
+
+`--per-root` は各rootの選択戦術、選択候補のvisit数、個別最大visit数、最大値同点の候補数、選択候補が最初の最大候補か、戦術ごとの候補数・visit数を表示する。`selected-prior` と `selected-predicted-Q` はログに存在すれば表示（後者は**ニューラルネットワークの保存された予測値**であり、MCTSのback-up Qや実際の報酬ではない）。過去の一部データには予測値が存在しないこともある。
+
+この診断は**read-only**で、行動の選択規則やPolicy/Q/Vの学習を変更しない。訪問数同点の実例があるかどうかは既存Rolloutの実出力を確認するまで断定しない。

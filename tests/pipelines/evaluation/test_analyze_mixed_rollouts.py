@@ -7,11 +7,16 @@ import pytest
 
 from scripts.analyze_mixed_rollouts import (
     format_summary,
+    format_root_diagnostics,
     main,
     parse_args,
     resolve_paths,
 )
-from src.pipelines.rollout_analysis import read_rollout, summarize_rollouts
+from src.pipelines.rollout_analysis import (
+    read_rollout,
+    read_root_diagnostics,
+    summarize_rollouts,
+)
 
 
 def _choice(goal):
@@ -228,3 +233,72 @@ def test_rejects_corrupt_root_candidate_encoding(tmp_path):
     )
     with pytest.raises(ValueError, match="one-hot"):
         read_rollout(path)
+
+
+def test_per_root_identifies_first_max_ties_and_per_candidate_visits(tmp_path):
+    path = _write(
+        tmp_path / "rollout_seed_5.npz",
+        goals=("DIRECT_ATTACK", "POSITION_ATTACK"),
+        root_turn=[0, 0, 0, 1, 1],
+        root_visits=[1, 1, 0, 2, 1],
+        root_selected=[True, False, False, True, False],
+        root_candidate=np.stack([
+            _choice("DIRECT_ATTACK"), _choice("POSITION_ATTACK"),
+            _choice("SAFETY"), _choice("POSITION_ATTACK"),
+            _choice("DIRECT_ATTACK"),
+        ]),
+        root_prior=np.asarray([0.3, 0.4, 0.3, 0.6, 0.4]),
+        root_predicted_q=np.asarray([0.2, 0.8, np.nan, 0.1, 0.4]),
+    )
+    details = read_root_diagnostics(path)
+    assert len(details) == 2
+    assert details[0]["max_visit_tie_count"] == 2
+    assert details[0]["selected_goal"] == "DIRECT_ATTACK"
+    assert details[0]["selected_is_first_visit_max"]
+    assert details[0]["candidate_count"] == 3
+    assert details[0]["visits_by_goal"] == {
+        "DIRECT_ATTACK": 1, "POSITION_ATTACK": 1, "SAFETY": 0,
+    }
+    assert details[0]["selected_prior"] == pytest.approx(0.3)
+    assert details[0]["selected_predicted_q"] == pytest.approx(0.2)
+    assert details[1]["max_visit_tie_count"] == 1
+    assert details[1]["selected_goal"] == "POSITION_ATTACK"
+    assert details[1]["selected_is_first_visit_max"]
+    shown = format_root_diagnostics(details)
+    assert "root ties for maximum individual visits: 1/2" in shown
+    assert "selected=POSITION_ATTACK" in shown
+    assert "selected-predicted-Q=+0.2000" in shown
+
+
+def test_per_root_flags_selection_mismatch_without_relabeling(tmp_path):
+    path = _write(
+        tmp_path / "rollout_seed_6.npz",
+        goals=("DIRECT_ATTACK",),
+        root_turn=[0, 0],
+        root_visits=[2, 2],
+        root_selected=[False, True],
+        root_candidate=np.stack([
+            _choice("SAFETY"), _choice("DIRECT_ATTACK"),
+        ]),
+    )
+    detail = read_root_diagnostics(path)[0]
+    assert detail["selected_visits"] == detail["max_candidate_visits"] == 2
+    assert detail["max_visit_tie_count"] == 2
+    assert not detail["selected_is_first_visit_max"]
+    assert detail["selected_predicted_q"] is None
+    assert "recorded selections different from first max: 1" in format_root_diagnostics([detail])
+
+
+def test_cli_per_root_prints_diagnostic_without_writing(tmp_path, capsys):
+    path = _write(
+        tmp_path / "rollout_seed_7.npz",
+        goals=("DIRECT_ATTACK",),
+        root_turn=[0], root_visits=[1], root_selected=[True],
+        root_candidate=np.stack([_choice("DIRECT_ATTACK")]),
+    )
+    main(parse_args(["--rollout", str(path), "--per-root"]))
+    shown = capsys.readouterr().out
+    assert "MCTS root choices" in shown
+    assert "first-max=True" in shown
+    assert "selected-predicted-Q=N/A" in shown
+    assert sorted(p.name for p in tmp_path.iterdir()) == [path.name]
