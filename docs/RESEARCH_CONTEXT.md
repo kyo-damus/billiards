@@ -337,3 +337,10 @@ sign = +1 (同じプレイヤー) / -1 (相手へ手番交代)
 ## 26. 自己対戦データのルール文脈を記録
 
 - Macroの学習時に現在の盤面だけでは合法手・3ファウル等の判断が不足するため、収集JSONの各ターンに`rule_context`（反則連続回数/プッシュアウト可能フラグ）と`next_rule_context`も出力する。モデル側のObservationとしての使用は**まだ未実装**。
+
+## 27. 2026-11-10 Phase 8: 多球エージェントのv3入力・候補の契約
+
+- 9ball対戦収集（非学習幾何Agent）のユーザーログ: unit/integration計10 PASSED (0.33秒)。seed310000が2-0で39ショット/9ファウルで終端、seed310004は1-0で51ショット/8ファウルの打切り。集計は**1/2マッチ完了、計3ラック、90ショット、17ファウル**。この結果はRL性能ではない。既存JSONは保管。
+- 次の主要課題は多球用Macro/Microの**入力次元・球ID**契約。旧12D/31D Macro、9D観測+2D MicroのCheckpointを新10球で読むことはできないため、`src/game/nine_ball_encoding_v3.py` にv3専用 `encode_rack_v3`（実球番号0..15の固定16枠+ルール文脈=72D）、`encode_goal_v3`（BREAK/DIRECT/POSITION/SAFETY、球ID、ポケット、停止目標、明示shot=36D）、Micro結合108Dの仕様を新設。球数が違う練習盤面も同次元のpad表現で受け取れる。
+- `generate_nine_ball_goals` は、9ballの最小番号球をfirst contactの前提とし、break/直接ポケット/次球位置/簡易safety候補を列挙する**学習・MCTS未接続**の入口。選択戦術の出現率は強制しない。POSITION目標やSAFETYの現内容は仮の幾何値であり最適性を示さない。
+- GPUは共有8×32000MiB、原則1GPU・空き確認後最大2枚。データからの学習を次に接続する。

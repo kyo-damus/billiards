@@ -375,3 +375,13 @@ python -m scripts.collect_nine_ball_self_play \
 ```
 
 性能主張は禁止：この時点ではMacro学習・SAC学習済みポリシーは接続されていない。また公式WPAルールの例外が残る。
+
+## 2026-11-10: v3多球状態・Macro候補 / Micro条件付き入力
+
+新旧入力の混同禁止。`src/game/nine_ball_encoding_v3.py` の`MACRO_STATE_V3_DIM=72`、`MACRO_GOAL_V3_DIM=36`、`MICRO_CONDITIONED_V3_DIM=108`は、0..15番球の固定枠、現在プレイヤー、手球自由配置、ブレイク、3ファウル等のルール文脈、BREAK/DIRECT/POSITION/SAFETY戦術候補を表現する**新形式**。旧12D/31D/2D学習済みモデルをこの形式へ流用しない。
+
+```bash
+python -m pytest tests/unit/game/test_nine_ball_encoding_v3.py -v
+```
+
+9-ballのPosition/Safety候補は暫定幾何値。戦術の出現割合を強制しない。将来の新Macro Policy/Q/V・5D Micro SACをこの次元へ接続する。
