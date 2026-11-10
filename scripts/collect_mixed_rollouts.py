@@ -192,6 +192,10 @@ def parse_args():
     parser.add_argument("--residual-checkpoint", required=True)
     parser.add_argument("--candidate-value-checkpoint", required=True)
     parser.add_argument("--candidate-policy-checkpoint")
+    parser.add_argument(
+        "--state-value-checkpoint",
+        help="Optional trained state V; otherwise MCTS uses zero leaf value.",
+    )
     parser.add_argument("--games", type=int, default=2)
     parser.add_argument("--start-seed", type=int, default=94000)
     parser.add_argument("--max-turns", type=int, default=3)

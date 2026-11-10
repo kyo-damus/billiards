@@ -264,3 +264,24 @@ python -m pytest \
 ```
 
 ここで実装は一度止め、ゼミ発表を優先する。結果・限界・今後の課題は [SEMINAR_PHASE5_MCTS_20261110.md](../docs/SEMINAR_PHASE5_MCTS_20261110.md) を参照。
+
+
+## Phase 6: 全階層の学習→独立評価を一括で実行する
+
+`scripts/run_full_hierarchical_experiment.py` は、既存のmixed policy iteration（Candidate Policy訪問学習、完了ゲームからのCandidate Q/State V更新）を実行し、同じ未使用seed集合で **学習前と学習後の階層モデル** を比較する。Macro Policy/Q/V、MCTS、Goal-conditioned Micro（base + residual）、FastFiz、簡易ゲームルールを接続する。
+
+- `scripts/collect_mixed_rollouts.py` は従来のZeroValueデフォルトに加え、`--state-value-checkpoint`を受け付ける（**変更前は評価CLIからVを指定できなかった**）。
+- 学習seedと評価seedは重複を拒否し、全成果物を新規`--output-dir`以下に分離する。実験ディレクトリ既存時は上書き拒否。checkpointの上書きは行わない。
+- `--update-critics`（デフォルト）では完了ゲームが2件以上の反復だけQ/V更新。最後の反復でスキップされた場合は、最後に成功したQ/Vまたは初期チェックポイントを評価に使う。
+- `--no-update-critics`でPolicyのみ更新することもできるが、当面は全構成要素をつなぐ実験を優先する。
+- **注意:** 既存の反復学習は訪問教師から毎反復Policyを初期化し、Criticは完了ゲームの実行済みリターンで学習し直す方式。まだ洗練された大規模on-policy actor-criticではない。初期のMacro Q教師（全候補2-step）とは教師の意味が異なる。
+- **重要:** これはまだ手球1・的球2の簡易ルール下の全階層統合実験であり、一般的な公式ビリヤード勝率の比較ではない。学習前後の比較は最小の総合実験で、最終的な論文用には対照方式（例：DIRECTのみ、探索なし等）を同一条件で評価する必要がある。
+
+```bash
+python -m pytest \
+  tests/pipelines/evaluation/test_run_full_hierarchical_experiment.py \
+  tests/pipelines/rollout/test_collect_mixed_rollouts.py \
+  tests/pipelines/macro/test_iterate_mixed_macro_policy.py -v
+```
+
+ゼミまでの局所アブレーションは増やさず、まず最小の全体学習・独立評価を接続し、本番実験へ進む。
