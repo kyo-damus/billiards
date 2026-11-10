@@ -20,6 +20,7 @@ from src.game.nine_ball_encoding_v3 import (
 )
 from src.game.nine_ball_rules import NineBallContext, NineBallRules
 from src.game.nine_ball_session import NineBallRackSession
+from src.game.rack_state import TableGameConfig
 
 
 @dataclass
@@ -71,10 +72,7 @@ class NineBallMCTS:
         self.value = value_network
         self.device = micro_agent.device
         self.simulator = simulator or MultiBallFastFizSimulator(
-            # The exact nine-ball inventory is fixed by v3.
-            __import__(
-                "src.game.rack_state", fromlist=["TableGameConfig"]
-            ).TableGameConfig.nine_ball_inventory()
+            TableGameConfig.nine_ball_inventory()
         )
         self.rules = rules or NineBallRules()
         self.simulations = simulations
@@ -237,7 +235,9 @@ class NineBallMCTS:
             "uses_learned_state_v": self.value is not None,
             "uses_selected_action_q": False,
             "root_candidates": len(root.edges),
-            "chosen_index": root.edges.index(chosen),
+            "chosen_index": next(
+                i for i, edge in enumerate(root.edges) if edge is chosen
+            ),
             "root_visits": [edge.visits for edge in root.edges],
             "root_priors": [edge.prior for edge in root.edges],
             "root_empirical_q": [edge.q for edge in root.edges],
