@@ -411,3 +411,17 @@ sign = +1 (同じプレイヤー) / -1 (相手へ手番交代)
 - 探索中に反則でball-in-handとなった場合、既存のNineBallRackSessionと幾何配置候補で物理的に合法な手球配置を再現する。手球配置の戦術最適化は未対応。
 - 自己対戦CLIに `--agent-kind micro_mcts` と探索回数・深さ・State Vを渡す引数を追加。選択Goalとroot訪問分布等をJSON保存して将来のPolicy訪問教師として利用できる形にした。ただし教師生成・Policy反復学習はまだ未実装。
 - `docs/PHASE13_NINE_BALL_MCTS_V3.md` に設計とDGXテスト/1試合smokeの実行手順。**コードはGitHubへコミット済みだが、DGX関連pytestと実物理MCTSはまだ未検証。** 中間seedの不足、V未校正、反則勝敗の偏りを改善したと主張しない。
+
+## 37. 2026-11-10 Phase 13: DGXで初の9-ball物理MCTS実行確認
+
+- DGXで指定関連テスト**24件PASSED（4.42秒）**。
+- 学習済みMacro Candidate Policy v3と固定Micro 5D、State V v3を用いたPUCT探索（8 simulations、最大深さ2）で、9-ball自己対戦**1試合完走（seed 450000、5ショット、1反則、勝者player0）**。MCTS→物理→ルールまでの接続確認であり、改善の証拠ではない。
+- 実行履歴とroot訪問分布は `artifacts/runs/phase13_nineball_mcts_smoke_v1/outputs/` に保存。1試合なので訪問Policyの試合単位train/validation分割には単独で不足。
+
+## 38. 2026-11-10 Phase 14: MCTS訪問分布によるMacro Policy更新（DGX未実行）
+
+- 新作業ブランチ `phase14-nineball-mcts-visits-policy`（Phase13から分岐）。
+- `scripts/build_nine_ball_mcts_visit_dataset_v3.py` は保存済み対戦rootの候補v3特徴、訪問数、事前確率、選択候補の厳密一致、simulations数との整合性を検証して、盤面ごとのPolicy教師データを生成。未完了試合もroot訪問教師として利用可能（終端MCリターンとは異なる）。単一候補rootは既定で除外。候補戦術の出現割合は強制しない。
+- `scripts/train_nine_ball_macro_visits_v3.py`: v3 Candidate Policyの既存重みを任意の初期値として読み、MCTS訪問分布へのlistwise CEで更新。検証はmatch seed単位。初期checkpointと比較し、検証CEが悪化した場合は更新前の重みを保持。保存形式は従来のv3 Policy互換。
+- **MCTS方策の教師あり蒸留**であり、対戦勝率改善、Q/Vの更新、反復学習ループ完成を意味しない。微小な学習・検証データでのCE改善を本実験の結論としない。
+- 実装/検証コマンドは `docs/PHASE14_NINE_BALL_VISIT_POLICY.md`。GitHubへのコミットは完了、DGXのpytest・ネイティブ自己対戦・訪問データ生成・学習実行は**未確認**。
