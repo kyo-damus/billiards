@@ -250,3 +250,17 @@ python -m scripts.compare_mixed_rollout_modes \
 ```
 
 `matched first-decision MCTS roots`、`identical candidate+visit arrays`、`first-root max-visit ties` の3項目を確認。**訪問数が同じで候補配列まで同一のペア**でのみ、最終同点処理の比較として厳密に扱うことができる。
+
+
+## 2026-11-10: Phase 5ゼミ前の区切り
+
+`tests/unit/macro/test_mixed_candidate_mcts.py` に「同じ最大visit数の場合、DIRECT / POSITION / SAFETYのいずれも観測Qが最高なら選べる」「DIRECTが候補リストの最後でも探索から選べる」回帰テストを追加。**これは行動選択比率の調整ではなく、戦術の均等化を強制していない仕様の確認**。
+
+```bash
+python -m pytest \
+  tests/unit/macro/test_mixed_candidate_mcts.py \
+  tests/unit/macro/test_candidate_mcts.py \
+  tests/pipelines/macro/test_iterate_mixed_macro_policy.py -v
+```
+
+ここで実装は一度止め、ゼミ発表を優先する。結果・限界・今後の課題は [SEMINAR_PHASE5_MCTS_20261110.md](../docs/SEMINAR_PHASE5_MCTS_20261110.md) を参照。

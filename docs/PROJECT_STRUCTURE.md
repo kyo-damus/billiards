@@ -60,6 +60,7 @@
 ├── docs/                            # 研究方針・設計・保全記録
 │   ├── PROJECT_STRUCTURE.md         # ★この文書（構成と管理の正本）
 │   ├── RESEARCH_CONTEXT.md          # 研究目的・実装状況の引き継ぎ
+│   ├── SEMINAR_PHASE5_MCTS_20261110.md # ゼミ前のMCTS検証結果と限界
 │   ├── CHAT_HANDOFF_PROMPT.md       # 新しいチャットへの移行文面
 │   ├── REFACTORING_PLAN.md          # 整理の変更・テスト履歴
 │   ├── PHASE4_ARTIFACT_AUDIT.md     # CMake・モデル保全の詳細
@@ -207,3 +208,8 @@ python -m pytest tests/integration/physics/test_fastfiz_simulator.py -q
 ## 10. Phase 5: root同点率の短い集計
 
 `src/pipelines/rollout_analysis.py` に `summarize_root_ties`、`scripts/analyze_mixed_rollouts.py` に `--root-summary` を追加。大量のRolloutを出力1root1行にせず、最大visit数が同点のroot割合・平均候補数・選択戦術数を集計する。例は [tests/README.md](../tests/README.md) を参照。初期seedを揃えた96ゲーム比較の結果と解釈上の限界は [RESEARCH_CONTEXT.md](RESEARCH_CONTEXT.md) §15に記載。
+
+
+## 11. Phase 5区切り（2026-11-10）
+
+今週のゼミ向けに実装・実験を一旦停止。リファクタリング・MCTS同点処理・seed対応96ゲーム実験・報酬設計の限界を [SEMINAR_PHASE5_MCTS_20261110.md](SEMINAR_PHASE5_MCTS_20261110.md) にまとめた。戦術別の選択割合を均等化する処理は追加しない。回帰テストは `tests/unit/macro/test_mixed_candidate_mcts.py` に追記。既存モデルや生成データを変更しない。

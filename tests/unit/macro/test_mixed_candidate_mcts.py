@@ -344,3 +344,73 @@ def test_select_action_resolves_real_search_visit_tie_without_fastfiz():
 
     assert search_choice("first") == attack
     assert search_choice("empirical_q") == safety
+
+
+@pytest.mark.parametrize(
+    "best_goal",
+    ("DIRECT_ATTACK", "POSITION_ATTACK", "SAFETY"),
+)
+def test_empirical_q_tie_never_forces_goal_type_distribution(best_goal):
+    """All three goals can win an equal-visit root if observed Q is highest."""
+    direct, safety = make_candidates()
+    position = MacroCandidate(
+        action=MacroAction(Strategy.ATTACK, 0, 1),
+        goal=TacticalGoal(
+            TacticalGoalType.POSITION_ATTACK,
+            target_ball=0,
+            target_pocket=1,
+            cue_target_position=(0.6, 0.4),
+            cue_target_radius=0.1,
+        ),
+    )
+    candidates = (
+        ("SAFETY", safety),
+        ("POSITION_ATTACK", position),
+        ("DIRECT_ATTACK", direct),
+    )
+    mcts, _, _, _ = make_mcts(root_tie_breaker="empirical_q")
+    root = MCTSNode(state=make_state())
+    for name, candidate in candidates:
+        root.children[candidate] = MCTSNode(
+            state=make_state(player=1),
+            visit_count=1,
+            reward=1.0 if name == best_goal else 0.0,
+            predicted_q=-10.0 if name == best_goal else 10.0,
+            prior=1.0 / 3.0,
+            terminated=True,
+        )
+    chosen = mcts._select_root_action(root)
+    assert chosen.goal.goal_type.name == best_goal
+    assert all(child.visit_count == 1 for child in root.children.values())
+
+
+def test_opt_in_mcts_search_can_select_direct_even_if_listed_last():
+    """End-to-end search cannot impose anti-DIRECT balancing."""
+    direct, safety = make_candidates()
+
+    class PreferDirectTransition:
+        def step(self, state, action):
+            return MacroTransitionResult(
+                next_state=make_state(player=1),
+                reward=0.8 if action == direct else 0.1,
+                terminated=True,
+            )
+
+    mcts = MCTS(
+        policy_network=None,
+        value_network=ZeroValue(),
+        action_generator=FixedGenerator([]),
+        root_action_generator=FixedGenerator([safety, direct]),
+        transition_model=PreferDirectTransition(),
+        simulations=2,
+        candidate_mode=True,
+        candidate_encoding_version=2,
+        uniform_candidate_priors=True,
+        turn_aware=True,
+        root_min_visits_before_puct=1,
+        root_tie_breaker="empirical_q",
+        device="cpu",
+    )
+    chosen = mcts.select_action(make_state())
+    assert [child.visit_count for child in mcts.last_root.children.values()] == [1, 1]
+    assert chosen == direct
