@@ -365,3 +365,18 @@ sign = +1 (同じプレイヤー) / -1 (相手へ手番交代)
 - 原因: `Shot5DDecoder`は半径12.0mmの円境界まで撞点を許し、PythonからC++のfloat32へ変換した際に`a*a+b*b`が144.0fを僅かに超え得る。C++ `BilliardSimulatorMulti::step`は厳密な`>144.0f`を拒否。保存前に失敗したためモデルは未出力。乱数warmup 5000候補の数値検証では81件がこの境界を超える例を確認。
 - 修正: `Shot5DDecoder.decode`の有効な最大撞点半径を`min(tip_radius_mm, 11.99)`に制限する。FastFizの厳密な12mm判定は変更しない。CPUでfloat32変換境界の回帰テスト、実native版の回帰テストを追加。隔離CMakeバイナリの再ビルドは不要。
 - **DGXでの修正後の学習・テストは未確認。** まず関連テスト→5000stepを再実行。GPUは既存`CUDA_VISIBLE_DEVICES`の1枚指定を継承。
+
+## 31. 2026-11-10 Phase 8: DGXで確認した5D Micro初期学習と自己対戦
+
+- ユーザーがv3/108D→5D Micro SACを5,000 steps学習し、`artifacts/runs/phase8_micro5d_first/outputs/micro_sac_5d.pt`を保存。学習中500-step窓の最終平均報酬 -0.3401、正しい目標ポケットへの入球率 0.040。これは学習時・直近500 shotsの値で、未知盤面の性能や対戦勝率ではない。
+- 関連する学習・自己対戦テスト7件がDGXでPASSED（3.02秒）。
+- 学習済みMicroと幾何Macroで9-ball自己対戦3試合が全完走（seed 420000,420002,420004）。計3ラック、56ショット、18ファウル。保存先 `artifacts/runs/phase8_micro5d_selfplay_smoke_v1/outputs/`。これは接続・完走確認であり戦術性能の証拠ではない。
+
+## 32. 2026-11-10 Phase 11: 9-ball用Macro Policy v3教師・学習経路（DGX未検証）
+
+- 新作業ブランチ `phase11-nineball-macro-v3-bootstrap` を `phase10-rollout-analysis-20261110` から分岐。既存の旧Macro v2重みと現行v3 Microを上書きしない。
+- `NineBallMicroSACAgent.plan_goal` で**任意の指定候補Goal**を固定した5D Microから物理ショットへ変換可能にした。デフォルトの`choose_shot`は維持。
+- `scripts/build_nine_ball_macro_oracle.py`: 実観測された非ブレイク前状態・rule contextだけを読み、全候補を同じ盤面からFastFizで一手実行して局所教師を作る。選択結果や保存next_stateは教師に使わない。SAFETYの相手脅威評価は未導入、暫定的に合法なSAFETYを0点とする。
+- `scripts/train_nine_ball_macro_policy_v3.py`: 72D状態+36D Goal候補のネットワークを、教師スコアsoftmaxへのlistwise CEで訓練。match seedごとにtrain/validation分離。出力チェックポイントをv3専用タグで保存し、既存の9-ball学習済みエージェントのMacro読み込み口につなぐ。
+- **これは一手物理教師からの教師ありPolicy bootstrapであり、RLのMacro Q/VでもMCTSでもない。** 後続はturn-awareなQ/V教師・物理MCTS・反復学習を整えること。
+- 実装の仕様・DGXでの関連テストとsmokeコマンド: `docs/PHASE11_NINE_BALL_MACRO_BOOTSTRAP.md`。GitHubへソースはコミット済みだが、DGXの関連テスト・教師データ生成・学習は**未実行／未確認**。これらのログを確認してから実装済み機能として評価する。
