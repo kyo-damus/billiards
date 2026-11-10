@@ -141,3 +141,73 @@ def test_reject_single_match_dataset(tmp_path):
         split_by_match(
             np.array([7, 7, 7]), validation_fraction=0.5, seed=1,
         )
+
+
+def test_oracle_dataset_uses_pre_shot_state_and_preserves_match_groups(tmp_path):
+    import json
+    from dataclasses import replace
+    from scripts.build_nine_ball_macro_oracle import build
+
+    data_dir = tmp_path / "matches"
+    data_dir.mkdir()
+    state = replace(
+        create_nine_ball_rack(breaker=0, seed=10), break_shot=False,
+    )
+    raw = {
+        "ball_numbers": list(state.config.ball_numbers),
+        "positions": state.ball_positions.tolist(),
+        "pocket_indices": state.ball_pocket_indices.tolist(),
+        "current_player": state.current_player,
+        "ball_in_hand": False,
+        "break_shot": False,
+        "turn_index": state.turn_index,
+    }
+    for seed in (10, 20):
+        (data_dir / f"match_seed_{seed}.json").write_text(
+            json.dumps({
+                "run_type": "learned_micro_self_play",
+                "trajectory": [{"state": raw, "rule_context": None}],
+            }),
+            encoding="utf-8",
+        )
+
+    class Agent:
+        def plan_goal(self, board, goal, context):
+            return SimpleNamespace(target_ball=goal.target_ball, shot=None)
+
+    class Simulator:
+        def restore(self, board):
+            self.board = board
+
+        def step(self, *, target_ball, shot):
+            return SimpleNamespace(
+                positions=self.board.ball_positions.copy(),
+                pocket_indices=self.board.ball_pocket_indices.copy(),
+            )
+
+    class Rules:
+        def apply(self, board, physical, context):
+            return SimpleNamespace(
+                foul=False, rack_winner=None, newly_pocketed=(),
+                turn_changed=True,
+            )
+
+    output = tmp_path / "outputs" / "oracle.npz"
+    report = build(
+        SimpleNamespace(
+            rollout_dir=data_dir,
+            max_states_per_match=1,
+            output=output,
+            micro_checkpoint=tmp_path / "unused.pt",
+            device="cpu",
+        ),
+        agent=Agent(), simulator=Simulator(), rules=Rules(),
+    )
+    assert report["states"] == 2
+    assert report["candidates"] >= 2
+    assert report["match_seeds"] == [10, 20]
+    states, goals, scores, offsets, seeds = load_dataset(output)
+    assert states.shape == (2, 72)
+    assert goals.shape[1] == 36
+    assert offsets[-1] == len(scores)
+    assert np.array_equal(seeds, [10, 20])
