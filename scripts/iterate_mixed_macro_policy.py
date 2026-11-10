@@ -297,6 +297,12 @@ def parse_args():
     parser.add_argument("--training-seed", type=int, default=94100)
     parser.add_argument("--root-min-visits", type=int, default=1)
     parser.add_argument(
+        "--root-tie-breaker",
+        choices=("first", "empirical_q"),
+        default="first",
+        help="Opt-in tie handling; default preserves original search.",
+    )
+    parser.add_argument(
         "--candidate-q-prior-visits", type=float, default=2.0
     )
     parser.add_argument("--c-puct", type=float, default=1.5)

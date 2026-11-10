@@ -12,7 +12,7 @@ from src.common.types import (
 )
 from src.goal.types import TacticalGoal, TacticalGoalType
 from src.macro.candidate import MacroCandidate, PhysicalShotSpec
-from src.macro.mcts import MCTS
+from src.macro.mcts import MCTS, MCTSNode
 from src.macro.transition import MacroTransitionResult
 
 
@@ -234,3 +234,76 @@ def test_mixed_mcts_refuses_old_25d_candidate_policy():
             candidate_encoding_version=2,
             uniform_candidate_priors=False,
         )
+
+
+def test_root_visit_tie_breaker_default_keeps_first_candidate():
+    mcts, _, attack, safety = make_mcts()
+    root = MCTSNode(state=make_state(), children={
+        attack: MCTSNode(
+            state=make_state(player=1), visit_count=1,
+            reward=0.0, prior=0.2,
+        ),
+        safety: MCTSNode(
+            state=make_state(player=1), visit_count=1,
+            reward=0.8, prior=0.8,
+        ),
+    })
+    assert mcts.root_tie_breaker == "first"
+    assert mcts._select_root_action(root) == attack
+
+
+def test_empirical_q_tie_breaker_uses_observed_physical_rewards():
+    mcts, _, attack, safety = make_mcts(root_tie_breaker="empirical_q")
+    root = MCTSNode(state=make_state(), children={
+        attack: MCTSNode(
+            state=make_state(player=1), visit_count=1,
+            reward=0.0, predicted_q=4.0, prior=0.8,
+        ),
+        safety: MCTSNode(
+            state=make_state(player=1), visit_count=1,
+            reward=0.6, predicted_q=-2.0, prior=0.2,
+        ),
+    })
+    # Learned Candidate-Q predictions are not empirical child returns.
+    assert mcts._select_root_action(root) == safety
+
+
+def test_empirical_q_tie_breaker_negates_opponent_future_value():
+    mcts, _, attack, safety = make_mcts(root_tie_breaker="empirical_q")
+    root = MCTSNode(state=make_state(player=0), children={
+        attack: MCTSNode(
+            state=make_state(player=1), visit_count=1,
+            reward=1.0, value_sum=2.0, prior=0.6,
+        ),
+        safety: MCTSNode(
+            state=make_state(player=1), visit_count=1,
+            reward=0.25, value_sum=0.0, prior=0.4,
+        ),
+    })
+    # attack = +1 - gamma*2 < safety = +0.25
+    assert mcts._select_root_action(root) == safety
+
+
+def test_empirical_q_tie_breaker_preserves_visit_primary_and_prior_secondary():
+    mcts, _, attack, safety = make_mcts(root_tie_breaker="empirical_q")
+    root = MCTSNode(state=make_state(), children={
+        attack: MCTSNode(
+            state=make_state(player=1), visit_count=2,
+            reward=-2.0, prior=0.1,
+        ),
+        safety: MCTSNode(
+            state=make_state(player=1), visit_count=1,
+            reward=1.0, prior=0.9,
+        ),
+    })
+    assert mcts._select_root_action(root) == attack
+    root.children[attack].visit_count = 1
+    root.children[attack].reward = 1.0
+    assert mcts._select_root_action(root) == safety
+    root.children[safety].prior = 0.1
+    assert mcts._select_root_action(root) == attack
+
+
+def test_root_tie_breaker_rejects_invalid_name():
+    with pytest.raises(ValueError, match="root_tie_breaker"):
+        make_mcts(root_tie_breaker="unknown")

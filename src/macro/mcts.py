@@ -103,6 +103,7 @@ class MCTS:
         turn_aware=False,
         candidate_encoding_version=1,
         uniform_candidate_priors=False,
+        root_tie_breaker="first",
     ):
         self.policy_network = policy_network
         self.value_network = value_network
@@ -225,6 +226,13 @@ class MCTS:
             root_min_visits_before_puct
         )
 
+        if root_tie_breaker not in ("first", "empirical_q"):
+            raise ValueError(
+                "root_tie_breaker must be 'first' or 'empirical_q'."
+            )
+        # Default is intentionally the old first-max-visits behavior.
+        self.root_tie_breaker = root_tie_breaker
+
         # 直近searchの診断用。
         # 探索ロジックには使用しない。
         self.last_root = None
@@ -266,13 +274,54 @@ class MCTS:
 
         root = self.search(root_state)
 
-        # 最終行動はvisit count最大
-        action, _ = max(
-            root.children.items(),
-            key=lambda item: item[1].visit_count,
-        )
+        return self._select_root_action(root)
 
-        return action
+    def _select_root_action(self, root: MCTSNode) -> MacroChoice:
+        """Choose the most visited candidate, with opt-in Q tie resolution.
+
+        Never sum visits across goal categories. 'empirical_q' compares
+        parent-player-perspective shot reward + discounted child value
+        ONLY among equally most-visited, actually evaluated candidates.
+        It does not use unvisited learned Candidate-Q predictions, and
+        preserves the legacy first-insertion-order default.
+        """
+        items = list(root.children.items())
+        if not items:
+            raise NoFeasibleMacroActionError(
+                "No feasible MacroActions from root state."
+            )
+        highest = max(child.visit_count for _, child in items)
+        tied = [
+            (action, child)
+            for action, child in items
+            if child.visit_count == highest
+        ]
+        if (
+            self.root_tie_breaker == "first"
+            or len(tied) == 1
+            or highest == 0
+        ):
+            return tied[0][0]
+
+        def rank(item):
+            _, child = item
+            if child.state is None:
+                raise RuntimeError(
+                    "Visited root child has no physical next state."
+                )
+            # child.value is from child's player perspective; negate
+            # continuation when the turn switches.
+            empirical_q = (
+                child.reward
+                + self.gamma
+                * self._turn_sign(root.state, child.state)
+                * child.value
+            )
+            return (empirical_q, child.prior)
+
+        # If empirical Q also ties, prefer learned Policy prior; if
+        # that ties too, Python max preserves the first root candidate.
+        return max(tied, key=rank)[0]
 
     # ============================================================
     # One simulation

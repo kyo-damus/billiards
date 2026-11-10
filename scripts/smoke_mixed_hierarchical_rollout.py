@@ -101,6 +101,7 @@ def build_agent(args, device):
         uniform_candidate_priors=policy is None,
         turn_aware=True,
         root_min_visits_before_puct=args.root_min_visits,
+        root_tie_breaker=getattr(args, "root_tie_breaker", "first"),
     )
     return HierarchicalAgent(
         mcts=mcts,
@@ -210,6 +211,15 @@ def parse_args():
     parser.add_argument("--max-turns", type=int, default=3)
     parser.add_argument("--simulations", type=int, default=15)
     parser.add_argument("--root-min-visits", type=int, default=1)
+    parser.add_argument(
+        "--root-tie-breaker",
+        choices=("first", "empirical_q"),
+        default="first",
+        help=(
+            "Root equal-visit tie: first candidate (legacy), or "
+            "highest observed parent-perspective Q (opt-in)."
+        ),
+    )
     parser.add_argument("--candidate-q-prior-visits", type=float, default=2.0)
     parser.add_argument("--c-puct", type=float, default=1.5)
     parser.add_argument("--gamma", type=float, default=0.99)

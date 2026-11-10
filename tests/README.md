@@ -196,3 +196,14 @@ python -m scripts.analyze_mixed_rollouts \
 `--per-root` は各rootの選択戦術、選択候補のvisit数、個別最大visit数、最大値同点の候補数、選択候補が最初の最大候補か、戦術ごとの候補数・visit数を表示する。`selected-prior` と `selected-predicted-Q` はログに存在すれば表示（後者は**ニューラルネットワークの保存された予測値**であり、MCTSのback-up Qや実際の報酬ではない）。過去の一部データには予測値が存在しないこともある。
 
 この診断は**read-only**で、行動の選択規則やPolicy/Q/Vの学習を変更しない。訪問数同点の実例があるかどうかは既存Rolloutの実出力を確認するまで断定しない。
+
+## 2026-11-10: ルートの訪問数同点を比較するオプション
+
+既存Mixed Rolloutでは5/5 rootが、探索10回で最大visit数1の10候補同点となり、どのrootでも候補リストの先頭のDIRECTが選ばれた。`src/macro/mcts.py` の選択規則は、通常は**個別候補の最大visit数、同点時は最初の候補**。候補群の合計訪問数とは無関係。
+
+- `--root-tie-breaker first`（デフォルト）: 旧選択規則を厳密に維持。
+- `--root-tie-breaker empirical_q`（実験用）: **個別最大visit数で同点、かつ訪問済みの候補同士だけ**、手番符号を考慮した `reward + gamma * sign * child.value` が高いものを選択。さらに同点ならPolicy prior、その後候補登録順。訪問数が異なれば従来どおりvisit数優先。
+- この `empirical_q` は観測したFastFiz遷移と子状態価値による探索時の見積もりであり、保存されている学習済みCandidate-Q `predicted_q` とは別の量。手番交代時は子の価値を負符号にする。
+- `scripts/smoke_mixed_hierarchical_rollout.py`、`scripts/collect_mixed_rollouts.py`、`scripts/iterate_mixed_macro_policy.py` にオプションを追加。**指定しなければ旧動作**であり、学習済みモデル・報酬・教師データ定義は変更しない。
+- 比較時は同じcheckpoint・初期seed・探索回数・候補生成条件を指定し、**出力先は必ず別にする**。rootに同点がない場合、両方式の結果は一致する。特定の設定で選択が改善しても性能改善とは言わない。
+- 対象テスト: `tests/unit/macro/test_mixed_candidate_mcts.py`（デフォルト互換・手番符号・visit優先・Q/ prior同点）＋既存MCTS契約テスト。長時間学習は不要。
