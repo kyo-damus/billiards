@@ -285,3 +285,21 @@ python -m pytest \
 ```
 
 ゼミまでの局所アブレーションは増やさず、まず最小の全体学習・独立評価を接続し、本番実験へ進む。
+
+
+## Phase 7開始（2026-11-10）：多球盤面・対戦・5自由度ショットの基盤
+
+現行3球の `src.common.types.GameState` / `FastFizSimulator` / 12D・31Dのcheckpointを変更せず、競技環境用に独立した型を追加。次のテストはGPU・FastFizネイティブ拡張不要。
+
+```bash
+python -m pytest \
+  tests/unit/game/test_rack_state.py \
+  tests/unit/game/test_match.py \
+  tests/unit/micro/test_shot_control.py -v
+```
+
+- `src/game/rack_state.py`: 明示的な球番号インベントリ（0=手球）と可変球数状態、現行3球からの明示的変換
+- `src/game/match.py`: ラックの勝者を引数で渡す、race-to-N/ブレイク順の集計のみ。**まだ9-ballの合法性や勝敗を判定しない**
+- `src/micro/shot_control.py`: FastFizの5自由度を表す型と5Dアクションデコード。**まだ5-D SAC Actorは学習していない**
+
+共有GPUは8×32000MiBだが、原則1枚・必要時のみ最大2枚まで。学習ジョブ実行前に空きメモリと他利用者を確認し、`CUDA_VISIBLE_DEVICES` で使用GPUを限定する。

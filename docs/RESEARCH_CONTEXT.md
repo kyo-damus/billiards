@@ -277,3 +277,13 @@ sign = +1 (同じプレイヤー) / -1 (相手へ手番交代)
 - 既存`iterate_mixed_macro_policy`はPolicy訪問教師と、必要なら完了ゲームのexecuted-return Q/Vを更新できる。しかし`collect_mixed_rollouts`のCLIにState V指定がなかったので`--state-value-checkpoint`を追加。新規`scripts/run_full_hierarchical_experiment.py`で学習・独立seed評価（学習前/後）を一括実行する。単体の接続テストを追加。コードはGitHub反映後、DGXでのテスト待ち。
 - 既存の学習ロジックは完全なend-to-end同時学習ではなく、MacroのPolicy / Q / Vを段階的に学習し、Microは学習済み重みを固定する構成。Safetyは物理候補生成を用いる。**「提案手法全体が最終仕様まで完成した」と断定しない。**
 - 現行の評価は手球1・的球2の簡易ルール下。ベースライン対照実験・一般化した盤面/ルール・データ分割・勝敗定義の確定は本実験計画に必要であり、根拠のない勝率性能主張は避ける。
+
+
+## 19. 2026-11-10 大規模対戦実験最優先・共有GPU制約・競技盤面への拡張開始
+
+- **目前の研究目標:** 「ビリヤードにおける階層型強化学習の実装、実験、考察」。全階層を統合して現行の物理基盤で大規模な学習と評価を行う。最終的には9-ballなどの競技ルールで対戦し、複数ラック先取のマッチを既存手法と比較する。ルールは後で選べる設計とし、小規模盤面はMicro事前学習・Curriculum向けに残す。
+- **サーバー:** 共有GPU8枚、1枚あたり32000MiB。**原則1枚のみ使用し、2枚までなら必要性と空き状況を確認した上で同時使用可能。8枚を占有しない。** 共有サーバーなので使用前に `nvidia-smi` で他利用者の使用量を確認し、`CUDA_VISIBLE_DEVICES=<使用許可された空きGPU>` を明示。未許可の自動マルチGPU・長時間独占・8枚占有は行わない。GPUスクリプトを自動実行することはせず、ユーザーがDGXで実行・結果を返信する。
+- **現時点の基本実験は完走:** ユーザー提出 `experiment_summary.json` より、Microは固定でMacro反復学習256ゲーム×4、独立seed評価学習前後各128ゲーム、MCTS各50探索を完走。学習前/後の簡易ゲーム完了数111/128→120/128、1ターン平均Macro局所報酬0.656→0.835、平均ターン数3.383→2.703。これは実際の対戦勝率ではない。反復ごとの完成ゲーム数238/230/242/250、Q/Vは4回とも更新。実験ディレクトリ全体と最終学習済みPolicy/Q/Vを保持する。
+- **現行コードの主要な構造的制約:** GameStateは3球固定、FastFiz C++ラッパーはcue+2球固定、Micro SACは2-D (power,angle offset)、Macro state 12D・candidate 31D固定、ゲームルールはSimplifiedGameRules。GPU数を増やすだけでは対戦環境完成にならない。
+- **新設（このコミット）:** `src/game/rack_state.py` 可変球数のTableGameConfig/RackState（cue+任意の番号付き的球、旧GameStateからの明示変換）、`src/game/match.py` RaceToMatch（ルール外部で決定した各ラック勝者を集計、先攻交代方式を指定可能）、`src/micro/shot_control.py` FastFizの5自由度に対応する物理ショット表現と正規化5-Dデコーダ。既存2的球の動作・チェックポイントを改変せず、新規単体テストを追加。これは**可変球数物理、9-ball rules、5D SAC学習実装の完成ではない**。
+- **直近の次優先:** (1) C++/FastFiz多球set/restore/step、Python可変球数adapter、(2) rule engineとrack・matchの連結、(3) Macroの可変球数エンコーダ/候補・Micro 5Dを学習させる経路、(4) 既存手法との同条件対戦と総合実験。改変時は古い12D/31D・2D学習済みCheckpointと新形式の混同を禁じ、明示的にversioningする。
