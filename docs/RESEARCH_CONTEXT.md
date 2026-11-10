@@ -394,3 +394,20 @@ sign = +1 (同じプレイヤー) / -1 (相手へ手番交代)
 - `scripts/train_nine_ball_macro_qv_v3.py`: 選択行動のみのQ(s,c)、実行方策の状態価値V(s)を教師ありMSEで学習。match seed単位でtrain/validation分離。v3専用の厳格なチェックポイントメタデータとローダーを追加。
 - **重要:** Qは未選択候補のQを正しく評価する保証がない。Vも現行behavior policyの平均的結果を近似するだけ。MCTSは未接続。本実験の有効性、勝率改善は未検証。
 - 詳細とDGX実行手順: `docs/PHASE12_NINE_BALL_MACRO_QV_V3.md`。GitHubへのコードコミット済みだが、pytestとDGX実機実行は**未確認**。
+
+## 35. 2026-11-10 Phase 12: DGXでMacro Q/V初期学習成功
+
+- Phase12ブランチで関連テスト24件PASSED（5.26秒）。
+- 学習済みMacro+Microでrace-to-1 6試合全完走。計134ショット、55反則。勝者player1が5件、player0が1件。反則率や勝者偏りの原因・再現性は未評価。
+- 選択Macro Goalを厳密に保存した134ショットの完成試合MC教師を作成（train 90ショット/4試合、val 44ショット/2試合）。
+- 5epochのv3 Candidate Q 検証MSE=0.779848、v3 State V 検証MSE=0.765339。学習集合平均による定数予測baseline=0.793873。少数試合なので性能主張は不可。Checkpointは `artifacts/runs/phase12_nineball_qv_smoke_v1/outputs/` に保存。
+- 繰り返すが、このQは**実行済みMacro候補のMCリターンのみ**で訓練したため、未実行候補への一般化は保証されない。
+
+## 36. 2026-11-10 Phase 13: 9-ball用物理PUCT・手番価値バックアップ（DGX未検証）
+
+- 新作業ブランチ `phase13-nineball-mcts-v3`（Phase12から分岐）。
+- 9-ball v3 `NineBallGoal`をMacro候補、Candidate Policy v3をPUCT prior、固定5D Micro+FastFiz+NineBallRulesを候補物理遷移、任意のState V v3を葉評価として使用する探索を追加。
+- 価値は現在の行動プレイヤー視点。試合終端で+1/-1、非終端は0の即時報酬とし、手番変化で継続価値の符号を反転。未実行候補への信頼性不足から、既存のselected-action Qは探索に**使用しない**。
+- 探索中に反則でball-in-handとなった場合、既存のNineBallRackSessionと幾何配置候補で物理的に合法な手球配置を再現する。手球配置の戦術最適化は未対応。
+- 自己対戦CLIに `--agent-kind micro_mcts` と探索回数・深さ・State Vを渡す引数を追加。選択Goalとroot訪問分布等をJSON保存して将来のPolicy訪問教師として利用できる形にした。ただし教師生成・Policy反復学習はまだ未実装。
+- `docs/PHASE13_NINE_BALL_MCTS_V3.md` に設計とDGXテスト/1試合smokeの実行手順。**コードはGitHubへコミット済みだが、DGX関連pytestと実物理MCTSはまだ未検証。** 中間seedの不足、V未校正、反則勝敗の偏りを改善したと主張しない。
