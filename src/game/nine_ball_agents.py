@@ -25,6 +25,8 @@ class ShotPlan:
     # Exact v3 TacticalGoal for selected-action Q learning; absent for
     # legacy/nonlearned GeometryNineBallAgent shots.
     macro_goal: object | None = None
+    # Optional MCTS root diagnostics; not a training target by itself.
+    macro_search: dict | None = None
 
 
 class GeometryNineBallAgent:
