@@ -178,3 +178,28 @@ def test_learned_agent_trajectories_are_not_mislabeled_as_geometry(tmp_path):
     import json
     payload = json.loads((folder / "match_seed_400.json").read_text())
     assert payload["run_type"] == "learned_micro_self_play"
+
+
+def test_exact_versioned_chosen_macro_goal_is_logged():
+    from dataclasses import replace
+    from src.game.nine_ball_encoding_v3 import (
+        NineBallGoal, encode_goal_v3,
+    )
+
+    class GoalProducingAgent(GeometryNineBallAgent):
+        def choose_shot(self, state, context=None):
+            plan = super().choose_shot(state, context)
+            return replace(
+                plan, macro_goal=NineBallGoal("BREAK", target_ball=plan.target_ball),
+            )
+
+    outcome = play_match(
+        OneRackFakeMatch(),
+        (GoalProducingAgent(), GoalProducingAgent()),
+        max_shots_per_rack=1,
+    )
+    chosen = outcome["trajectory"][0]["chosen_action"]
+    assert len(chosen["goal_v3"]) == 36
+    np.testing.assert_allclose(
+        chosen["goal_v3"], encode_goal_v3(NineBallGoal("BREAK", 1)),
+    )
