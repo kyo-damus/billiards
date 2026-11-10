@@ -303,3 +303,20 @@ python -m pytest \
 - `src/micro/shot_control.py`: FastFizの5自由度を表す型と5Dアクションデコード。**まだ5-D SAC Actorは学習していない**
 
 共有GPUは8×32000MiBだが、原則1枚・必要時のみ最大2枚まで。学習ジョブ実行前に空きメモリと他利用者を確認し、`CUDA_VISIBLE_DEVICES` で使用GPUを限定する。
+
+
+### 多球FastFiz実ビルド検証（既存buildを保持）
+
+`cpp_simulator.cpp` に既存 `BilliardSimulator` と並列の `BilliardSimulatorMulti` を追加。実球番号を維持したcue+1～15番球の部分集合、5自由度shot、first-contact、ball/rail/pocket等の時系列イベントを取得する。
+
+```bash
+cd ~/research
+cmake -S . -B /tmp/billiards-fastfiz-phase7 -DPython_EXECUTABLE="$(which python)"
+cmake --build /tmp/billiards-fastfiz-phase7 --parallel 2
+BILLIARDS_FASTFIZ_BUILD_DIR=/tmp/billiards-fastfiz-phase7 \
+  python -m pytest \
+    tests/integration/physics/test_multi_ball_fastfiz.py \
+    tests/integration/physics/test_fastfiz_simulator.py -v
+```
+
+**DGXでのC++コンパイルと実物理テストは未確認。** 旧 `build/`、旧2D Micro学習済みモデル、既存の12/31次元Macro学習済みモデルは変更・上書きしない。新方式の実行時だけ `BILLIARDS_FASTFIZ_BUILD_DIR` を指定。

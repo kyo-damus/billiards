@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from pathlib import Path
+import os
 import sys
 
 import numpy as np
@@ -53,7 +54,10 @@ class FastFizPreconditionError(RuntimeError):
 
 # CMakeで生成された billiard_env_cpp を読み込む
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-BUILD_DIR = PROJECT_ROOT / "build"
+# Opt-in isolated native build. Default stays the existing three-ball build/.
+BUILD_DIR = Path(
+    os.environ.get("BILLIARDS_FASTFIZ_BUILD_DIR", str(PROJECT_ROOT / "build"))
+).expanduser().resolve()
 
 if str(BUILD_DIR) not in sys.path:
     sys.path.insert(0, str(BUILD_DIR))

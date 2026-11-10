@@ -287,3 +287,12 @@ sign = +1 (同じプレイヤー) / -1 (相手へ手番交代)
 - **現行コードの主要な構造的制約:** GameStateは3球固定、FastFiz C++ラッパーはcue+2球固定、Micro SACは2-D (power,angle offset)、Macro state 12D・candidate 31D固定、ゲームルールはSimplifiedGameRules。GPU数を増やすだけでは対戦環境完成にならない。
 - **新設（このコミット）:** `src/game/rack_state.py` 可変球数のTableGameConfig/RackState（cue+任意の番号付き的球、旧GameStateからの明示変換）、`src/game/match.py` RaceToMatch（ルール外部で決定した各ラック勝者を集計、先攻交代方式を指定可能）、`src/micro/shot_control.py` FastFizの5自由度に対応する物理ショット表現と正規化5-Dデコーダ。既存2的球の動作・チェックポイントを改変せず、新規単体テストを追加。これは**可変球数物理、9-ball rules、5D SAC学習実装の完成ではない**。
 - **直近の次優先:** (1) C++/FastFiz多球set/restore/step、Python可変球数adapter、(2) rule engineとrack・matchの連結、(3) Macroの可変球数エンコーダ/候補・Micro 5Dを学習させる経路、(4) 既存手法との同条件対戦と総合実験。改変時は古い12D/31D・2D学習済みCheckpointと新形式の混同を禁じ、明示的にversioningする。
+
+
+## 20. Phase 7: 可変球数FastFiz別クラス追加（DGX実機テスト待ち）
+
+- FastFiz submodule `ekiefl/fastfiz@6c6df412` のヘッダを確認し、CUE～FIFTEENのBall ID、5自由度`ShotParams`、物理イベント`BALL_COLLISION` / `RAIL_COLLISION` / `POCKETED` 等を確認。
+- `cpp_simulator.cpp` で旧3球 `BilliardSimulator` を残し、`BilliardSimulatorMulti` を新設。Cue+任意の的球番号、位置・ポケット状態の復元、ショット実行、first-contactの実球番号、イベント時刻/種類/関与球を提供する構成。
+- `src/env/multi_ball_fastfiz.py` は`RackState`と`PhysicalShot5D`を使うPython adapter。ルール処理・ラック勝敗・学習はまだ接続していない。
+- `BILLIARDS_FASTFIZ_BUILD_DIR` をオプトイン指定した場合だけ隔離CMakeビルドを読み込む。旧環境は既定`build/`のまま。
+- **未確認:** C++実ビルド・9球物理shot・旧FastFiz回帰。関連テスト実行前に多球物理が完成したとは主張しない。実行コマンドは`tests/README.md`。ビルドはCPU2並列程度、GPUは不要。
