@@ -12,6 +12,7 @@ from functools import partial
 from src.env.multi_ball_fastfiz import MultiBallFastFizSimulator
 from src.game.match import MatchConfig
 from src.game.nine_ball_agents import GeometryNineBallAgent
+from src.game.nine_ball_encoding_v3 import encode_goal_v3
 from src.game.nine_ball_session import NineBallMatchSession
 
 
