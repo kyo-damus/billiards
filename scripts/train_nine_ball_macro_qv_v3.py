@@ -58,9 +58,12 @@ def load_returns(path):
 
 
 def model_predictions(model, state, goal, indices, model_kind):
+    # CUDA tensors require device-compatible indices. Keep this explicit
+    # rather than relying on NumPy advanced-index conversion.
+    index = torch.as_tensor(indices, dtype=torch.long, device=state.device)
     if model_kind == "q":
-        return model(state[indices], goal[indices]).reshape(-1)
-    return model(state[indices]).reshape(-1)
+        return model(state[index], goal[index]).reshape(-1)
+    return model(state[index]).reshape(-1)
 
 
 def fit_model(kind, model, state, goals, targets, train_ids, val_ids, args, device):
