@@ -156,7 +156,7 @@ def run_experiment(
         summaries[name] = report(paths)
         print(
             f"{name}: completed={summaries[name]['completed_games']} "
-            f"score_delta={summaries[name]['score_delta']}"
+            f"score_delta={summaries[name]['score_delta_by_player']}"
         )
     result = {
         "note": (

@@ -102,7 +102,7 @@ def test_run_experiment_trains_then_compares_heldout_seeds_with_full_v(tmp_path)
 
     def aggregate(paths):
         calls.append(("report", len(paths), paths[0].name))
-        return {"games": 2, "completed_games": 1, "score_delta": [1.0, 0.0]}
+        return {"games": 2, "completed_games": 1, "score_delta_by_player": [1.0, 0.0]}
 
     result = run_experiment(
         args, iterate=train, collect=collect, agent_factory=agent_factory,
