@@ -150,9 +150,9 @@ python -m pytest \
 
 ## Mixed Rolloutの読み取り集計（2026-11-10追加）
 
-学習や物理実行をせず、既存のMixed Rollout \`rollout_seed_*.npz\` から選択戦術、完了ゲーム、終了理由、ポケット・スクラッチ、手番交代、Macro局所報酬とゲームスコア差分、MCTS訪問教師として使えるroot数を確認する。
+学習や物理実行をせず、既存のMixed Rollout `rollout_seed_*.npz` から選択戦術、完了ゲーム、終了理由、ポケット・スクラッチ、手番交代、Macro局所報酬とゲームスコア差分、MCTS訪問教師として使えるroot数を確認する。
 
-\`\`\`bash
+```bash
 # 指定ディレクトリ直下のRolloutを集計
 python -m scripts.analyze_mixed_rollouts --rollout-dir mixed_rollouts
 
@@ -164,10 +164,10 @@ python -m scripts.analyze_mixed_rollouts \
 python -m scripts.analyze_mixed_rollouts \
   --rollout mixed_rollout_smoke.npz \
   --json-output artifacts/runs/<run_id>/outputs/rollout_summary.json
-\`\`\`
+```
 
-\`<run_id>\` は実行時に固有のIDへ置き換える。\`--json-output\` は既存ファイルの上書きを拒否する。ディレクトリ検索は \`rollout_seed_*.npz\` のみを対象にし、その他の教師データNPZは除外する。
+`<run_id>` は実行時に固有のIDへ置き換える。`--json-output` は既存ファイルの上書きを拒否する。ディレクトリ検索は `rollout_seed_*.npz` のみを対象にし、その他の教師データNPZは除外する。
 
-**指標の注意点:** \`completed_games\` は \`rollout_terminated=True\` と \`stop_reason=game_terminated\` を満たす件数（勝率ではない）。ポケット数は、物理状態の的球ポケットフラグが新しく立った回数（狙ったポケットへの成功率ではない）。スクラッチは手球のポケットフラグから算出。局所報酬とゲームスコア差分は別集計。新規の学習・勝敗評価・全pytestスイート実行は含まない。
+**指標の注意点:** `completed_games` は `rollout_terminated=True` と `stop_reason=game_terminated` を満たす件数（勝率ではない）。ポケット数は、物理状態の的球ポケットフラグが新しく立った回数（狙ったポケットへの成功率ではない）。スクラッチは手球のポケットフラグから算出。局所報酬とゲームスコア差分は別集計。新規の学習・勝敗評価・全pytestスイート実行は含まない。
 
-実装本体: \`src/pipelines/rollout_analysis.py\`、CLI: \`scripts/analyze_mixed_rollouts.py\`、関連テスト: \`tests/pipelines/evaluation/test_analyze_mixed_rollouts.py\`。
+実装本体: `src/pipelines/rollout_analysis.py`、CLI: `scripts/analyze_mixed_rollouts.py`、関連テスト: `tests/pipelines/evaluation/test_analyze_mixed_rollouts.py`。

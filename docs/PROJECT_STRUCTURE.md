@@ -1,6 +1,6 @@
 # リポジトリのフォルダ構造とファイル管理ガイド
 
-**更新日:** 2026-11-09（JST）  
+**更新日:** 2026-11-10（JST）  
 **対象:** `kyo-damus/billiards` の `refactor-phase9-preserve-20261109` ブランチ  
 **目的:** 初めて本研究を引き継ぐ人やChatGPTが、**どのファイルをどこに置き、何をGitで管理し、何を保全するか**を、この文書だけで把握できるようにする。
 
@@ -22,14 +22,16 @@
 │       ├── training_utils.py
 │       ├── checkpoint_loading.py
 │       ├── attack_components.py
-│       └── mixed_components.py
+│       ├── mixed_components.py
+│       └── rollout_analysis.py       # 保存済みMixed Rolloutの統計集計
 ├── scripts/                         # 学習・評価・データ生成・smokeのCLI
 │                                    # 一部は旧import互換ラッパー
+│                                    # analyze_mixed_rollouts.py: NPZ読取集計
 ├── configs/                         # 実験設定の記録用テンプレート
 │   ├── macro/
 │   ├── smoke/
 │   └── README.md
-├── tests/                           # 計76テストファイル
+├── tests/                           # 計77テストファイル
 │   ├── unit/                        # 36: 純粋/局所的な契約
 │   │   ├── macro/position/
 │   │   ├── micro/
@@ -44,7 +46,7 @@
 │   │   ├── agent/
 │   │   ├── defense/
 │   │   └── goal/
-│   ├── pipelines/                   # 29: 学習/評価/教師データ生成の処理
+│   ├── pipelines/                   # 30: 学習/評価/教師データ生成の処理
 │   │   ├── macro/
 │   │   ├── micro/
 │   │   ├── rollout/
@@ -168,7 +170,7 @@ cmake --build build --parallel 2
 ```
 
 - 既存DGXではPhase 4で既存 `build/` を変更せず、別の `/tmp/` ディレクトリでconfigure → C++ビルド → Python 3.11で `billiard_env_cpp` importと `BilliardSimulator()` を確認済み。既存の `build/Makefile` はGit非追跡のまま利用可能。
-- `tests/` は **unit 36 / integration 11 / pipelines 29 = 計76ファイル**。テスト対象ファイルの分類は完了し、各段階の指定テストは通過済み。ただし**全テストスイート一括実行をしたと解釈しない**。
+- `tests/` は **unit 36 / integration 11 / pipelines 30 = 計77ファイル**（Phase 3の76件＋Phase 5で追加した集計テスト1件）。既存76件は各段階の指定テストが通過済み。新規テストはDGXでの確認待ちであり、**全スイート一括テスト済みという意味ではない**。
 
 作業内容に応じて、例えば以下の範囲でテストする。
 
@@ -190,3 +192,10 @@ python -m pytest tests/integration/physics/test_fastfiz_simulator.py -q
 この構造整理は現行ブランチで一区切り。**mainへのマージ、学習性能改善の実証、全スイート一括テストは未実施。** 今後の変更は研究ロジックの変更とファイル管理の変更を別コミットで扱い、実際のGit構成、`.gitignore`、出力先、バックアップとこの文書を同期する。
 
 研究全体の方針が変わる場合は `docs/RESEARCH_CONTEXT.md` も更新する。変更の技術的な経緯が必要な場合のみ `docs/REFACTORING_PLAN.md` / `docs/PHASE4_ARTIFACT_AUDIT.md` を参照する。
+
+## 8. Phase 5: Mixed Rollout集計（2026-11-10着手）
+
+- **実装:** `src/pipelines/rollout_analysis.py` に保存済みNPZからの集計処理、`scripts/analyze_mixed_rollouts.py` にCLIを追加。物理実行・再学習・既存NPZ更新はしない。
+- **指標:** ゲーム完了率（勝率ではない）、停止理由、DIRECT/POSITION/SAFETYの選択数、実際の的球ポケット数、手球スクラッチ、手番交代、Macro局所報酬とゲームスコア差分、MCTS root数/Policy訪問教師に使えるroot数。
+- **テスト:** `tests/pipelines/evaluation/test_analyze_mixed_rollouts.py` に6件を追加し、作成時に軽量なローカル検証が成功。**DGX上での新配置テストと既存の実データ集計は未確認**。
+- 詳しいCLI例は [tests/README.md](../tests/README.md) を参照。新たな実験結果を性能向上や実際の勝率として表現しない。
