@@ -380,3 +380,17 @@ sign = +1 (同じプレイヤー) / -1 (相手へ手番交代)
 - `scripts/train_nine_ball_macro_policy_v3.py`: 72D状態+36D Goal候補のネットワークを、教師スコアsoftmaxへのlistwise CEで訓練。match seedごとにtrain/validation分離。出力チェックポイントをv3専用タグで保存し、既存の9-ball学習済みエージェントのMacro読み込み口につなぐ。
 - **これは一手物理教師からの教師ありPolicy bootstrapであり、RLのMacro Q/VでもMCTSでもない。** 後続はturn-awareなQ/V教師・物理MCTS・反復学習を整えること。
 - 実装の仕様・DGXでの関連テストとsmokeコマンド: `docs/PHASE11_NINE_BALL_MACRO_BOOTSTRAP.md`。GitHubへソースはコミット済みだが、DGXの関連テスト・教師データ生成・学習は**未実行／未確認**。これらのログを確認してから実装済み機能として評価する。
+
+## 33. 2026-11-10 Phase 11: DGXでMacro Policy初期学習・対戦まで確認
+
+- 物理教師の生成: 既存学習済みMicro 5Dを固定して6盤面・49候補を同盤面から実行、候補反則率 26.53%、正しいポケット入球率 14.29%。これは**全候補を1ショット評価した平均**でありゲームプレイの成功率ではない。
+- 4学習盤面・2検証盤面（検証seed 420004）でMacro Policyを3epoch訓練・保存。held-out teacher regret 1.0、教師と同点最良候補の選択率0.5。盤面2件のため性能主張には不十分。
+- 旧Microと新Macroを接続した9-ball自己対戦3試合（seed 430000/430002/430004）は**3件完走、計40ショット、15反則、全勝者がplayer1**。動作統合確認のみ。勝率改善・対戦の強さは未検証。勝者の偏り/反則多発は後続評価課題。
+
+## 34. 2026-11-10 Phase 12: 9-ball Macro Q/Vの選択行動MC学習（DGX未実行）
+
+- 新ブランチ: `phase12-nineball-turn-aware-qv`（Phase11から分岐）。v3選択Macro Goalの36D特徴量をショットログに厳密に保存するため、`ShotPlan.macro_goal`と`chosen_action.goal_v3`を追加。旧Geometry Agentはnull。過去の保存済みphase11自己対戦JSONにはこの項目がないので、**Q教師へ曖昧な再推定はせず新規ログを収集する**。
+- `scripts/build_nine_ball_macro_returns_v3.py`: race-to-1の終了試合だけを使い、`winner`視点の終端±1から、手番変化の符号を反転しながら割引リターンを作成。未完了試合は教師に使わない。各実行済み行動だけをラベル付け。複数ラックのrace-to-Nは現行72D表現にマッチのラック勝数が含まれないため除外する。
+- `scripts/train_nine_ball_macro_qv_v3.py`: 選択行動のみのQ(s,c)、実行方策の状態価値V(s)を教師ありMSEで学習。match seed単位でtrain/validation分離。v3専用の厳格なチェックポイントメタデータとローダーを追加。
+- **重要:** Qは未選択候補のQを正しく評価する保証がない。Vも現行behavior policyの平均的結果を近似するだけ。MCTSは未接続。本実験の有効性、勝率改善は未検証。
+- 詳細とDGX実行手順: `docs/PHASE12_NINE_BALL_MACRO_QV_V3.md`。GitHubへのコードコミット済みだが、pytestとDGX実機実行は**未確認**。
