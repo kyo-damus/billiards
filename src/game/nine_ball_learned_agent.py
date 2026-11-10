@@ -118,10 +118,14 @@ class NineBallMicroSACAgent(GeometryNineBallAgent):
             )
         return goals[-1]
 
-    def choose_shot(self, state, context=None) -> ShotPlan:
+    def plan_goal(self, state, goal, context=None) -> ShotPlan:
+        """Decode a supplied Macro goal, without selecting or changing it.
+
+        Used for counterfactual one-shot Macro supervision: every goal must
+        be evaluated from the same original pre-shot state.
+        """
         if state.ball_in_hand:
             raise ValueError("Place cue ball before Micro shot generation")
-        goal = self._choose_goal(state, context)
         if goal.explicit_shot is not None:
             return ShotPlan(
                 target_ball=goal.target_ball,
@@ -147,3 +151,7 @@ class NineBallMicroSACAgent(GeometryNineBallAgent):
             ),
             target_pocket=goal.target_pocket,
         )
+
+    def choose_shot(self, state, context=None) -> ShotPlan:
+        goal = self._choose_goal(state, context)
+        return self.plan_goal(state, goal, context)
