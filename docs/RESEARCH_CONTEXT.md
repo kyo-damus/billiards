@@ -358,3 +358,10 @@ sign = +1 (同じプレイヤー) / -1 (相手へ手番交代)
 - 任意のv3/72D状態+36D候補Macro Policy checkpointを渡した場合にのみ、そのPolicyのlogitで候補選択。未指定時は**幾何的な暫定Macro**を使用。まだMacro Policyの9-ball学習/MCTSは未実装であり、学習済みMicroだけでフル階層RLと名乗らない。
 - `scripts/collect_nine_ball_self_play.py`に`--agent-kind micro_sac --micro-checkpoint <v3 checkpoint>`、`--macro-policy-checkpoint`（任意）、`--device`を追加。geometry既定値はそのまま。対戦時の`rule_context`をAgentへ渡す。GPUで推論する場合は明示`CUDA_VISIBLE_DEVICES`を1枚に制限する。ユニットテスト・DGXネイティブ実行は未確認。
 - **次の重要な実装**は、9-ballのMacro Policy/Q/Vを実際の自己対戦リターンやMCTS教師で更新する流れと、9-ball物理遷移を使うMCTS実装。今のMacro教師は幾何行動のログと一致せず、旧Macro学習をコピーして「完成」としてはいけない。
+
+## 30. 2026-11-10 5D Micro学習開始時のFastFiz撞点浮動小数誤差
+
+- ユーザーDGX実行: `--steps 5000 --device cuda`、checkpointのモデル入力は108D/5D、学習盤面86件まで読み込み成功。学習中の最初の物理ショットで`ValueError: Invalid shot parameters`。
+- 原因: `Shot5DDecoder`は半径12.0mmの円境界まで撞点を許し、PythonからC++のfloat32へ変換した際に`a*a+b*b`が144.0fを僅かに超え得る。C++ `BilliardSimulatorMulti::step`は厳密な`>144.0f`を拒否。保存前に失敗したためモデルは未出力。乱数warmup 5000候補の数値検証では81件がこの境界を超える例を確認。
+- 修正: `Shot5DDecoder.decode`の有効な最大撞点半径を`min(tip_radius_mm, 11.99)`に制限する。FastFizの厳密な12mm判定は変更しない。CPUでfloat32変換境界の回帰テスト、実native版の回帰テストを追加。隔離CMakeバイナリの再ビルドは不要。
+- **DGXでの修正後の学習・テストは未確認。** まず関連テスト→5000stepを再実行。GPUは既存`CUDA_VISIBLE_DEVICES`の1枚指定を継承。

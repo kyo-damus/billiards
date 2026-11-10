@@ -25,7 +25,9 @@ def test_action_bounds_and_tip_disk_projection():
     assert shot.speed_m_s == pytest.approx(3.0)
     assert shot.azimuth_deg == pytest.approx(20.0)
     assert shot.elevation_deg == pytest.approx(30.0)
-    assert np.hypot(shot.tip_x_mm, shot.tip_y_mm) == pytest.approx(12.0)
+    # 12.00 mm is the theoretical limit, but the native float32 check
+    # can round boundary shots to a squared radius slightly above 144.
+    assert np.hypot(shot.tip_x_mm, shot.tip_y_mm) == pytest.approx(11.99)
 
 
 @pytest.mark.parametrize("bad", [np.zeros(2), np.zeros(4), np.ones(6),
@@ -47,3 +49,30 @@ def test_decoder_requires_sensible_ranges():
         Shot5DDecoder(min_speed=2, max_speed=1)
     with pytest.raises(ValueError, match="elevation"):
         Shot5DDecoder(max_elevation_deg=75)
+
+
+@pytest.mark.parametrize(
+    "tip_xy",
+    [(1.0, 1.0), (-1.0, -1.0), (1.0, -1.0), (-1.0, 1.0),
+     (0.8, 0.9), (-0.9, 0.8), (1.0, 0.0), (0.0, -1.0)],
+)
+def test_decoder_tip_never_crosses_strict_native_float32_radius(tip_xy):
+    shot = Shot5DDecoder().decode(
+        [0.0, 0.0, 0.0, *tip_xy], reference_angle_deg=90.0
+    )
+    # Replicate the C++ float32 arithmetic after pybind converts arguments.
+    x = np.float32(shot.tip_x_mm)
+    y = np.float32(shot.tip_y_mm)
+    squared = np.float32(np.float32(x * x) + np.float32(y * y))
+    assert squared <= np.float32(144.0)
+
+
+def test_random_warmup_tip_actions_are_native_safe_after_float32_cast():
+    rng = np.random.default_rng(410000)
+    decoder = Shot5DDecoder()
+    for _ in range(1024):
+        action = rng.uniform(-1.0, 1.0, size=5).astype(np.float32)
+        shot = decoder.decode(action, reference_angle_deg=90.0)
+        x, y = np.float32(shot.tip_x_mm), np.float32(shot.tip_y_mm)
+        squared = np.float32(np.float32(x * x) + np.float32(y * y))
+        assert squared <= np.float32(144.0)

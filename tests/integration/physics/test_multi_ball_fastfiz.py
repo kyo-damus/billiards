@@ -5,7 +5,7 @@ import pytest
 
 from src.env.multi_ball_fastfiz import MultiBallFastFizSimulator
 from src.game.rack_state import RackState, TableGameConfig
-from src.micro.shot_control import PhysicalShot5D
+from src.micro.shot_control import PhysicalShot5D, Shot5DDecoder
 
 
 def make_rack(config):
@@ -59,3 +59,20 @@ def test_native_rejects_target_ball_not_in_inventory():
             target_ball=1,
             shot=PhysicalShot5D(1.0, 90.0, 10.0, 0, 0),
         )
+
+
+def test_native_accepts_decoder_diagonal_tip_at_radius_boundary():
+    # Regresses the first warmup-shot failure in 5D Micro training.
+    config = TableGameConfig.nine_ball_inventory()
+    sim = MultiBallFastFizSimulator(config)
+    rack = make_rack(config)
+    sim.restore(rack)
+    shot = Shot5DDecoder().decode(
+        np.array([0.0, 0.0, 0.0, 1.0, -1.0], dtype=np.float32),
+        reference_angle_deg=90.0,
+    )
+    result = sim.step(target_ball=1, shot=shot)
+    assert result.positions.shape == (10, 2)
+    # A physical precondition failure is allowed; a native ValueError for
+    # invalid shot parameters is not.
+    assert isinstance(result.precondition_code, int)

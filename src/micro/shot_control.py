@@ -99,10 +99,16 @@ class Shot5DDecoder:
         norm = float(np.linalg.norm(tip))
         if norm > 1.0:
             tip /= norm
+        # FastFiz's pybind11 interface casts doubles to 32-bit floats.
+        # At exactly 12 mm, float32 rounding can make a*a+b*b > 144.0f,
+        # which the native simulator rejects with "Invalid shot parameters".
+        # Stay just inside the disk for *all* normalized actor outputs,
+        # including diagonal corner actions during random warmup.
+        native_safe_radius = min(self.tip_radius_mm, 11.99)
         return PhysicalShot5D(
             speed_m_s=speed,
             azimuth_deg=angle,
             elevation_deg=elevation,
-            tip_x_mm=float(tip[0]) * self.tip_radius_mm,
-            tip_y_mm=float(tip[1]) * self.tip_radius_mm,
+            tip_x_mm=float(tip[0]) * native_safe_radius,
+            tip_y_mm=float(tip[1]) * native_safe_radius,
         )
