@@ -36,6 +36,8 @@ def test_pretrained_micro_format_loads_and_shoots_all_five_parameters(tmp_path):
     rack = create_nine_ball_rack(breaker=0, seed=1)
     break_shot = agent.choose_shot(rack)
     assert break_shot.goal_label == "BREAK_EXPLICIT"
+    assert break_shot.macro_goal is not None
+    assert break_shot.macro_goal.kind == "BREAK"
     from dataclasses import replace
     regular = replace(rack, break_shot=False)
     shot = agent.choose_shot(regular)
