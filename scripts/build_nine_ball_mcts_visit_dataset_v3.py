@@ -46,7 +46,10 @@ def read_root(row):
         or int(root["root_candidates"]) != count
         or int(root["simulations"]) < 1
         or int(visits.sum()) != int(root["simulations"])
-        or not np.array_equal(visits, visits.astype(np.int64))
+        or not np.allclose(goal_array[:, :4].sum(axis=1), 1.0, atol=1e-5)
+        or np.any(goal_array[:, :4] < -1e-5)
+        or not np.allclose(goal_array[:, 4:20].sum(axis=1), 1.0, atol=1e-5)
+        or np.any(goal_array[:, 4:20] < -1e-5)
     ):
         raise ValueError("Inconsistent v3 root candidate/visit/prior metadata")
     if visits[chosen] != visits.max():
