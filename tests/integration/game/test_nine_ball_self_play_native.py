@@ -24,3 +24,4 @@ def test_native_three_shot_autonomous_match_recording():
         assert shot["chosen_action"]["target_ball"] in range(1, 10)
         assert len(shot["state"]["positions"]) == 10
         assert "events" in shot["physical"]
+        assert shot["physical"]["precondition_code"] is not None

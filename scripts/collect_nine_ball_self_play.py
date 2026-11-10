@@ -64,7 +64,10 @@ def play_match(
         state = match.state
         plan = agent.choose_shot(state)
         result = match.step(target_ball=plan.target_ball, shot=plan.shot)
-        physical = getattr(match.rack, "last_physical", None)
+        physical = getattr(
+            match, "last_physical",
+            getattr(match.rack, "last_physical", None),
+        )
         records.append({
             "rack_index": int(match.match.snapshot().racks_completed)
                 - (1 if result.rack_winner is not None else 0),
@@ -142,7 +145,9 @@ def collect_matches(
     agents = (agent_factory(), agent_factory())
     summaries = []
     for index in range(matches):
-        seed = start_seed + index
+        # Reserve 2*race_to seeds per match. A race-to-N lasts at most
+        # 2*N-1 racks, so independently collected matches do not share racks.
+        seed = start_seed + index * (2 * race_to)
         if match_factory is None:
             match = NineBallMatchSession(
                 simulator_factory=simulator_factory,

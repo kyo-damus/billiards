@@ -131,6 +131,7 @@ class NineBallMatchSession:
         self.match = RaceToMatch(match_config)
         self.seed = seed
         self.rack_history = []
+        self.last_physical = None  # retain terminal-rack physical event evidence
         self.rack = None
         self._start_next_rack()
 
@@ -161,6 +162,7 @@ class NineBallMatchSession:
             target_ball=target_ball, shot=shot,
             declared_push_out=declared_push_out,
         )
+        self.last_physical = self.rack.last_physical
         if result.rack_winner is not None:
             self.rack_history.append({
                 "rack": self.match.snapshot().racks_completed,

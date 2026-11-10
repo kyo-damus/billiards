@@ -107,7 +107,7 @@ def test_output_files_separate_and_no_overwrite(tmp_path):
     assert result["finished_matches"] == 2
     assert result["unfinished_matches"] == 0
     assert sorted(p.name for p in out.iterdir()) == [
-        "match_seed_300.json", "match_seed_301.json", "summary.json"
+        "match_seed_300.json", "match_seed_302.json", "summary.json"
     ]
     assert json.loads((out / "match_seed_300.json").read_text())["match_winner"] == 1
     with pytest.raises(FileExistsError, match="Refusing"):
@@ -127,3 +127,32 @@ def test_invalid_match_limits_refused_before_output(tmp_path):
             match_factory=OneRackFakeMatch,
         )
     assert not out.exists()
+
+
+class EvidencePreservingFakeMatch(OneRackFakeMatch):
+    """Simulate a new rack replacing the old one immediately after a win."""
+
+    def step(self, *, target_ball, shot):
+        evidence = SimpleNamespace(
+            first_contact_ball=1,
+            precondition_code=0,
+            events=(
+                SimpleNamespace(
+                    time_s=0.1, kind="BALL_COLLISION", ball1=0, ball2=1
+                ),
+            ),
+        )
+        self.last_physical = evidence
+        self.rack = SimpleNamespace(last_physical=None)
+        return super().step(target_ball=target_ball, shot=shot)
+
+
+def test_terminal_rack_physical_evidence_survives_rack_replacement():
+    result = play_match(
+        EvidencePreservingFakeMatch(),
+        (GeometryNineBallAgent(), GeometryNineBallAgent()),
+        max_shots_per_rack=1,
+    )
+    row = result["trajectory"][0]
+    assert row["physical"]["first_contact_ball"] == 1
+    assert row["physical"]["events"][0]["kind"] == "BALL_COLLISION"
