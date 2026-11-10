@@ -355,3 +355,23 @@ python -m pytest \
 ```
 
 `src/game/nine_ball_rules.py` が公式のブレイク・プッシュアウト・レフェリー判定まで網羅したと誤認しないこと。未完成の規則は`docs/RESEARCH_CONTEXT.md`に記録。
+
+## 2026-11-10: 9-ballの自律試合と物理経験ログ（非学習の接続確認）
+
+`src/game/nine_ball_agents.py` の `GeometryNineBallAgent` は、最小番号球へのBreak / Ghost-ball系DIRECT / fallbackを出力する**非学習の検証用Agent**。後から学習済みMacro/Microと差し替える前提。
+
+`scripts/collect_nine_ball_self_play.py`は自律ショット→FastFiz→9ballルール→マッチを繰り返し、全ショットの5自由度物理入力、初期盤面・次盤面、Cue placement、FastFizイベント、foulとrack winnerを`match_seed_*.json`に保存する。未完了は勝利とみなさない。旧モデル/成果物は保持。
+
+```bash
+cd ~/research
+python -m pytest tests/unit/game/test_nine_ball_self_play.py -v
+BILLIARDS_FASTFIZ_BUILD_DIR=/tmp/billiards-fastfiz-phase7 \
+python -m pytest tests/integration/game/test_nine_ball_self_play_native.py -v
+BILLIARDS_FASTFIZ_BUILD_DIR=/tmp/billiards-fastfiz-phase7 \
+python -m scripts.collect_nine_ball_self_play \
+  --matches 2 --race-to 2 --max-shots-per-rack 40 \
+  --start-seed 310000 \
+  --output-dir artifacts/runs/phase7_9ball_geometry_selfplay_smoke/outputs
+```
+
+性能主張は禁止：この時点ではMacro学習・SAC学習済みポリシーは接続されていない。また公式WPAルールの例外が残る。

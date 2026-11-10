@@ -318,3 +318,12 @@ sign = +1 (同じプレイヤー) / -1 (相手へ手番交代)
 - `tests/integration/game/test_nine_ball_native_session.py`を追加。9球菱形ラック、FastFizネイティブ物理ショット、first-contact/rail/pocketイベント、`NineBallRules`適用後の状態同期までを1ショット実行する。
 - このテストは物理結果の良さ・合法ブレイク率ではなく、実行経路の結合を検証する。GPU不要で、隔離ビルド`BILLIARDS_FASTFIZ_BUILD_DIR`を使用する。
 - ローカルの模擬物理テスト16件はPASS。DGXでの新規ルールと結合テストの実行はまだ確認していない。
+
+## 24. 2026-11-10 自律9-ball自己対戦データ収集（非学習ベースライン）
+
+- DGXでのテスト結果：新規9-ballルールと盤面/ショットのユニットテスト**44件PASSED（0.27秒）**、C++隔離ビルドを使うNative物理・ルール統合テスト**4件PASSED（0.25秒）**。計48件PASS、gitクリーン。
+- 新規 `src/game/nine_ball_agents.py` に、幾何から最低番号球を狙う**学習なしの仮エージェント**を追加。打球はFastFizの5自由度で出力するが、上下左右撞点はデフォルト0、仰角10度（5D SACではない）。Breakは最低番号球への直線、通常は障害物を考慮したGhost ballへの簡易DIRECT、不可なら最低番号球を狙うfallback。
+- `scripts/collect_nine_ball_self_play.py`で物理FastFiz→NineBallRules→rack/matchをショット制限まで自律反復。ショットの前後状態・選択した行動・物理イベント・反則理由・ラック勝者を`match_seed_*.json`へ記録。`summary.json`には完了/未完了件数を分離し、**未完了を勝利としてカウントしない**。既存出力先には書き込まない。
+- 将来の学習済みMacro/Microは`choose_shot()` / `cue_placement_candidates()`インターフェースで差し替える設計。今回はまだMacro/Micro学習統合ではなく、**非学習・完全WPA準拠ではない環境の自己対戦収集基盤**。
+- `NineBallRackSession.last_physical`でrule適用後のNative `restore()`によって消えるイベント詳細をログ用に保持。
+- 関連ユニット7テスト＋実物理3ショット自律試行の統合1テストを追加。**DGX実機は未実行**。GPU不要。CPUで動く小規模データ収集から確認する。

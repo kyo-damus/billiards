@@ -61,6 +61,7 @@ class NineBallRackSession:
         self.state = initial_state
         self.context = NineBallContext()
         self.winner = None
+        self.last_physical = None
         self.simulator.restore(initial_state)
 
     def place_cue_ball(self, x: float, y: float) -> RackState:
@@ -108,6 +109,8 @@ class NineBallRackSession:
             raise NotImplementedError("Push-out requires option/choice support")
         physical = self.simulator.step(target_ball=target_ball, shot=shot)
         result = self.rules.apply(self.state, physical, self.context)
+        # Preserve event evidence before simulator.restore clears native diagnostics.
+        self.last_physical = physical
         self.state = result.next_state
         self.context = result.next_context
         self.winner = result.rack_winner
