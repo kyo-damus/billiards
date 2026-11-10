@@ -48,6 +48,8 @@ def _episode(path, seed):
         candidates = np.asarray(f["candidate"])
         rewards = np.asarray(f["macro_local_reward"])
         score_delta = np.asarray(f["score_delta"])
+        before_pockets = np.asarray(f["state_pocket_indices"])
+        after_pockets = np.asarray(f["next_state_pocket_indices"])
         first_action = (
             candidates[0].copy() if len(candidates) else None
         )
@@ -55,11 +57,42 @@ def _episode(path, seed):
             GOAL_NAMES[int(np.argmax(first_action[2:5]))]
             if first_action is not None else None
         )
+        first_pocketed_count = None
+        first_scratch = None
+        first_target_pot = None
+        if len(states):
+            first_pocketed_count = int(np.count_nonzero(
+                (before_pockets[0, 1:] < 0)
+                & (after_pockets[0, 1:] >= 0)
+            ))
+            first_scratch = bool(
+                before_pockets[0, 0] < 0
+                and after_pockets[0, 0] >= 0
+            )
+            # Goal-specific target ball / pocket are encoded in features:
+            # target ball = [5:7], target pocket = [7:13].
+            # Explicit Safety has no destination pocket: N/A.
+            ball_hot = first_action[5:7]
+            pocket_hot = first_action[7:13]
+            if (
+                np.count_nonzero(ball_hot) == 1
+                and np.count_nonzero(pocket_hot) == 1
+            ):
+                ball_id = int(np.argmax(ball_hot)) + 1
+                pocket_id = int(np.argmax(pocket_hot))
+                first_target_pot = bool(
+                    before_pockets[0, ball_id] < 0
+                    and after_pockets[0, ball_id] == pocket_id
+                )
+
         return {
             "initial_state": states[0].copy() if len(states) else None,
             "first_action": first_action,
             "first_goal": first_goal,
             "first_reward": float(rewards[0]) if len(rewards) else None,
+            "first_pocketed_count": first_pocketed_count,
+            "first_scratch": first_scratch,
+            "first_target_pot": first_target_pot,
             "first_score_p0": float(score_delta[0, 0]) if len(score_delta) else None,
             "first_score_p1": float(score_delta[0, 1]) if len(score_delta) else None,
             "game_score_p0": float(info["score_delta"][0]),
@@ -107,6 +140,12 @@ def compare_paired_rollouts(first_dir, empirical_dir):
             "first_candidate_changed": changed,
             "first_local_reward_first": a["first_reward"],
             "first_local_reward_empirical_q": b["first_reward"],
+            "first_pocketed_count_first": a["first_pocketed_count"],
+            "first_pocketed_count_empirical_q": b["first_pocketed_count"],
+            "first_target_pot_first": a["first_target_pot"],
+            "first_target_pot_empirical_q": b["first_target_pot"],
+            "first_scratch_first": a["first_scratch"],
+            "first_scratch_empirical_q": b["first_scratch"],
             "first_score_p0_first": a["first_score_p0"],
             "first_score_p0_empirical_q": b["first_score_p0"],
             "turns_first": a["turns"],
@@ -137,6 +176,24 @@ def compare_paired_rollouts(first_dir, empirical_dir):
             if row["first_candidate_changed"] is not None
         ]),
         "mean_paired_first_reward_difference": _mean(differences),
+        "first_target_pot_observed_first": sum(
+            row["first_target_pot_first"] is not None for row in rows
+        ),
+        "first_target_pot_observed_empirical_q": sum(
+            row["first_target_pot_empirical_q"] is not None for row in rows
+        ),
+        "first_target_pot_success_first": sum(
+            row["first_target_pot_first"] is True for row in rows
+        ),
+        "first_target_pot_success_empirical_q": sum(
+            row["first_target_pot_empirical_q"] is True for row in rows
+        ),
+        "first_pocketed_count_first": sum(
+            row["first_pocketed_count_first"] or 0 for row in rows
+        ),
+        "first_pocketed_count_empirical_q": sum(
+            row["first_pocketed_count_empirical_q"] or 0 for row in rows
+        ),
         "completed_games_first": sum(row["completed_first"] for row in rows),
         "completed_games_empirical_q": sum(
             row["completed_empirical_q"] for row in rows
@@ -171,6 +228,13 @@ def format_comparison(report):
         f"first-turn Macro LOCAL reward mean: first={s['mean_first_reward_first']} "
         f"empirical_q={s['mean_first_reward_empirical_q']} "
         f"mean paired difference (new-old)={s['mean_paired_first_reward_difference']}",
+        f"first-turn exact target pocket successes (where target exists): "
+        f"first={s['first_target_pot_success_first']}/"
+        f"{s['first_target_pot_observed_first']} "
+        f"empirical_q={s['first_target_pot_success_empirical_q']}/"
+        f"{s['first_target_pot_observed_empirical_q']}",
+        f"first-turn pocketed object counts: first={s['first_pocketed_count_first']} "
+        f"empirical_q={s['first_pocketed_count_empirical_q']}",
         f"complete games: first={s['completed_games_first']} "
         f"empirical_q={s['completed_games_empirical_q']}",
         f"mean cumulative SCORE delta for player 0: "
@@ -190,6 +254,10 @@ def format_comparison(report):
             f"changed={x['first_candidate_changed']} "
             f"first-local=({x['first_local_reward_first']}, "
             f"{x['first_local_reward_empirical_q']}) "
+            f"target-pot=({x['first_target_pot_first']}, "
+            f"{x['first_target_pot_empirical_q']}) "
+            f"first-scratch=({x['first_scratch_first']}, "
+            f"{x['first_scratch_empirical_q']}) "
             f"complete=({x['completed_first']}, {x['completed_empirical_q']}) "
             f"game-score-p0=({x['game_score_p0_first']}, "
             f"{x['game_score_p0_empirical_q']})"

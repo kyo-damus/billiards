@@ -16,7 +16,8 @@ from scripts.compare_mixed_rollout_modes import (
 
 def write_rollout(folder, seed, *, goal="DIRECT_ATTACK", reward=0.0,
                   initial_state=None, score0=0.0, score1=0.0,
-                  completed=False, stop="max_turns"):
+                  completed=False, stop="max_turns",
+                  target_pocket=None, actual_pocket=None):
     path = folder / f"rollout_seed_{seed}.npz"
     path.parent.mkdir(parents=True, exist_ok=True)
     state = (
@@ -26,6 +27,13 @@ def write_rollout(folder, seed, *, goal="DIRECT_ATTACK", reward=0.0,
     chosen = np.zeros(31, dtype=np.float32)
     chosen[1 if goal == "SAFETY" else 0] = 1
     chosen[{"DIRECT_ATTACK": 2, "POSITION_ATTACK": 3, "SAFETY": 4}[goal]] = 1
+    if target_pocket is not None:
+        chosen[5] = 1  # object ball 0
+        chosen[7 + target_pocket] = 1
+    before = np.full((1, 3), -1, dtype=np.int32)
+    after = before.copy()
+    if actual_pocket is not None:
+        after[0, 1] = actual_pocket
     np.savez_compressed(
         path,
         format_version=np.asarray(1),
@@ -36,8 +44,8 @@ def write_rollout(folder, seed, *, goal="DIRECT_ATTACK", reward=0.0,
         rollout_terminated=np.asarray(completed),
         state=state.reshape(1, 12),
         candidate=chosen.reshape(1, 31),
-        state_pocket_indices=np.full((1, 3), -1, dtype=np.int32),
-        next_state_pocket_indices=np.full((1, 3), -1, dtype=np.int32),
+        state_pocket_indices=before,
+        next_state_pocket_indices=after,
         score_delta=np.asarray([[score0, score1]], dtype=np.float32),
         macro_local_reward=np.asarray([reward], dtype=np.float32),
         player_before=np.asarray([0], dtype=np.int32),
@@ -122,3 +130,38 @@ def test_rejects_empty_rollout_directory(tmp_path):
     a.mkdir()
     with pytest.raises(ValueError, match="No rollout"):
         discover_seeded_rollouts(a)
+
+
+def test_pair_reports_exact_target_pot_separately_from_any_pocket(tmp_path):
+    first = tmp_path / "first"
+    empirical = tmp_path / "empirical"
+    write_rollout(
+        first, 94100, goal="DIRECT_ATTACK", target_pocket=2,
+        actual_pocket=3, reward=-0.5, score0=1.0,
+    )
+    write_rollout(
+        empirical, 94100, goal="POSITION_ATTACK", target_pocket=3,
+        actual_pocket=3, reward=1.25, score0=1.0,
+    )
+    report = compare_paired_rollouts(first, empirical)
+    s = report["summary"]
+    assert s["first_target_pot_observed_first"] == 1
+    assert s["first_target_pot_observed_empirical_q"] == 1
+    assert s["first_target_pot_success_first"] == 0
+    assert s["first_target_pot_success_empirical_q"] == 1
+    assert s["first_pocketed_count_first"] == 1
+    assert s["first_pocketed_count_empirical_q"] == 1
+    assert "exact target pocket successes" in format_comparison(report)
+    assert report["per_seed"][0]["first_target_pot_first"] is False
+    assert report["per_seed"][0]["first_target_pot_empirical_q"] is True
+
+
+def test_first_turn_safety_has_no_target_pocket(tmp_path):
+    first = tmp_path / "first"
+    empirical = tmp_path / "empirical"
+    write_rollout(first, 101, goal="SAFETY")
+    write_rollout(empirical, 101, goal="DIRECT_ATTACK", target_pocket=0)
+    report = compare_paired_rollouts(first, empirical)
+    assert report["summary"]["first_target_pot_observed_first"] == 0
+    assert report["summary"]["first_target_pot_observed_empirical_q"] == 1
+    assert report["per_seed"][0]["first_target_pot_first"] is None

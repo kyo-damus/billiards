@@ -224,3 +224,5 @@ python -m scripts.compare_mixed_rollout_modes \
 **注意:** ゲーム完了率は勝率ではない（スクラッチでも簡易ルール上の終了となる）。異なる政策の軌跡長が違えば累積のMacro局所報酬を単純に優劣へ結びつけられない。探索回数10と50などの予算を変える比較では、予算ごとに分けて上記のseed対応比較を実行する。実行後の性能結論はユーザーDGXログを確認してから記録する。
 
 対象テスト: `tests/pipelines/evaluation/test_compare_mixed_rollout_modes.py`。
+
+補足: `scripts.compare_mixed_rollout_modes` は初手の物理的的球入球数に加え、Attack系候補のエンコード済みの目標球/目標ポケットと実際の次状態のポケットIDを照合し、**狙ったポケットへの入球**を区別する。SAFETYや目標ポケットのない候補は `N/A` とし、失敗には数えない。Macro局所報酬にはwrong-pocket減点、POSITION加点、次ショット可能性の加点が含まれるため、スコアだけでなくこの物理的結果も確認する。
