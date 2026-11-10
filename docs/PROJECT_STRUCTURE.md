@@ -31,7 +31,7 @@
 │   ├── macro/
 │   ├── smoke/
 │   └── README.md
-├── tests/                           # 計77テストファイル
+├── tests/                           # 計78テストファイル
 │   ├── unit/                        # 36: 純粋/局所的な契約
 │   │   ├── macro/position/
 │   │   ├── micro/
@@ -46,7 +46,7 @@
 │   │   ├── agent/
 │   │   ├── defense/
 │   │   └── goal/
-│   ├── pipelines/                   # 30: 学習/評価/教師データ生成の処理
+│   ├── pipelines/                   # 31: 学習/評価/教師データ生成の処理
 │   │   ├── macro/
 │   │   ├── micro/
 │   │   ├── rollout/
@@ -170,7 +170,7 @@ cmake --build build --parallel 2
 ```
 
 - 既存DGXではPhase 4で既存 `build/` を変更せず、別の `/tmp/` ディレクトリでconfigure → C++ビルド → Python 3.11で `billiard_env_cpp` importと `BilliardSimulator()` を確認済み。既存の `build/Makefile` はGit非追跡のまま利用可能。
-- `tests/` は **unit 36 / integration 11 / pipelines 30 = 計77ファイル**（Phase 3の76件＋Phase 5で追加した集計テスト1件）。既存76件は各段階の指定テストが通過済み。新規テストはDGXでの確認待ちであり、**全スイート一括テスト済みという意味ではない**。
+- `tests/` は **unit 36 / integration 11 / pipelines 31 = 計78ファイル**（Phase 3の76件＋Phase 5で追加した集計テスト2件）。既存76件は各段階の指定テストが通過済み。新規テストはDGXでの確認待ちであり、**全スイート一括テスト済みという意味ではない**。
 
 作業内容に応じて、例えば以下の範囲でテストする。
 

@@ -1,0 +1,34 @@
+{
+  "schema_version": 1,
+  "experiment_type": "mixed_mcts_root_tie_break_paired_evaluation",
+  "entrypoint": "scripts.collect_mixed_rollouts",
+  "analysis_entrypoint": "scripts.compare_mixed_rollout_modes",
+  "notes": "Record only: compare first vs empirical_q for the same 24 seeds, with budgets 10 and 50 separately. Never label completion as win rate. No training.",
+  "checkpoint_inputs": {
+    "base": "goal_conditioned_micro_mixed_curriculum_100k.pt",
+    "residual": "position_power_residual_mlp_2000.pt",
+    "candidate_q": "macro_candidate_value_mixed_v2.pt",
+    "candidate_policy": "macro_policy_iteration_smoke/iteration_000/candidate_policy.pt",
+    "state_value": "zero (not supplied)"
+  },
+  "comparison_settings": {
+    "start_seed": 95000,
+    "games": 24,
+    "max_turns": 8,
+    "simulation_budgets": [
+      10,
+      50
+    ],
+    "root_tie_breakers": [
+      "first",
+      "empirical_q"
+    ],
+    "root_min_visits": 1,
+    "candidate_q_prior_visits": 2,
+    "c_puct": 1.5,
+    "gamma": 0.99,
+    "device": "cpu"
+  },
+  "outputs": "artifacts/runs/<run_id>/outputs/budget_<simulations>/<root_tie_breaker>/rollout_seed_<seed>.npz",
+  "qualification": "Matched initial GameState and seed alone do not prove policy gain; compare first-turn reward, completion, score, fouls, and full trajectory under simplified rules."
+}
