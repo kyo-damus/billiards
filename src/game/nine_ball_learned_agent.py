@@ -153,5 +153,7 @@ class NineBallMicroSACAgent(GeometryNineBallAgent):
         )
 
     def choose_shot(self, state, context=None) -> ShotPlan:
+        if state.ball_in_hand:
+            raise ValueError("Place cue ball before Micro shot generation")
         goal = self._choose_goal(state, context)
         return self.plan_goal(state, goal, context)
