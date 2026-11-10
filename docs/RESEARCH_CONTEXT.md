@@ -351,3 +351,10 @@ sign = +1 (同じプレイヤー) / -1 (相手へ手番交代)
 - これはMacroを更新しない独立した**Micro事前学習の入口**で、目標候補の抽出分布はMacro戦術選択比率の制約と無関係。今後同一v3仕様をMacro Policy/Q/Vに接続し、交互学習・MCTSでMacroとの相互依存を扱う。
 - `--device cuda` の場合は`CUDA_VISIBLE_DEVICES`でGPU1枚に限定する仕様。1GPUしか使わない。既存サーバーが共有8×32000MiBであることを再確認。空きGPUのIDは必ずDGXでユーザーが確認して指定する。
 - 学習成果の勝率・試合品質は**未検証**。現時点では収集した90ショットの盤面からresetして1-shot SACを学ぶため、未見初期盤面や多球相互作用の一般化は証明できない。補助データ取得だけでは最終的な対戦学習の完了ではない。
+
+## 29. Phase 8: 学習済み5D Micro推論の9-ball自律対戦への接続
+
+- `src/game/nine_ball_learned_agent.py`を追加。明示的にタグ付きのv3/108D状態+5D動作のMicro SAC checkpointのみロードし、候補目標条件で5自由度のショットを生成する。break/safetyは現在明示的な物理ショットのためMicro推論を経由しない。
+- 任意のv3/72D状態+36D候補Macro Policy checkpointを渡した場合にのみ、そのPolicyのlogitで候補選択。未指定時は**幾何的な暫定Macro**を使用。まだMacro Policyの9-ball学習/MCTSは未実装であり、学習済みMicroだけでフル階層RLと名乗らない。
+- `scripts/collect_nine_ball_self_play.py`に`--agent-kind micro_sac --micro-checkpoint <v3 checkpoint>`、`--macro-policy-checkpoint`（任意）、`--device`を追加。geometry既定値はそのまま。対戦時の`rule_context`をAgentへ渡す。GPUで推論する場合は明示`CUDA_VISIBLE_DEVICES`を1枚に制限する。ユニットテスト・DGXネイティブ実行は未確認。
+- **次の重要な実装**は、9-ballのMacro Policy/Q/Vを実際の自己対戦リターンやMCTS教師で更新する流れと、9-ball物理遷移を使うMCTS実装。今のMacro教師は幾何行動のログと一致せず、旧Macro学習をコピーして「完成」としてはいけない。

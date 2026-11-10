@@ -7,6 +7,7 @@ hierarchical RL self-play result. Unfinished racks/matches are never wins.
 import argparse
 import json
 from pathlib import Path
+from functools import partial
 
 from src.env.multi_ball_fastfiz import MultiBallFastFizSimulator
 from src.game.match import MatchConfig
@@ -67,7 +68,7 @@ def play_match(
             "consecutive_fouls": list(context.consecutive_fouls),
             "push_out_available": bool(context.push_out_available),
         } if context is not None else None
-        plan = agent.choose_shot(state)
+        plan = agent.choose_shot(state, context=context)
         result = match.step(target_ball=plan.target_ball, shot=plan.shot)
         physical = getattr(
             match, "last_physical",
@@ -182,7 +183,7 @@ def collect_matches(
             "seed": seed,
             "race_to": race_to,
             "max_shots_per_rack": max_shots_per_rack,
-            "players": ["GeometryNineBallAgent", "GeometryNineBallAgent"],
+            "players": [type(agent).__name__ for agent in agents],
             **outcome,
         }
         file = output_dir / f"match_seed_{seed}.json"
@@ -226,12 +227,41 @@ def parse_args(argv=None):
     p.add_argument("--start-seed", type=int, default=310000)
     p.add_argument("--max-shots-per-rack", type=int, default=60)
     p.add_argument("--output-dir", type=Path, required=True)
+    p.add_argument("--agent-kind", choices=("geometry", "micro_sac"), default="geometry")
+    p.add_argument("--micro-checkpoint", type=Path)
+    p.add_argument("--macro-policy-checkpoint", type=Path)
+    p.add_argument("--device", choices=("cpu", "cuda"), default="cpu")
     return p.parse_args(argv)
 
 
 if __name__ == "__main__":
     args = parse_args()
-    summary = collect_matches(**vars(args))
+    agent_factory = GeometryNineBallAgent
+    if args.agent_kind == "micro_sac":
+        if args.micro_checkpoint is None:
+            raise ValueError("--micro-checkpoint is required for micro_sac")
+        if args.device == "cuda":
+            import os
+            visible = os.environ.get("CUDA_VISIBLE_DEVICES", "")
+            if not visible or len(visible.split(",")) != 1:
+                raise ValueError("Shared GPU: set exactly one CUDA_VISIBLE_DEVICES ID")
+        from src.game.nine_ball_learned_agent import NineBallMicroSACAgent
+        agent_factory = partial(
+            NineBallMicroSACAgent,
+            micro_checkpoint=args.micro_checkpoint,
+            macro_policy_checkpoint=args.macro_policy_checkpoint,
+            device=args.device,
+        )
+    elif args.micro_checkpoint is not None or args.macro_policy_checkpoint is not None:
+        raise ValueError("Checkpoints require --agent-kind micro_sac")
+    summary = collect_matches(
+        matches=args.matches,
+        race_to=args.race_to,
+        start_seed=args.start_seed,
+        max_shots_per_rack=args.max_shots_per_rack,
+        output_dir=args.output_dir,
+        agent_factory=agent_factory,
+    )
     print(
         "=== Completed heuristic nine-ball data collection ===\n"
         f"finished={summary['finished_matches']}/{summary['matches']} "

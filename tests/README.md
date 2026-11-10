@@ -404,3 +404,20 @@ python -m scripts.train_nine_ball_micro_sac \
 ```
 
 GPUを使わず結合確認するなら`--steps 20 --warmup-steps 10 --batch-size 8 --report-interval 10 --device cpu`とし、既存出力を上書きしないよう別の`--output-dir`を指定する。
+
+## v3学習済みMicroによる9-ball自律対戦（学習済みMacroは任意）
+
+`src/game/nine_ball_learned_agent.py`は新5D SACチェックポイントを厳格に読み込み（旧2Dでは不可）、BREAKや明示Safety以外でGoal-conditionedショットを生成する。v3のMacro Candidate Policy checkpointはオプション。未指定の場合Macroは**幾何選択**で、フル階層RL結果とは扱わない。
+
+```bash
+python -m pytest tests/unit/game/test_nine_ball_learned_agent.py -v
+BILLIARDS_FASTFIZ_BUILD_DIR=/tmp/billiards-fastfiz-phase7 \
+python -m scripts.collect_nine_ball_self_play \
+  --agent-kind micro_sac \
+  --micro-checkpoint artifacts/runs/phase8_micro5d_first/outputs/micro_sac_5d.pt \
+  --matches 2 --race-to 2 --max-shots-per-rack 40 \
+  --start-seed 320000 \
+  --output-dir artifacts/runs/phase8_micro5d_selfplay_v1/outputs
+```
+
+旧checkpointや再利用済みout-dirを上書きしない。
