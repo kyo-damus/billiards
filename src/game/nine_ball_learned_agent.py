@@ -151,6 +151,7 @@ class NineBallMicroSACAgent(GeometryNineBallAgent):
                 else "GEOMETRY_MACRO"
             ),
             target_pocket=goal.target_pocket,
+            macro_goal=goal,
         )
 
     def choose_shot(self, state, context=None) -> ShotPlan:
