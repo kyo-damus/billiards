@@ -22,6 +22,9 @@ class ShotPlan:
     shot: PhysicalShot5D
     goal_label: str
     target_pocket: int | None = None
+    # Exact v3 TacticalGoal for selected-action Q learning; absent for
+    # legacy/nonlearned GeometryNineBallAgent shots.
+    macro_goal: object | None = None
 
 
 class GeometryNineBallAgent:
