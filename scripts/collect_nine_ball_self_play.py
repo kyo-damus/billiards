@@ -84,6 +84,10 @@ def play_match(
             "cue_placement": cue_placement,
             "chosen_action": {
                 "goal_label": plan.goal_label,
+                "goal_v3": (
+                    encode_goal_v3(plan.macro_goal).tolist()
+                    if plan.macro_goal is not None else None
+                ),
                 "target_ball": int(plan.target_ball),
                 "target_pocket": plan.target_pocket,
                 **plan.shot.to_fastfiz_kwargs(),
