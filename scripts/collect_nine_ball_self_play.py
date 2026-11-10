@@ -253,23 +253,42 @@ def parse_args(argv=None):
 if __name__ == "__main__":
     args = parse_args()
     agent_factory = GeometryNineBallAgent
-    if args.agent_kind == "micro_sac":
+    if args.agent_kind in ("micro_sac", "micro_mcts"):
         if args.micro_checkpoint is None:
-            raise ValueError("--micro-checkpoint is required for micro_sac")
+            raise ValueError("--micro-checkpoint is required for learned agents")
         if args.device == "cuda":
             import os
             visible = os.environ.get("CUDA_VISIBLE_DEVICES", "")
             if not visible or len(visible.split(",")) != 1:
                 raise ValueError("Shared GPU: set exactly one CUDA_VISIBLE_DEVICES ID")
-        from src.game.nine_ball_learned_agent import NineBallMicroSACAgent
-        agent_factory = partial(
-            NineBallMicroSACAgent,
-            micro_checkpoint=args.micro_checkpoint,
-            macro_policy_checkpoint=args.macro_policy_checkpoint,
-            device=args.device,
-        )
-    elif args.micro_checkpoint is not None or args.macro_policy_checkpoint is not None:
-        raise ValueError("Checkpoints require --agent-kind micro_sac")
+        if args.agent_kind == "micro_sac":
+            if args.state_value_checkpoint is not None:
+                raise ValueError("State V checkpoint requires --agent-kind micro_mcts")
+            from src.game.nine_ball_learned_agent import NineBallMicroSACAgent
+            agent_factory = partial(
+                NineBallMicroSACAgent,
+                micro_checkpoint=args.micro_checkpoint,
+                macro_policy_checkpoint=args.macro_policy_checkpoint,
+                device=args.device,
+            )
+        else:
+            from src.game.nine_ball_mcts_agent import NineBallMCTSAgent
+            agent_factory = partial(
+                NineBallMCTSAgent,
+                micro_checkpoint=args.micro_checkpoint,
+                macro_policy_checkpoint=args.macro_policy_checkpoint,
+                state_value_checkpoint=args.state_value_checkpoint,
+                simulations=args.mcts_simulations,
+                max_depth=args.mcts_max_depth,
+                c_puct=args.mcts_c_puct,
+                root_min_visits=args.mcts_root_min_visits,
+                device=args.device,
+            )
+    elif any(v is not None for v in (
+        args.micro_checkpoint, args.macro_policy_checkpoint,
+        args.state_value_checkpoint,
+    )):
+        raise ValueError("Checkpoints require a learned --agent-kind")
     summary = collect_matches(
         matches=args.matches,
         race_to=args.race_to,
