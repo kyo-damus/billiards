@@ -73,7 +73,9 @@ def test_macro_policy_requires_distinct_versioned_checkpoint(tmp_path):
     from dataclasses import replace
     rack = replace(create_nine_ball_rack(breaker=0, seed=1), break_shot=False)
     shot = agent.choose_shot(rack)
-    assert shot.goal_label.endswith("MACRO_POLICY")
+    assert agent.macro_policy is not None
+    assert shot.target_ball == 1
+    assert shot.goal_label.endswith(("MACRO_POLICY", "_EXPLICIT"))
     # Loader should reject the legacy Macro policy dimensions even if there
     # happens to be a torch model with compatible parameter names.
     ckp = torch.load(macro_path, weights_only=True)

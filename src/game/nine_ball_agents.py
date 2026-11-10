@@ -63,7 +63,7 @@ class GeometryNineBallAgent:
         choices.sort()
         return tuple((x, y) for _, x, y in choices)
 
-    def choose_shot(self, state) -> ShotPlan:
+    def choose_shot(self, state, context=None) -> ShotPlan:
         if state.ball_in_hand:
             raise ValueError("Cue ball must be placed before selecting shot.")
         available = state.on_table_object_balls()
