@@ -341,3 +341,17 @@ python -m pytest tests/unit/game/test_nine_ball_rules.py -v
 ```
 
 新C++を使った実物理ルール接続は次段階で確認する。既存の3球`GameRules`、Micro SAC、Macroチェックポイントを変更しない。
+
+### C++実物理と9-ballルールを結合する確認
+
+以下の追加テストは、実際の9球菱形ラックを生成し、隔離FastFizで1ショット実行して物理イベントからルール判定・手番・再配置同期までを確認する。入球や合法ブレイクの成功を強制しない（それは性能指標であり実装結合テストではない）。
+
+```bash
+cd ~/research
+BILLIARDS_FASTFIZ_BUILD_DIR=/tmp/billiards-fastfiz-phase7 \
+python -m pytest \
+  tests/unit/game/test_nine_ball_rules.py \
+  tests/integration/game/test_nine_ball_native_session.py -v
+```
+
+`src/game/nine_ball_rules.py` が公式のブレイク・プッシュアウト・レフェリー判定まで網羅したと誤認しないこと。未完成の規則は`docs/RESEARCH_CONTEXT.md`に記録。
