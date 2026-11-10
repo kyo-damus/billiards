@@ -425,3 +425,13 @@ sign = +1 (同じプレイヤー) / -1 (相手へ手番交代)
 - `scripts/train_nine_ball_macro_visits_v3.py`: v3 Candidate Policyの既存重みを任意の初期値として読み、MCTS訪問分布へのlistwise CEで更新。検証はmatch seed単位。初期checkpointと比較し、検証CEが悪化した場合は更新前の重みを保持。保存形式は従来のv3 Policy互換。
 - **MCTS方策の教師あり蒸留**であり、対戦勝率改善、Q/Vの更新、反復学習ループ完成を意味しない。微小な学習・検証データでのCE改善を本実験の結論としない。
 - 実装/検証コマンドは `docs/PHASE14_NINE_BALL_VISIT_POLICY.md`。GitHubへのコミットは完了、DGXのpytest・ネイティブ自己対戦・訪問データ生成・学習実行は**未確認**。
+
+## 39. 2026-11-10 Phase 14完走・ゼミ発表準備へ移行（ここで実装を一時停止）
+
+- ユーザーDGX実行: 関連pytest **28件すべてPASS（5.40秒）**。
+- 9-ball学習済みMacro Policy + MCTS 16 simulations、深さ2、固定5D Micro、State Vによる自己対戦が**3/3試合完走**。seed 460000/460002/460004、計30ショット、7反則、今回の3試合の勝者は全てplayer0。勝率改善・先後有利の推定には使えない。
+- MCTS visitの教師データを生成: 30 root（うち単一候補3を除外）、有効27 root・185候補。train 2試合15 root、validation 1試合12 root。
+- Macro Policy v3を5 epoch更新、検証visit CE **1.6741823653 → 1.6720843017**、KL **0.1091053 → 0.1070073**、最大visit候補一致率 **0.8333333のまま**。保存先 `artifacts/runs/phase14_nineball_macro_visit_policy_smoke_v1/outputs/macro_policy_visits_v3.pt`。
+- **正確な結論:** 9-ball Macro → MCTS → Goal-conditioned 5D Micro → FastFiz → ルール → 訪問データ → Macro Policy更新の一巡が**個別スクリプトを順番に実行する形で成立**。多回反復の自動ループ、性能向上を検証する対戦比較、大規模データによる学習は未実施。少数データのCE僅差改善はゲーム強さの改善ではない。
+- **ユーザー指示により、Phase14を研究実装の区切りとして追加実験・新フェーズ実装を止め、ゼミ資料制作へ移行**。大規模GPU学習もゼミ後に再検討。
+- ゼミ資料の構成・数値・限界は `docs/SEMINAR_PHASE8_14_9BALL_HANDOFF_20261110.md` を参照。白黒中心、差分は赤字、コード掲載なし、数式と文章中心。過去環境の数値と新9-ballの数値を混同しない。
