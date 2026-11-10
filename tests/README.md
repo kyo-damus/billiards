@@ -385,3 +385,22 @@ python -m pytest tests/unit/game/test_nine_ball_encoding_v3.py -v
 ```
 
 9-ballのPosition/Safety候補は暫定幾何値。戦術の出現割合を強制しない。将来の新Macro Policy/Q/V・5D Micro SACをこの次元へ接続する。
+
+## 2026-11-10: 9-ballの1shot Goal-conditioned Micro SAC (5D)
+
+`scripts/train_nine_ball_micro_sac.py`は新`108D`(72D盤面+36D目標)の状態から`5D`正規化行動を出すSACを、保存済み9-ballの幾何自己対戦前盤面＋FastFiz 1shot報酬で学習する。既存2D Microとは完全に別のcheckpoint形式。これはまだ対戦全体の学習ではない。
+
+```bash
+cd ~/research
+python -m pytest tests/unit/game/test_nine_ball_encoding_v3.py \
+  tests/pipelines/micro/test_train_nine_ball_micro_sac.py -v
+# GPUは共有。nvidia-smiで空きを確認してから一枚だけ指定。
+CUDA_VISIBLE_DEVICES=<空いているGPU番号> \
+BILLIARDS_FASTFIZ_BUILD_DIR=/tmp/billiards-fastfiz-phase7 \
+python -m scripts.train_nine_ball_micro_sac \
+  --rollout-dir artifacts/runs/phase7_9ball_geometry_selfplay_v1/outputs \
+  --output-dir artifacts/runs/phase8_micro5d_first/outputs \
+  --steps 5000 --device cuda
+```
+
+GPUを使わず結合確認するなら`--steps 20 --warmup-steps 10 --batch-size 8 --report-interval 10 --device cpu`とし、既存出力を上書きしないよう別の`--output-dir`を指定する。

@@ -344,3 +344,10 @@ sign = +1 (同じプレイヤー) / -1 (相手へ手番交代)
 - 次の主要課題は多球用Macro/Microの**入力次元・球ID**契約。旧12D/31D Macro、9D観測+2D MicroのCheckpointを新10球で読むことはできないため、`src/game/nine_ball_encoding_v3.py` にv3専用 `encode_rack_v3`（実球番号0..15の固定16枠+ルール文脈=72D）、`encode_goal_v3`（BREAK/DIRECT/POSITION/SAFETY、球ID、ポケット、停止目標、明示shot=36D）、Micro結合108Dの仕様を新設。球数が違う練習盤面も同次元のpad表現で受け取れる。
 - `generate_nine_ball_goals` は、9ballの最小番号球をfirst contactの前提とし、break/直接ポケット/次球位置/簡易safety候補を列挙する**学習・MCTS未接続**の入口。選択戦術の出現率は強制しない。POSITION目標やSAFETYの現内容は仮の幾何値であり最適性を示さない。
 - GPUは共有8×32000MiB、原則1GPU・空き確認後最大2枚。データからの学習を次に接続する。
+
+## 28. Phase 8: 9-ball実物理shotによる5自由度Micro SAC学習経路（DGX未実行）
+
+- `scripts/train_nine_ball_micro_sac.py` 追加。保存済み幾何Agentの`match_seed_*.json`から、ショット前の盤面・foul contextを復元し、direct/positionのTacticalGoalを生成する。FastFizで毎回5D行動を実行、ルールでファウルや正しい目標ポケットを判定して一ショットのGoal条件付き報酬で既存`SACAgent(state_dim=108,action_dim=5)`を訓練する。旧Microの事前学習済み2Dは読み込まない/上書きしない。新checkpoint`micro_sac_5d.pt`にv3/108D/5Dタグを保存。
+- これはMacroを更新しない独立した**Micro事前学習の入口**で、目標候補の抽出分布はMacro戦術選択比率の制約と無関係。今後同一v3仕様をMacro Policy/Q/Vに接続し、交互学習・MCTSでMacroとの相互依存を扱う。
+- `--device cuda` の場合は`CUDA_VISIBLE_DEVICES`でGPU1枚に限定する仕様。1GPUしか使わない。既存サーバーが共有8×32000MiBであることを再確認。空きGPUのIDは必ずDGXでユーザーが確認して指定する。
+- 学習成果の勝率・試合品質は**未検証**。現時点では収集した90ショットの盤面からresetして1-shot SACを学ぶため、未見初期盤面や多球相互作用の一般化は証明できない。補助データ取得だけでは最終的な対戦学習の完了ではない。
