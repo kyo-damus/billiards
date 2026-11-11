@@ -472,3 +472,11 @@ sign = +1 (同じプレイヤー) / -1 (相手へ手番交代)
   同じ学習データにするのは厳密な比較実験では不適切であり、再開はdebug限定。
   本格的な実験は`phase15_hierarchical_iteration_v2`など新runに収集し直す。
 - テスト・DGXの新規実Native実行は未確認。修正成功と学習性能向上は未確定。
+
+## 41. 2026-11-11 Phase15単独リプレイ成功とチャット移行
+
+- ユーザーDGXで`seed=510040`を修正後Phase15の`micro_mcts`+Policy v3+State V v3+5D Microで独立1試合再実行。**finished=True / winner=0 / rack_wins=[1,0] / 13 shots / 4 fouls**、1/1完走。保存先`artifacts/runs/phase15_badshot_replay_seed510040_v1/outputs`。これは例外がその1試合で再発しなかったというスモーク結果であり、根本原因の完全修正や性能改善ではない。
+- 元の`phase15_hierarchical_iteration_v1`は初回32試合のうち20件保存して止まったまま。データを混合しないため旧runは保全し、修正後の関連pytest結果を確認した上で**新run`phase15_hierarchical_iteration_v2`**で最初から収集する。旧runでの`--resume --accept-unverified-code-change`はデバッグ目的のみ。
+- 現在の反復学習経路は自己対戦→MCTS visits Policy→選択行動MC Q/V→Macro選択Goalで5D Micro継続学習→次反復。完全自動2反復はまだ未完走。
+- チャット移行用の最新正本`docs/CHAT_HANDOFF_PHASE15_20261111.md`を新設。新チャットでは必ず最新HEAD・このファイル・現在のpytest/実験ログを照合。研究の優先は**9-ballの提案手法一通り完成、大規模自己対戦、独立評価、考察**であり、微細な最適化と既存研究比較は後回し。
+- ユーザーはGitHubのツール承認を「すべて許可」に設定。Private状態で一部書込手段に403が出たことがあるが、別経路`create_file`/`update_file`でのコミットは成功。ユーザーが一旦Publicへ戻し、2026-11-11時点のGitHub連携で`visibility=public`・`push=true`を確認した。アクセス状態は新チャットで再確認すること。
