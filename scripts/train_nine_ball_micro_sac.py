@@ -22,6 +22,9 @@ from src.game.nine_ball_encoding_v3 import (
     generate_nine_ball_goals, reference_angle_deg,
 )
 from src.game.nine_ball_rules import NineBallContext, NineBallRules, TABLE_LENGTH_M, TABLE_WIDTH_M
+from src.game.nine_ball_physics_guard import (
+    InvalidPhysicalTransition, validate_physical_step, validate_rack_layout,
+)
 from src.game.rack_state import RackState, TableGameConfig
 from src.micro.replay_buffer import ReplayBuffer
 from src.micro.sac import SACAgent
@@ -210,6 +213,24 @@ def restore_micro_checkpoint(agent: SACAgent, checkpoint: Path) -> int:
     return previous_steps
 
 
+def execute_valid_training_shot(simulator, rules, state, goal, context, shot):
+    """Never label a native non-shot or impossible successor as SAC experience."""
+    validate_rack_layout(state)
+    simulator.restore(state)
+    try:
+        physical = simulator.step(target_ball=goal.target_ball, shot=shot)
+    except RuntimeError as exc:
+        if "Bad Shot Exception" not in str(exc):
+            raise
+        raise InvalidPhysicalTransition(
+            f"FastFiz rejected Micro training shot: {exc}"
+        ) from exc
+    validate_physical_step(physical)
+    outcome = rules.apply(state, physical, context)
+    validate_rack_layout(outcome.next_state)
+    return physical, outcome
+
+
 def train(args, *, simulator_factory=MultiBallFastFizSimulator):
     """Run one-step off-policy SAC with an explicitly bounded GPU allocation."""
     if args.steps <= 0 or args.batch_size <= 0 or args.warmup_steps < 0:
@@ -249,30 +270,55 @@ def train(args, *, simulator_factory=MultiBallFastFizSimulator):
         f"device={device}, training_states={len(samples)}, steps={args.steps}, "
         "action_dim=5, version=3 (NOT old 2D Micro)"
     )
+    invalid_physics_attempts = 0
+    skipped_no_goal_attempts = 0
+    consecutive_invalid_physics = 0
+    consecutive_no_goal = 0
     for step in range(1, args.steps + 1):
-        sample = samples[int(rng.integers(0, len(samples)))]
-        state, context = sample.state, sample.context
-        if args.goal_source == "logged":
-            goal = sample.selected_goal
-            if goal is None:
-                raise RuntimeError("Logged-goal training sample has no selected goal")
-        else:
-            candidate_goals = tuple(
-                g for g in generate_nine_ball_goals(state)
-                if g.kind in ("DIRECT_ATTACK", "POSITION_ATTACK")
-            )
-            if not candidate_goals:
+        # "steps" counts accepted physical transitions, not rejected native
+        # attempts. Do not push invalid shots or invent a negative reward.
+        while True:
+            sample = samples[int(rng.integers(0, len(samples)))]
+            state, context = sample.state, sample.context
+            if args.goal_source == "logged":
+                goal = sample.selected_goal
+                if goal is None:
+                    raise RuntimeError("Logged-goal training sample has no selected goal")
+            else:
+                candidate_goals = tuple(
+                    g for g in generate_nine_ball_goals(state)
+                    if g.kind in ("DIRECT_ATTACK", "POSITION_ATTACK")
+                )
+                if not candidate_goals:
+                    skipped_no_goal_attempts += 1
+                    consecutive_no_goal += 1
+                    if consecutive_no_goal >= 128:
+                        raise RuntimeError("No eligible Micro attack Goal in 128 attempts")
+                    continue
+                goal = candidate_goals[int(rng.integers(0, len(candidate_goals)))]
+            consecutive_no_goal = 0
+            encoded = conditioned_observation_v3(state, goal, context)
+            if step <= args.warmup_steps:
+                action = rng.uniform(-1.0, 1.0, size=5).astype(np.float32)
+            else:
+                action = agent.select_action(encoded, deterministic=False)
+            shot = decoder.decode(action, reference_angle_deg(state, goal))
+            try:
+                physical, outcome = execute_valid_training_shot(
+                    simulator, rules, state, goal, context, shot,
+                )
+            except InvalidPhysicalTransition as exc:
+                invalid_physics_attempts += 1
+                consecutive_invalid_physics += 1
+                if (consecutive_invalid_physics >= 128
+                        or invalid_physics_attempts >= max(256, args.steps * 2)):
+                    raise RuntimeError(
+                        "Too many invalid Micro physical transitions "
+                        f"(count={invalid_physics_attempts}, last={exc})"
+                    ) from exc
                 continue
-            goal = candidate_goals[int(rng.integers(0, len(candidate_goals)))]
-        encoded = conditioned_observation_v3(state, goal, context)
-        if step <= args.warmup_steps:
-            action = rng.uniform(-1.0, 1.0, size=5).astype(np.float32)
-        else:
-            action = agent.select_action(encoded, deterministic=False)
-        shot = decoder.decode(action, reference_angle_deg(state, goal))
-        simulator.restore(state)
-        physical = simulator.step(target_ball=goal.target_ball, shot=shot)
-        outcome = rules.apply(state, physical, context)
+            consecutive_invalid_physics = 0
+            break
         reward, exact = micro_reward(goal, state, physical, outcome)
         replay.push(
             encoded, action, reward, np.zeros_like(encoded), True
@@ -289,6 +335,8 @@ def train(args, *, simulator_factory=MultiBallFastFizSimulator):
                 "mean_reward": float(np.mean(window_rewards)),
                 "exact_target_pot_rate": float(np.mean(window_success)),
                 "replay_size": len(replay),
+                "invalid_physics_attempts": invalid_physics_attempts,
+                "skipped_no_goal_attempts": skipped_no_goal_attempts,
                 "alpha": float(agent.alpha.item()),
                 "actor_loss": losses["actor_loss"] if losses else None,
                 "critic_loss": losses["critic_loss"] if losses else None,
@@ -321,6 +369,8 @@ def train(args, *, simulator_factory=MultiBallFastFizSimulator):
         "method": "one_shot_goal_conditioned_sac",
         "training_states": len(samples),
         "episodes": args.steps,
+        "invalid_physics_attempts": invalid_physics_attempts,
+        "skipped_no_goal_attempts": skipped_no_goal_attempts,
         "source_rollout_dir": str(args.rollout_dir),
         "goal_source": args.goal_source,
         "init_checkpoint": str(args.init_checkpoint) if args.init_checkpoint else None,
