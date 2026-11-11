@@ -31,10 +31,51 @@ from src.micro.shot_control import Shot5DDecoder
 class TrainingSample:
     state: RackState
     context: NineBallContext
+    selected_goal: object | None = None
 
 
-def load_training_states(rollout_dir: Path) -> tuple[TrainingSample, ...]:
-    """Load only observed pre-shot states; reject simulated target leakage."""
+def _selected_attack_goal(state, row):
+    """Recover a *logged* Macro choice without silently inventing a new goal.
+
+    A generator/code revision can make an old goal unrecoverable. Fail rather
+    than training Micro on a different TacticalGoal from the executed one.
+    """
+    chosen = (row.get("chosen_action") or {}).get("goal_v3")
+    if chosen is None:
+        return None
+    selected = np.asarray(chosen, dtype=np.float32)
+    if selected.shape != (36,) or not np.all(np.isfinite(selected)):
+        raise ValueError("Malformed logged 36D Macro Goal")
+    # Break and the present heuristic Safety have explicit physical shots.
+    # Micro SAC currently trains only attack goals, not these two kinds.
+    if not np.allclose(selected[:4], (0, 1, 0, 0), atol=1e-5) and not np.allclose(
+        selected[:4], (0, 0, 1, 0), atol=1e-5
+    ):
+        if not np.allclose(selected[:4], (1, 0, 0, 0), atol=1e-5) and not np.allclose(
+            selected[:4], (0, 0, 0, 1), atol=1e-5
+        ):
+            raise ValueError("Invalid logged Macro Goal kind")
+        return None
+    from src.game.nine_ball_encoding_v3 import encode_goal_v3
+    matches = [
+        goal for goal in generate_nine_ball_goals(state)
+        if goal.kind in ("DIRECT_ATTACK", "POSITION_ATTACK")
+        and np.allclose(encode_goal_v3(goal), selected, atol=1e-5, rtol=0)
+    ]
+    if len(matches) != 1:
+        raise ValueError(
+            "Logged selected Macro Goal cannot be recovered exactly. "
+            "Candidate generator or stored goal encoding may have changed."
+        )
+    return matches[0]
+
+
+def load_training_states(
+    rollout_dir: Path, *, goal_source: str = "uniform",
+) -> tuple[TrainingSample, ...]:
+    """Load observed pre-shot states; optionally use exact selected Macro goals."""
+    if goal_source not in ("uniform", "logged"):
+        raise ValueError("goal_source must be uniform or logged")
     rollout_dir = Path(rollout_dir)
     files = sorted(rollout_dir.glob("match_seed_*.json"))
     if not files:
@@ -80,9 +121,15 @@ def load_training_states(rollout_dir: Path) -> tuple[TrainingSample, ...]:
                     push_out_available=bool(raw_ctx["push_out_available"]),
                 )
             if not state.break_shot and state.on_table_object_balls():
-                training.append(TrainingSample(state, context))
+                chosen = _selected_attack_goal(state, row) if goal_source == "logged" else None
+                if goal_source == "logged" and chosen is None:
+                    continue
+                training.append(TrainingSample(state, context, chosen))
     if not training:
-        raise ValueError("No usable non-break pre-shot states in the rollouts")
+        raise ValueError(
+            "No eligible non-break states with supported Macro goals "
+            f"for goal_source={goal_source}"
+        )
     return tuple(training)
 
 
@@ -102,7 +149,9 @@ def micro_reward(goal, before, physical, outcome) -> tuple[float, bool]:
         reward += 0.4
     if physical.first_contact_ball != min(before.on_table_object_balls()):
         reward -= 0.5
-    if goal.cue_stop_xy is not None and not outcome.foul:
+    # POSITION means pot the specified ball in the specified pocket AND
+    # place the cue. Do not reward cue position after a missed pot.
+    if goal.cue_stop_xy is not None and exact and not outcome.foul:
         cue = np.asarray(physical.positions[0], dtype=np.float64)
         desired = np.asarray(goal.cue_stop_xy, dtype=np.float64)
         d = float(np.linalg.norm(cue - desired))
@@ -126,6 +175,40 @@ def resolve_device(name: str) -> str:
     raise ValueError("Select --device cpu or cuda explicitly")
 
 
+
+def restore_micro_checkpoint(agent: SACAgent, checkpoint: Path) -> int:
+    """Continue versioned 5D SAC weights without ever loading legacy 2D models.
+
+    Optimizer states and replay are *intentionally reset* on this new run;
+    only actor, critics and entropy coefficient are carried forward.
+    """
+    ckpt = torch.load(checkpoint, map_location="cpu", weights_only=True)
+    required = ("actor", "critic", "critic_target", "log_alpha")
+    if (
+        ckpt.get("format_version") != ENCODING_VERSION
+        or ckpt.get("model_kind") != "nine_ball_goal_conditioned_micro_sac_5d"
+        or ckpt.get("state_dim") != MICRO_CONDITIONED_V3_DIM
+        or ckpt.get("action_dim") != 5
+        or ckpt.get("hidden_dim") != agent.actor.fc1.out_features
+        or any(key not in ckpt for key in required)
+    ):
+        raise ValueError("Incompatible Micro checkpoint: expected strict v3/108D/5D SAC")
+    agent.actor.load_state_dict(ckpt["actor"], strict=True)
+    agent.critic.load_state_dict(ckpt["critic"], strict=True)
+    agent.critic_target.load_state_dict(ckpt["critic_target"], strict=True)
+    with torch.no_grad():
+        previous_log_alpha = torch.as_tensor(
+            ckpt["log_alpha"], dtype=agent.log_alpha.dtype, device=agent.device,
+        )
+        if previous_log_alpha.shape != agent.log_alpha.shape or not torch.isfinite(previous_log_alpha).all():
+            raise ValueError("Invalid saved Micro entropy coefficient")
+        agent.log_alpha.copy_(previous_log_alpha)
+    previous_steps = int(ckpt.get("trained_steps", 0))
+    if previous_steps < 0:
+        raise ValueError("Negative previous Micro trained_steps")
+    return previous_steps
+
+
 def train(args, *, simulator_factory=MultiBallFastFizSimulator):
     """Run one-step off-policy SAC with an explicitly bounded GPU allocation."""
     if args.steps <= 0 or args.batch_size <= 0 or args.warmup_steps < 0:
@@ -134,7 +217,7 @@ def train(args, *, simulator_factory=MultiBallFastFizSimulator):
         raise ValueError("Invalid replay capacity or update count")
     if args.output_dir.exists():
         raise FileExistsError(f"Refusing to overwrite {args.output_dir}")
-    samples = load_training_states(args.rollout_dir)
+    samples = load_training_states(args.rollout_dir, goal_source=args.goal_source)
     device = resolve_device(args.device)
     np.random.seed(args.seed)
     random.seed(args.seed)
@@ -150,6 +233,10 @@ def train(args, *, simulator_factory=MultiBallFastFizSimulator):
         learning_rate=args.learning_rate,
         device=device,
     )
+    initial_steps = (
+        restore_micro_checkpoint(agent, args.init_checkpoint)
+        if args.init_checkpoint is not None else 0
+    )
     replay = ReplayBuffer(capacity=args.replay_capacity)
     simulator = simulator_factory(TableGameConfig.nine_ball_inventory())
     rules = NineBallRules()
@@ -164,13 +251,18 @@ def train(args, *, simulator_factory=MultiBallFastFizSimulator):
     for step in range(1, args.steps + 1):
         sample = samples[int(rng.integers(0, len(samples)))]
         state, context = sample.state, sample.context
-        candidate_goals = tuple(
-            g for g in generate_nine_ball_goals(state)
-            if g.kind in ("DIRECT_ATTACK", "POSITION_ATTACK")
-        )
-        if not candidate_goals:
-            continue
-        goal = candidate_goals[int(rng.integers(0, len(candidate_goals)))]
+        if args.goal_source == "logged":
+            goal = sample.selected_goal
+            if goal is None:
+                raise RuntimeError("Logged-goal training sample has no selected goal")
+        else:
+            candidate_goals = tuple(
+                g for g in generate_nine_ball_goals(state)
+                if g.kind in ("DIRECT_ATTACK", "POSITION_ATTACK")
+            )
+            if not candidate_goals:
+                continue
+            goal = candidate_goals[int(rng.integers(0, len(candidate_goals)))]
         encoded = conditioned_observation_v3(state, goal, context)
         if step <= args.warmup_steps:
             action = rng.uniform(-1.0, 1.0, size=5).astype(np.float32)
@@ -212,7 +304,11 @@ def train(args, *, simulator_factory=MultiBallFastFizSimulator):
         "state_dim": MICRO_CONDITIONED_V3_DIM,
         "action_dim": 5,
         "hidden_dim": args.hidden_dim,
-        "trained_steps": args.steps,
+        "trained_steps": initial_steps + args.steps,
+        "training_steps_this_run": args.steps,
+        "init_checkpoint": str(args.init_checkpoint) if args.init_checkpoint else None,
+        "optimizer_state_carried_over": False,
+        "goal_source": args.goal_source,
         "actor": agent.actor.state_dict(),
         "critic": agent.critic.state_dict(),
         "critic_target": agent.critic_target.state_dict(),
@@ -225,6 +321,11 @@ def train(args, *, simulator_factory=MultiBallFastFizSimulator):
         "training_states": len(samples),
         "episodes": args.steps,
         "source_rollout_dir": str(args.rollout_dir),
+        "goal_source": args.goal_source,
+        "init_checkpoint": str(args.init_checkpoint) if args.init_checkpoint else None,
+        "previous_trained_steps": initial_steps,
+        "training_steps_this_run": args.steps,
+        "optimizer_state_carried_over": False,
         "gpu_visible": os.environ.get("CUDA_VISIBLE_DEVICES"),
         "device": device,
         "reward_note": (
@@ -243,6 +344,11 @@ def train(args, *, simulator_factory=MultiBallFastFizSimulator):
 def parse_args(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--rollout-dir", required=True, type=Path)
+    parser.add_argument("--init-checkpoint", type=Path)
+    parser.add_argument(
+        "--goal-source", choices=("uniform", "logged"), default="uniform",
+        help="uniform candidates or exact attack Goals from collected Macro decisions",
+    )
     parser.add_argument("--output-dir", required=True, type=Path)
     parser.add_argument("--steps", type=int, default=5000)
     parser.add_argument("--warmup-steps", type=int, default=400)

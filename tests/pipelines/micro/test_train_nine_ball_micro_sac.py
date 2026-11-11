@@ -9,6 +9,7 @@ import pytest
 
 from scripts.train_nine_ball_micro_sac import (
     load_training_states, micro_reward, parse_args, resolve_device,
+    restore_micro_checkpoint,
 )
 from src.game.nine_ball_encoding_v3 import NineBallGoal
 from src.game.nine_ball_session import create_nine_ball_rack
@@ -102,3 +103,93 @@ def test_training_loader_accepts_new_micro_self_play_source(tmp_path):
     path.write_text(json.dumps(payload))
     samples = load_training_states(folder)
     assert len(samples) == 1
+
+
+def test_position_attack_reward_requires_correct_pocket_in_addition_to_cue_stop():
+    from src.game.nine_ball_encoding_v3 import NineBallGoal
+    rack = replace(create_nine_ball_rack(breaker=0, seed=2), break_shot=False)
+    stop = tuple(float(x) for x in rack.ball_positions[0])
+    goal = NineBallGoal("POSITION_ATTACK", 1, 2, stop, 0.25)
+    pockets = rack.ball_pocket_indices.copy()
+    physical = type("Physical", (), {
+        "pocket_indices": pockets,
+        "positions": rack.ball_positions.copy(),
+        "first_contact_ball": 1,
+    })()
+    missed = type("Outcome", (), {"foul": False, "newly_pocketed": ()})()
+    missed_reward, missed_exact = micro_reward(goal, rack, physical, missed)
+    direct_goal = NineBallGoal("DIRECT_ATTACK", 1, 2)
+    direct_reward, _ = micro_reward(direct_goal, rack, physical, missed)
+    assert not missed_exact
+    assert missed_reward == pytest.approx(direct_reward)
+    pockets[1] = 2
+    potted = type("Outcome", (), {"foul": False, "newly_pocketed": (1,)})()
+    success_reward, success_exact = micro_reward(goal, rack, physical, potted)
+    assert success_exact
+    assert success_reward > missed_reward + 2.0
+
+
+def test_logged_macro_goal_training_uses_exact_selected_goal(tmp_path):
+    from src.game.nine_ball_encoding_v3 import (
+        encode_goal_v3, generate_nine_ball_goals,
+    )
+    folder = tmp_path / "rollouts"
+    _rollout(folder)
+    path = folder / "match_seed_0.json"
+    payload = json.loads(path.read_text())
+    rack = replace(create_nine_ball_rack(breaker=0, seed=1), break_shot=False)
+    chosen = next(g for g in generate_nine_ball_goals(rack)
+                  if g.kind in ("DIRECT_ATTACK", "POSITION_ATTACK"))
+    payload["trajectory"][0]["chosen_action"] = {
+        "goal_v3": encode_goal_v3(chosen).tolist()
+    }
+    path.write_text(json.dumps(payload))
+    logged = load_training_states(folder, goal_source="logged")
+    assert len(logged) == 1
+    np.testing.assert_allclose(
+        encode_goal_v3(logged[0].selected_goal), encode_goal_v3(chosen)
+    )
+    # A mismatched saved target cannot be silently remapped to a new goal.
+    payload["trajectory"][0]["chosen_action"]["goal_v3"][4:20] = (
+        [0.] * 15 + [1.]
+    )
+    path.write_text(json.dumps(payload))
+    with pytest.raises(ValueError, match="cannot be recovered"):
+        load_training_states(folder, goal_source="logged")
+
+
+def test_logged_goal_training_rejects_legacy_unlabeled_source(tmp_path):
+    folder = tmp_path / "old"
+    _rollout(folder)
+    with pytest.raises(ValueError, match="No eligible"):
+        load_training_states(folder, goal_source="logged")
+
+
+def test_pretrained_micro_restores_weights_and_entropy_without_legacy_2d(tmp_path):
+    import torch
+    from src.micro.sac import SACAgent
+    initial = SACAgent(state_dim=108, action_dim=5, hidden_dim=16, device="cpu")
+    current = SACAgent(state_dim=108, action_dim=5, hidden_dim=16, device="cpu")
+    with torch.no_grad():
+        initial.actor.fc1.weight.fill_(0.123)
+        initial.log_alpha.fill_(-0.9)
+    path = tmp_path / "initial.pt"
+    checkpoint = {
+        "format_version": 3,
+        "model_kind": "nine_ball_goal_conditioned_micro_sac_5d",
+        "state_dim": 108, "action_dim": 5, "hidden_dim": 16,
+        "trained_steps": 5000,
+        "actor": initial.actor.state_dict(),
+        "critic": initial.critic.state_dict(),
+        "critic_target": initial.critic_target.state_dict(),
+        "log_alpha": initial.log_alpha.detach().cpu(),
+    }
+    torch.save(checkpoint, path)
+    previous_steps = restore_micro_checkpoint(current, path)
+    assert previous_steps == 5000
+    assert torch.allclose(current.actor.fc1.weight, initial.actor.fc1.weight)
+    assert current.alpha.item() == pytest.approx(initial.alpha.item())
+    checkpoint["action_dim"] = 2
+    torch.save(checkpoint, path)
+    with pytest.raises(ValueError, match="Incompatible Micro"):
+        restore_micro_checkpoint(current, path)

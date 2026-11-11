@@ -435,3 +435,11 @@ sign = +1 (同じプレイヤー) / -1 (相手へ手番交代)
 - **正確な結論:** 9-ball Macro → MCTS → Goal-conditioned 5D Micro → FastFiz → ルール → 訪問データ → Macro Policy更新の一巡が**個別スクリプトを順番に実行する形で成立**。多回反復の自動ループ、性能向上を検証する対戦比較、大規模データによる学習は未実施。少数データのCE僅差改善はゲーム強さの改善ではない。
 - **ユーザー指示により、Phase14を研究実装の区切りとして追加実験・新フェーズ実装を止め、ゼミ資料制作へ移行**。大規模GPU学習もゼミ後に再検討。
 - ゼミ資料の構成・数値・限界は `docs/SEMINAR_PHASE8_14_9BALL_HANDOFF_20261110.md` を参照。白黒中心、差分は赤字、コード掲載なし、数式と文章中心。過去環境の数値と新9-ballの数値を混同しない。
+
+## 38. Phase15提案手法整合性監査（2026-11-11）
+
+- Phase14のMacro Policyは物理教師bootstrap→MCTS訪問分布蒸留、Q/Vは完了したrace-to-1の選択行動MC教師。MCTSは学習済みPolicy priors+State V葉評価+固定5D Microを使い、選択行動Qは使用しない。これは探索と統計推定上の整合性から妥当であり、無理にQを未実行候補へ適用しない。
+- ただし、ユーザー提案手法として重要なMacro/Micro相互学習は未実装だった。Phase15では`train_nine_ball_micro_sac --init-checkpoint`で旧5D SACを上書きせず継続学習し、`--goal-source logged`で自己対戦でMacroが実際に選んだDIRECT/POSITIONの**一致する**GoalだけをMicro学習に使用可能とした。古いゴールの復元を勝手に推定せず、違う候補生成なら明示エラーとする。
+- 重要な報酬設計誤りを修正: POSITION_ATTACKの手球位置ボーナスが目標球の指定ポケット成功なしでも加算されていた。今後は**目標球の指定ポケット成功時のみ**加算し、Goal-conditioned「ポケット成功+配置」の契約に合わせる。
+- Microの継続学習時はActor/Critic/Target Critic/エントロピーを読み、optimizer/replayはリセットする設計（メタデータで明示）。完全な同一ラン再開ではなく、新しい収集分布へのfine-tune。新旧Microチェックポイントは厳格なv3/108D/5Dのみ。GPUはユーザー選択済みの可視1枚を利用。
+- 未達成: Macro Policy/MCTS+Micro更新を完全な一つの自動反復、MicroのSAFETY/Break条件付き学習、弱いPosition/SAFETY候補改善、独立seed・モデル別対戦、本格的な反復学習実験。Phase15のtest実機確認後に高優先で接続する。**これを階層型RL性能改善とはまだ主張しない。**
