@@ -449,3 +449,26 @@ sign = +1 (同じプレイヤー) / -1 (相手へ手番交代)
 - `scripts/iterate_nine_ball_hierarchical_v3.py` を追加。Phase14のroot visits→Macro Policy蒸留、Phase12の完了試合MC→Q/V更新、Phase15のMacro選択Goal→5D Micro fine-tuneを同一ループに接続。次iterationは更新したMacro Policy, State V, Microのモデルを使用。
 - 個別stageのCLIを子プロセスで実行し、各出力を`iteration_###`に分離。各段階のログ・状態を`run_manifest.json`に逐次記録。前roundのモデルや既存結果の上書きを拒否し、失敗時は成果物保全。反復間seed分離。複数ラックrace-to-Nは未対応、race-to-1のみ。
 - これは**一式がDGXで実際に完走する前の実装段階**。実機テストと物理自己対戦の再実行が必要。最終自己対戦後の実力比較は未実施で、Phase15で動作保証や性能改善を主張しない。
+
+## 40. 2026-11-11 Phase15 FastFiz Bad Shot Exceptionへの修正
+
+- 2反復・各32試合の`000_self_play`が20試合保存後、Native
+  `Bad Shot Exception`で停止。ログの`Cue overlaps Four`は約1.7e-8m、
+  `Two overlaps Five`は約0.0294mの重なり。後者は重大な不正配置。
+  実際の異常発生が直前のショットからか探索仮想状態にあるかは、失敗局面の
+  直接リプレイなしに断定しない。
+- `src/game/nine_ball_physics_guard.py`導入。Nativeでショット未実行
+  （precondition/placement失敗）、FastFizの`Bad Shot Exception`、
+  または大きい球重なりを、**現実の反則や相手勝利と偽装せず**検知する。
+  MCTSではそのedgeをinvalidとして訪問せず別候補を試し、予定の実行可能
+  探索回数と失敗試行数を区別してroot診断へ保存。全候補が失敗したら明示停止。
+- Live環境は不正物理遷移をGameRulesへ流さず例外。Collectorは当該試合を
+  `invalid_physics`・未完了・勝者なしで保存し、次seedを続行。以前に完了した
+  試合の勝敗や物理状態には触れない。
+- 中断した`phase15_hierarchical_iteration_v1`は保全。Collectorの
+  `--resume`と反復ランナーの`--resume`で既存試合JSONの本人確認と
+  欠落seedだけの実行をサポート。**元runはGitリビジョンを記録していなかったため**
+  `--accept-unverified-code-change`が必要。異なるコード改修前後の試合を
+  同じ学習データにするのは厳密な比較実験では不適切であり、再開はdebug限定。
+  本格的な実験は`phase15_hierarchical_iteration_v2`など新runに収集し直す。
+- テスト・DGXの新規実Native実行は未確認。修正成功と学習性能向上は未確定。
