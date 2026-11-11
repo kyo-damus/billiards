@@ -155,3 +155,88 @@ def test_nineball_mcts_agent_forwards_search_discount(monkeypatch):
     monkeypatch.setattr(agent_module, "NineBallMCTS", DummyMcts)
     candidate = NineBallMCTSAgent("unused", gamma=0.9)
     assert candidate.searcher.gamma == pytest.approx(0.9)
+
+
+def test_mcts_rejects_overlapping_next_state_without_fabricating_visits(monkeypatch):
+    from dataclasses import replace
+    from src.game.nine_ball_physics_guard import InvalidPhysicalTransition
+
+    rack = replace(create_nine_ball_rack(breaker=0, seed=11), break_shot=False)
+    bad_positions = rack.ball_positions.copy()
+    bad_positions[2] = bad_positions[5]
+    overlapping = replace(rack, ball_positions=bad_positions)
+
+    a = NineBallGoal("DIRECT_ATTACK", 1, 0)
+    b = NineBallGoal("DIRECT_ATTACK", 1, 1)
+    monkeypatch.setattr(module, "generate_nine_ball_goals", lambda state: (a, b))
+
+    class Rules:
+        def apply(self, before, physical, context):
+            if physical.shot == 0:
+                return SimpleNamespace(
+                    next_state=overlapping, next_context=context, rack_winner=None,
+                )
+            return SimpleNamespace(
+                next_state=rack, next_context=context, rack_winner=0,
+            )
+
+    search = NineBallMCTS(
+        FakeMicro(), simulator=FakePhysics(), rules=Rules(),
+        simulations=3, max_depth=1, root_min_visits=1,
+    )
+    assert search.search(rack) == b
+    assert search.last_report["root_visits"] == [0, 3]
+    assert search.last_report["rejected_invalid_simulations"] == 1
+    assert "overlapping balls" in search.last_report["root_invalid_reasons"][0]
+    assert sum(search.last_report["root_visits"]) == 3
+
+
+def test_native_bad_shot_is_excluded_unrelated_runtime_error_is_not(monkeypatch):
+    from src.game.nine_ball_physics_guard import InvalidPhysicalTransition
+
+    a = NineBallGoal("DIRECT_ATTACK", 1, 0)
+    b = NineBallGoal("DIRECT_ATTACK", 1, 1)
+    root = SimpleNamespace(current_player=0, ball_in_hand=False)
+    monkeypatch.setattr(module, "generate_nine_ball_goals", lambda state: (a, b))
+
+    class Physics(FakePhysics):
+        def step(self, *, target_ball, shot):
+            if shot == 0:
+                raise RuntimeError("Bad Shot Exception")
+            return super().step(target_ball=target_ball, shot=shot)
+
+    class Rules:
+        def apply(self, before, physical, context):
+            return SimpleNamespace(
+                next_state=root, next_context=context, rack_winner=0,
+            )
+
+    search = NineBallMCTS(
+        FakeMicro(), simulator=Physics(), rules=Rules(),
+        simulations=2, max_depth=1, root_min_visits=1,
+    )
+    assert search.search(root) == b
+    assert search.last_report["root_visits"] == [0, 2]
+    assert search.last_report["rejected_invalid_simulations"] == 1
+
+    class OtherPhysics(FakePhysics):
+        def step(self, *, target_ball, shot):
+            raise RuntimeError("Unrelated native corruption")
+
+    search = NineBallMCTS(
+        FakeMicro(), simulator=OtherPhysics(), rules=Rules(),
+        simulations=1, max_depth=1,
+    )
+    with pytest.raises(RuntimeError, match="Unrelated"):
+        search.search(root)
+
+    class AlwaysBad(FakePhysics):
+        def step(self, *, target_ball, shot):
+            raise RuntimeError("Bad Shot Exception")
+
+    search = NineBallMCTS(
+        FakeMicro(), simulator=AlwaysBad(), rules=Rules(),
+        simulations=1, max_depth=1,
+    )
+    with pytest.raises(InvalidPhysicalTransition, match="No executable"):
+        search.search(root)
