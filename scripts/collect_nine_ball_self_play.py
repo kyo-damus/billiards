@@ -245,6 +245,7 @@ def parse_args(argv=None):
     p.add_argument("--mcts-simulations", type=int, default=24)
     p.add_argument("--mcts-max-depth", type=int, default=2)
     p.add_argument("--mcts-c-puct", type=float, default=1.5)
+    p.add_argument("--mcts-gamma", type=float, default=0.99)
     p.add_argument("--mcts-root-min-visits", type=int, default=1)
     p.add_argument("--device", choices=("cpu", "cuda"), default="cpu")
     return p.parse_args(argv)
@@ -281,6 +282,7 @@ if __name__ == "__main__":
                 simulations=args.mcts_simulations,
                 max_depth=args.mcts_max_depth,
                 c_puct=args.mcts_c_puct,
+                gamma=args.mcts_gamma,
                 root_min_visits=args.mcts_root_min_visits,
                 device=args.device,
             )

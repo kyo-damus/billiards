@@ -99,6 +99,7 @@ def build_plan(args):
             "--mcts-max-depth", str(args.mcts_max_depth),
             "--mcts-root-min-visits", str(args.mcts_root_min_visits),
             "--mcts-c-puct", str(args.mcts_c_puct),
+            "--mcts-gamma", str(args.gamma),
             "--device", args.device,
             "--output-dir", str(rollouts),
         ]

@@ -15,6 +15,7 @@ class NineBallMCTSAgent(NineBallMicroSACAgent):
         simulations=24,
         max_depth=2,
         c_puct=1.5,
+        gamma=0.99,
         root_min_visits=1,
         device="cpu",
     ):
@@ -34,6 +35,7 @@ class NineBallMCTSAgent(NineBallMicroSACAgent):
             simulations=simulations,
             max_depth=max_depth,
             c_puct=c_puct,
+            gamma=gamma,
             root_min_visits=root_min_visits,
         )
 

@@ -42,6 +42,7 @@ def test_plan_alternates_complete_macro_micro_loop_and_is_seed_disjoint(tmp_path
     assert str(tmp_path / "runs" / "iteration_000" / "macro_policy_v3.pt") in second_collect
     assert str(tmp_path / "runs" / "iteration_000" / "micro" / "micro_sac_5d.pt") in second_collect
     assert str(tmp_path / "runs" / "iteration_000" / "qv" / "state_v_v3.pt") in second_collect
+    assert second_collect[second_collect.index("--mcts-gamma")+1] == str(args.gamma)
     assert "--agent-kind" in second_collect
     assert second_collect[second_collect.index("--agent-kind")+1] == "micro_mcts"
     micro = stages[5].argv

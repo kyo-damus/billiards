@@ -135,3 +135,23 @@ def test_invalid_search_parameters():
         NineBallMCTS(FakeMicro(), simulations=0)
     with pytest.raises(ValueError):
         NineBallMCTS(FakeMicro(), simulations=1, gamma=0)
+
+
+def test_nineball_mcts_agent_forwards_search_discount(monkeypatch):
+    from src.game.nine_ball_mcts_agent import NineBallMCTSAgent
+    import src.game.nine_ball_mcts_agent as agent_module
+
+    class DummyMicro:
+        def __init__(self, *args, **kwargs):
+            self.macro_policy = None
+
+    class DummyMcts:
+        def __init__(self, micro, **kwargs):
+            self.gamma = kwargs["gamma"]
+
+    monkeypatch.setattr(
+        agent_module.NineBallMicroSACAgent, "__init__", DummyMicro.__init__
+    )
+    monkeypatch.setattr(agent_module, "NineBallMCTS", DummyMcts)
+    candidate = NineBallMCTSAgent("unused", gamma=0.9)
+    assert candidate.searcher.gamma == pytest.approx(0.9)
