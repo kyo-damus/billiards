@@ -12,15 +12,23 @@
 4. **Micro**: Goal-conditioned SACを基本に、連続パラメータ（方向・力など）から物理ショットを実行する。
 5. **GameRules**: 実行後の状態、得点、手番、終了条件を更新する。
 
-現在は、**的球2個＋手球1個の簡易環境**でシステムの実装・接続を確認している段階です。公式競技ルールに準拠したゲームAIの完成や、実対戦での強さを示すものではありません。
+**2026-11-11時点**では従来の2的球簡易環境を残しつつ、**9-ball（cue+1〜9球）の物理シミュレーションと部分的ルール**に対応しました。9-ball用のMacro Policy/Q/V・MCTSと5D Micro SACによる自己対戦/学習の経路を実装しています。完全なWPAルール・十分な強さ・汎化性能は未達成です。
 
-## 現状（2026-11-02時点）
+## 以前の簡易2的球経路（2026-11-02時点の履歴）
 
 - DIRECT / POSITION 攻撃と、物理ショット候補に基づく SAFETY を扱う31次元のMacroCandidate経路を構築。
 - Macro Candidate Policy、候補依存Q、状態価値V、MCTS、Micro、FastFiz、簡易GameRulesを接続。
 - 複数ターンの軌跡保存、MCTS訪問分布によるPolicy学習、完了ゲームからの行動リターン学習、Q/Vの任意更新を実装。
 - **小規模smokeが完走したことと、学習性能が良いことは区別する。** Macro Q/Vの経験学習、Defense選択、ゲーム勝率等について結論はまだ出ていない。
 - 2026-11-02の最新smokeは2ゲーム中1ゲーム終了。Policyを更新し、完了ゲーム不足によりQ/Vを更新しないガードが機能。
+
+## 現在の9-ball実装（2026-11-11時点、Phase15はDGX未検証）
+
+- v3 Macro状態72D・候補36D・Micro入力108D・5D物理操作。旧12D/31D/2D学習済みモデルと非互換。
+- Macro Policyは物理教師で初期学習し、MCTS root訪問分布で更新。Q/Vは完了race-to-1自己対戦の選択行動終端リターンから推定。選択行動Qを未実行候補の真値としない。
+- 9-ball手番考慮MCTSはMacro Policy事前確率・固定Micro・FastFiz・State V葉評価。防御/ブレイクは依然として明示的な仮ショット。
+- **Phase15で追加:** MicroのPOSITION成功条件に整合する報酬修正、Macro選択GoalからのMicro継続学習、自己対戦→Policy/Q/V→Microの反復ランナー。コードコミット済み、関連DGX実行は未確認。
+- [Phase15監査・実行手順](docs/PHASE15_PROPOSAL_ALIGNMENT.md) および [研究の正本](docs/RESEARCH_CONTEXT.md) を参照。原Phase14は保存済み。共有GPUは原則可視1枚。
 
 ## コード・関連ドキュメント
 

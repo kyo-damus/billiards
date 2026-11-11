@@ -1,7 +1,7 @@
 # リポジトリのフォルダ構造とファイル管理ガイド
 
-**更新日:** 2026-11-10（JST）  
-**対象:** `kyo-damus/billiards` の `refactor-phase9-preserve-20261109` ブランチ  
+**更新日:** 2026-11-11（JST、Phase15追記）  
+**対象:** `kyo-damus/billiards` の `phase15-nineball-coupled-learning-audit-20261111`。以下Phase4以前の構成図・個数は履歴として保管。  
 **目的:** 初めて本研究を引き継ぐ人やChatGPTが、**どのファイルをどこに置き、何をGitで管理し、何を保全するか**を、この文書だけで把握できるようにする。
 
 この文書を**フォルダ構造・ファイル管理の正本**とする。研究目的・学習仕様は [RESEARCH_CONTEXT.md](RESEARCH_CONTEXT.md)、リファクタリングの変更履歴は [REFACTORING_PLAN.md](REFACTORING_PLAN.md) に記録する。実際のファイル構成やCLI仕様が変わったら、必ず最新のGitツリーとコードを確認する。
@@ -213,3 +213,19 @@ python -m pytest tests/integration/physics/test_fastfiz_simulator.py -q
 ## 11. Phase 5区切り（2026-11-10）
 
 今週のゼミ向けに実装・実験を一旦停止。リファクタリング・MCTS同点処理・seed対応96ゲーム実験・報酬設計の限界を [SEMINAR_PHASE5_MCTS_20261110.md](SEMINAR_PHASE5_MCTS_20261110.md) にまとめた。戦術別の選択割合を均等化する処理は追加しない。回帰テストは `tests/unit/macro/test_mixed_candidate_mcts.py` に追記。既存モデルや生成データを変更しない。
+
+## 12. 2026-11-11 現行9-ball v3とPhase15の追加部分
+
+前掲の `現行の構成（Phase1〜4）` は当時の整理スナップショット。ファイル数・対象ブランチ・2的球の現況はそのまま現在に当てはめない。
+
+| 責務 | 現行ファイル | 保全・管理 |
+|---|---|---|
+| 9-ballゲームルール・ラック・対戦 | `src/game/nine_ball_rules.py`, `nine_ball_session.py`, `match.py` | 部分的WPAルール。完全準拠を主張しない |
+| v3盤面・候補表現 | `src/game/nine_ball_encoding_v3.py` | Macro72D・Goal36D・Micro108D。旧モデルと混ぜない |
+| 9-ball Micro SAC | `scripts/train_nine_ball_micro_sac.py`, `src/game/nine_ball_learned_agent.py` | 5D、既存モデル読込を選択可能。旧保存は上書き禁止 |
+| 9-ball Macro Policy・Q/V | `scripts/train_nine_ball_macro_policy_v3.py`, `train_nine_ball_macro_visits_v3.py`, `train_nine_ball_macro_qv_v3.py` | ターゲット種別を区別。MC Qを未実行Goalの真値にしない |
+| MCTS/自己対戦 | `src/game/nine_ball_mcts_v3.py`, `nine_ball_mcts_agent.py`, `scripts/collect_nine_ball_self_play.py` | 物理・ルール・手番考慮。訪問分布を生データに記録 |
+| 反復学習 | `scripts/iterate_nine_ball_hierarchical_v3.py` | Phase15で新設。run root一意、iteration別出力とログ、DGX実機未検証 |
+| 設計・変更履歴 | `docs/RESEARCH_CONTEXT.md`, `docs/PHASE15_PROPOSAL_ALIGNMENT.md` | 現行9-ball設計の正本。追加時は末尾に追記 |
+
+`artifacts/runs/`配下の旧Phase8〜14出力とモデルはGit管理外で保護する。新Phase15実験は必ず別run IDを使い、旧Phase14ブランチ自体も改変しない。GPUはユーザーが既に設定した`CUDA_VISIBLE_DEVICES`の1枚を継承する。試合勝率の独立比較と完全ルール対応は今後。

@@ -421,3 +421,15 @@ python -m scripts.collect_nine_ball_self_play \
 ```
 
 旧checkpointや再利用済みout-dirを上書きしない。
+
+## 2026-11-11 Phase15: Micro継続学習とMacro/Micro交互更新
+
+```bash
+python -m pytest \
+  tests/pipelines/micro/test_train_nine_ball_micro_sac.py \
+  tests/pipelines/macro/test_nine_ball_hierarchical_iteration_v3.py \
+  tests/unit/game/test_nine_ball_learned_agent.py \
+  tests/unit/game/test_nine_ball_mcts_v3.py -v
+```
+
+新規StageのDGX物理学習は未検証。全体フローは`docs/PHASE15_PROPOSAL_ALIGNMENT.md`。

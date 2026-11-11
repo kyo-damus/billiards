@@ -1,8 +1,9 @@
-"""Train a *new*, versioned 5D goal-conditioned SAC on real 9-ball shots.
+"""Train or fine-tune versioned 5D goal-conditioned SAC on nine-ball shots.
 
-Each RL episode is one physical shot from an observed 9-ball state; the
-candidate goal is sampled for Micro pretraining and NOT the Macro policy.
-This does not train Macro Policy/Q/V or demonstrate game-level competence.
+Each episode is one physical shot from an observed board. With --goal-source
+logged, learn against the exact selected attack Goal of self-play Macro;
+uniform retains the original independent candidate pretraining. This script
+never updates Macro Policy/Q/V or claims gameplay strength.
 """
 
 import argparse
@@ -329,8 +330,9 @@ def train(args, *, simulator_factory=MultiBallFastFizSimulator):
         "gpu_visible": os.environ.get("CUDA_VISIBLE_DEVICES"),
         "device": device,
         "reward_note": (
-            "One-shot goal reward, not self-play game outcome. "
-            "Macro Policy/Q/V and match-level value have NOT been trained."
+            "One-shot Micro goal reward, not the self-play match outcome. "
+            "This run does not train Macro Policy/Q/V; its logged goals may "
+            "originate from a separately trained Macro agent."
         ),
         "logs": logs,
     }
