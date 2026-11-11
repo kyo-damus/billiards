@@ -161,15 +161,55 @@ def build_plan(args):
     return stages, iteration_summaries
 
 
-def _run_logged(stage, root):
+def _git_commit():
+    """Record source revision for provenance; no Git modification."""
+    result = subprocess.run(
+        ["git", "rev-parse", "HEAD"], check=False,
+        capture_output=True, text=True,
+    )
+    return result.stdout.strip() if result.returncode == 0 else None
+
+
+def _stage_outputs(stage):
+    """Minimal completion artifacts; never trust a completed flag alone."""
+    argv = list(stage.argv)
+    def argument(name):
+        return Path(argv[argv.index(name) + 1])
+    if stage.name.endswith("_self_play"):
+        return (argument("--output-dir") / "summary.json",)
+    if stage.name.endswith("_visit_dataset"):
+        return (argument("--output"),)
+    if stage.name.endswith("_macro_policy"):
+        return (argument("--output"),)
+    if stage.name.endswith("_return_dataset"):
+        return (argument("--output"),)
+    if stage.name.endswith("_macro_qv"):
+        directory = argument("--output-dir")
+        return (directory / "candidate_q_v3.pt", directory / "state_v_v3.pt")
+    if stage.name.endswith("_micro_finetune"):
+        return (argument("--output-dir") / "micro_sac_5d.pt",)
+    raise ValueError(f"Unknown planned stage: {stage.name}")
+
+
+def _run_logged(stage, root, *, resume=False):
     log_path = root / "logs" / f"{stage.name}.log"
     if log_path.exists():
-        raise FileExistsError(f"Existing stage log: {log_path}")
+        if not resume:
+            raise FileExistsError(f"Existing stage log: {log_path}")
+        i = 1
+        while (root / "logs" / f"{stage.name}_retry_{i:03d}.log").exists():
+            i += 1
+        log_path = root / "logs" / f"{stage.name}_retry_{i:03d}.log"
+    argv = list(stage.argv)
+    if resume and stage.name.endswith("_self_play"):
+        output_dir = Path(argv[argv.index("--output-dir") + 1])
+        if output_dir.is_dir():
+            argv.append("--resume")
     print(f"\n=== {stage.name} ===", flush=True)
-    print(" ".join(stage.argv), flush=True)
+    print(" ".join(argv), flush=True)
     with log_path.open("x", encoding="utf-8") as log:
         with subprocess.Popen(
-            stage.argv, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            argv, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
             text=True, bufsize=1,
         ) as process:
             for line in process.stdout:
@@ -187,8 +227,10 @@ def _run_logged(stage, root):
 def run(args):
     _ensure_options(args)
     root = Path(args.output_root)
-    if root.exists():
+    if root.exists() and not args.resume:
         raise FileExistsError(f"Refusing existing run directory: {root}")
+    if args.resume and not root.is_dir():
+        raise FileNotFoundError(f"Cannot resume nonexistent run: {root}")
     stages, rounds = build_plan(args)
     # Resolve model file identities before any output creation or GPU work.
     inputs = {
@@ -202,8 +244,9 @@ def run(args):
             ("state_v", args.base_state_v_checkpoint),
         ) if value is not None
     }
-    manifest = {
+    new_manifest = {
         "kind": "nine_ball_macro_micro_alternating_v3",
+        "source_git_commit": _git_commit(),
         "status": "running",
         "source": "version_3_self_play",
         "objective": (
@@ -222,9 +265,67 @@ def run(args):
             for stage in stages
         ],
     }
-    root.mkdir(parents=True, exist_ok=False)
-    (root / "logs").mkdir()
     location = root / "run_manifest.json"
+    if args.resume:
+        if not location.is_file():
+            raise FileNotFoundError(f"Missing resume manifest: {location}")
+        manifest = json.loads(location.read_text(encoding="utf-8"))
+        if manifest.get("status") != "interrupted":
+            raise ValueError("Only an interrupted run may be resumed")
+        if (
+            manifest.get("kind") != new_manifest["kind"]
+            or manifest.get("source_checkpoints") != inputs
+            or len(manifest.get("stages", [])) != len(stages)
+            or any(
+                saved.get("name") != expected.name
+                or saved.get("argv") != list(expected.argv)
+                for saved, expected in zip(manifest["stages"], stages)
+            )
+        ):
+            raise ValueError("Resume command/model identity differs from saved manifest")
+        previous_settings = {
+            k: v for k, v in manifest["settings"].items()
+            if k not in ("resume", "accept_unverified_code_change")
+        }
+        current_settings = {
+            k: v for k, v in new_manifest["settings"].items()
+            if k not in ("resume", "accept_unverified_code_change")
+        }
+        if previous_settings != current_settings:
+            raise ValueError("Resume settings differ from previous run")
+        original_commit = manifest.get("source_git_commit")
+        current_commit = new_manifest["source_git_commit"]
+        if original_commit != current_commit:
+            if not args.accept_unverified_code_change:
+                raise ValueError(
+                    "Run Git revision differs or original was not recorded; "
+                    "explicitly supply --accept-unverified-code-change for "
+                    "debug/smoke ONLY, or use a fresh output-root for clean data"
+                )
+            manifest["cross_revision_resume"] = True
+            manifest["warning"] = (
+                "Mixed or unknown code versions in one run. Treat as a "
+                "debug-only smoke; do not claim clean performance comparisons."
+            )
+        for saved, expected in zip(manifest["stages"], stages):
+            outputs = _stage_outputs(expected)
+            if saved["status"] == "completed":
+                if not all(p.is_file() for p in outputs):
+                    raise FileNotFoundError(
+                        f"Completed stage missing outputs: {expected.name}"
+                    )
+            elif not expected.name.endswith("_self_play"):
+                if any(p.exists() for p in outputs):
+                    raise FileExistsError(
+                        f"Incomplete non-collector stage has existing outputs: "
+                        f"{expected.name}; refusing unsafe overwrite"
+                    )
+        manifest["status"] = "running"
+        manifest.pop("error", None)
+    else:
+        manifest = new_manifest
+        root.mkdir(parents=True, exist_ok=False)
+        (root / "logs").mkdir()
 
     def save():
         location.write_text(
@@ -235,10 +336,13 @@ def run(args):
     save()
     try:
         for i, stage in enumerate(stages):
-            manifest["stages"][i]["status"] = "running"
+            record = manifest["stages"][i]
+            if record["status"] == "completed":
+                continue
+            record["status"] = "running"
             save()
-            log = _run_logged(stage, root)
-            manifest["stages"][i].update(status="completed", log=log)
+            log = _run_logged(stage, root, resume=args.resume)
+            record.update(status="completed", log=log)
             save()
         manifest["status"] = "completed"
     except BaseException as exc:
@@ -270,6 +374,10 @@ def parse_args(argv=None):
     p.add_argument("--train-seed", type=int, default=610000)
     p.add_argument("--device", choices=("cpu", "cuda"), default="cpu")
     p.add_argument("--output-root", type=Path, required=True)
+    p.add_argument("--resume", action="store_true",
+                   help="Resume an interrupted run without overwriting completed files")
+    p.add_argument("--accept-unverified-code-change", action="store_true",
+                   help="Allow mixed/unknown code-revision debug-only continuation")
     return p.parse_args(argv)
 
 
