@@ -193,3 +193,84 @@ def test_pretrained_micro_restores_weights_and_entropy_without_legacy_2d(tmp_pat
     torch.save(checkpoint, path)
     with pytest.raises(ValueError, match="Incompatible Micro"):
         restore_micro_checkpoint(current, path)
+
+
+def test_micro_training_native_nonexecution_is_not_sent_to_rules():
+    from types import SimpleNamespace
+    from src.game.nine_ball_physics_guard import InvalidPhysicalTransition
+    from scripts.train_nine_ball_micro_sac import execute_valid_training_shot
+
+    rack = replace(create_nine_ball_rack(breaker=0, seed=42), break_shot=False)
+    goal = NineBallGoal("DIRECT_ATTACK", 1, 0)
+
+    class Physics:
+        def restore(self, state):
+            assert state is rack
+
+        def step(self, **kwargs):
+            return SimpleNamespace(precondition_code=2, placement_code=0)
+
+    class Rules:
+        def apply(self, *args):
+            raise AssertionError("Unexecuted native shot must not reach rules")
+
+    with pytest.raises(InvalidPhysicalTransition, match="precondition=2"):
+        execute_valid_training_shot(
+            Physics(), Rules(), rack, goal, NineBallContext(), object(),
+        )
+
+
+def test_micro_training_bad_shot_is_rejected_but_unrelated_errors_propagate():
+    from src.game.nine_ball_physics_guard import InvalidPhysicalTransition
+    from scripts.train_nine_ball_micro_sac import execute_valid_training_shot
+
+    rack = replace(create_nine_ball_rack(breaker=0, seed=43), break_shot=False)
+    goal = NineBallGoal("DIRECT_ATTACK", 1, 0)
+
+    class Physics:
+        error = "Bad Shot Exception"
+
+        def restore(self, state):
+            pass
+
+        def step(self, **kwargs):
+            raise RuntimeError(self.error)
+
+    sim = Physics()
+    with pytest.raises(InvalidPhysicalTransition, match="Bad Shot Exception"):
+        execute_valid_training_shot(
+            sim, object(), rack, goal, NineBallContext(), object(),
+        )
+    sim.error = "Unexpected C++ error"
+    with pytest.raises(RuntimeError, match="Unexpected C\\+\\+ error"):
+        execute_valid_training_shot(
+            sim, object(), rack, goal, NineBallContext(), object(),
+        )
+
+
+def test_micro_training_post_rule_overlaps_are_not_valid_experience():
+    from types import SimpleNamespace
+    from src.game.nine_ball_physics_guard import InvalidPhysicalTransition
+    from scripts.train_nine_ball_micro_sac import execute_valid_training_shot
+
+    rack = replace(create_nine_ball_rack(breaker=0, seed=44), break_shot=False)
+    goal = NineBallGoal("DIRECT_ATTACK", 1, 0)
+    positions = rack.ball_positions.copy()
+    positions[2] = positions[5]
+    bad = replace(rack, ball_positions=positions)
+
+    class Physics:
+        def restore(self, state):
+            pass
+
+        def step(self, **kwargs):
+            return SimpleNamespace(precondition_code=0, placement_code=0)
+
+    class Rules:
+        def apply(self, *args):
+            return SimpleNamespace(next_state=bad)
+
+    with pytest.raises(InvalidPhysicalTransition, match="overlapping balls"):
+        execute_valid_training_shot(
+            Physics(), Rules(), rack, goal, NineBallContext(), object(),
+        )
