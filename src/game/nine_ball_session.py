@@ -14,6 +14,9 @@ from src.game.nine_ball_rules import (
     NineBallContext, NineBallRules,
 )
 from src.game.rack_state import RackState, TableGameConfig
+from src.game.nine_ball_physics_guard import (
+    InvalidPhysicalTransition, validate_physical_step, validate_rack_layout,
+)
 
 
 def create_nine_ball_rack(*, breaker: int, seed: int) -> RackState:
@@ -107,8 +110,18 @@ class NineBallRackSession:
             raise ValueError("Cue-ball placement required before shooting")
         if declared_push_out:
             raise NotImplementedError("Push-out requires option/choice support")
-        physical = self.simulator.step(target_ball=target_ball, shot=shot)
+        validate_rack_layout(self.state)
+        try:
+            physical = self.simulator.step(target_ball=target_ball, shot=shot)
+        except RuntimeError as exc:
+            if "Bad Shot Exception" not in str(exc):
+                raise
+            raise InvalidPhysicalTransition(
+                f"Live FastFiz shot rejected, not a game foul: {exc}"
+            ) from exc
+        validate_physical_step(physical)
         result = self.rules.apply(self.state, physical, self.context)
+        validate_rack_layout(result.next_state)
         # Preserve event evidence before simulator.restore clears native diagnostics.
         self.last_physical = physical
         self.state = result.next_state
