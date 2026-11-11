@@ -51,3 +51,48 @@ def test_native_precondition_is_not_a_game_foul():
     validate_physical_step(SimpleNamespace(
         precondition_code=0, placement_code=0,
     ))
+
+
+def test_live_session_rejects_invalid_physical_next_state_without_scoring_foul():
+    from src.game.nine_ball_session import NineBallRackSession
+    rack = create_nine_ball_rack(breaker=0, seed=103)
+    overlap = rack.ball_positions.copy()
+    overlap[2] = overlap[5]
+    bad = replace(rack, ball_positions=overlap)
+
+    class Physics:
+        def restore(self, state):
+            self.current = state
+
+        def step(self, **kwargs):
+            return SimpleNamespace(precondition_code=0, placement_code=0)
+
+    class Rules:
+        def apply(self, state, physical, context):
+            return SimpleNamespace(next_state=bad, next_context=context,
+                                   rack_winner=None)
+
+    session = NineBallRackSession(Physics(), rack, rules=Rules())
+    with pytest.raises(InvalidPhysicalTransition, match="overlapping balls"):
+        session.step(target_ball=1, shot=object())
+    assert session.state is rack  # no invalid mutation of the live match
+
+
+def test_live_session_rejects_shot_with_native_nonexecution():
+    from src.game.nine_ball_session import NineBallRackSession
+    rack = create_nine_ball_rack(breaker=0, seed=104)
+
+    class Physics:
+        def restore(self, state):
+            pass
+
+        def step(self, **kwargs):
+            return SimpleNamespace(precondition_code=3, placement_code=0)
+
+    class Rules:
+        def apply(self, state, physical, context):
+            raise AssertionError("Rule engine must not see unexecuted shot")
+
+    session = NineBallRackSession(Physics(), rack, rules=Rules())
+    with pytest.raises(InvalidPhysicalTransition, match="precondition=3"):
+        session.step(target_ball=1, shot=object())
