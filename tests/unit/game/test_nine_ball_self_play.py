@@ -241,3 +241,65 @@ def test_search_root_visits_saved_with_executed_goal():
     assert row["macro_search"] == diagnostics
     assert row["goal_v3"] == encode_goal_v3(goal).tolist()
     assert row["macro_search"]["chosen_index"] == 0
+
+
+def test_resume_skips_saved_seed_and_collects_only_remaining_matches(tmp_path):
+    import json
+    out = tmp_path / "unfinished"
+    collect_matches(
+        matches=1, race_to=1, start_seed=700,
+        max_shots_per_rack=3, output_dir=out,
+        match_factory=lambda seed: OneRackFakeMatch(seed),
+    )
+    original = (out / "match_seed_700.json").read_bytes()
+    # Simulate interruption after the first saved match, before final summary.
+    (out / "summary.json").unlink()
+    outcome = collect_matches(
+        matches=2, race_to=1, start_seed=700,
+        max_shots_per_rack=3, output_dir=out,
+        match_factory=lambda seed: OneRackFakeMatch(seed),
+        resume=True,
+    )
+    assert outcome["matches"] == 2
+    assert (out / "match_seed_700.json").read_bytes() == original
+    assert (out / "match_seed_702.json").is_file()
+    assert (out / "summary.json").is_file()
+    assert json.loads((out / "summary.json").read_text())["finished_matches"] == 2
+
+    with pytest.raises(FileExistsError, match="completed collector summary"):
+        collect_matches(
+            matches=2, race_to=1, start_seed=700,
+            max_shots_per_rack=3, output_dir=out,
+            match_factory=lambda seed: OneRackFakeMatch(seed), resume=True,
+        )
+
+
+def test_resume_refuses_unexpected_saved_match_seed(tmp_path):
+    out = tmp_path / "bad"
+    out.mkdir()
+    (out / "match_seed_999.json").write_text("{}")
+    with pytest.raises(ValueError, match="Unexpected seed"):
+        collect_matches(
+            matches=2, race_to=1, start_seed=700,
+            max_shots_per_rack=3, output_dir=out,
+            match_factory=lambda seed: OneRackFakeMatch(seed), resume=True,
+        )
+
+
+def test_nonphysical_match_is_unfinished_not_an_invented_foul():
+    from src.game.nine_ball_physics_guard import InvalidPhysicalTransition
+
+    class BrokenPhysicsAgent(GeometryNineBallAgent):
+        def choose_shot(self, state, context=None):
+            raise InvalidPhysicalTransition("Bad Shot Exception: root unavailable")
+
+    outcome = play_match(
+        OneRackFakeMatch(), (BrokenPhysicsAgent(), BrokenPhysicsAgent()),
+        max_shots_per_rack=3,
+    )
+    assert outcome["match_finished"] is False
+    assert outcome["match_winner"] is None
+    assert outcome["stop_reason"] == "invalid_physics"
+    assert outcome["shots"] == 0
+    assert outcome["fouls"] == 0
+    assert "root unavailable" in outcome["physics_failure"]["error"]
