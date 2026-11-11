@@ -20,6 +20,9 @@ from src.game.nine_ball_encoding_v3 import (
 )
 from src.game.nine_ball_rules import NineBallContext, NineBallRules
 from src.game.nine_ball_session import NineBallRackSession
+from src.game.nine_ball_physics_guard import (
+    InvalidPhysicalTransition, validate_physical_step, validate_rack_layout,
+)
 from src.game.rack_state import TableGameConfig
 
 
@@ -31,6 +34,7 @@ class SearchEdge:
     value_sum: float = 0.0
     child: object = None
     terminal_reward: float = 0.0
+    invalid_reason: str | None = None
 
     @property
     def q(self):
@@ -102,7 +106,9 @@ class NineBallMCTS:
     def _expand(self, node):
         if node.expanded or node.winner is not None:
             return
+        validate_rack_layout(node.state)
         self._prepare(node)
+        validate_rack_layout(node.state)
         candidates = tuple(generate_nine_ball_goals(node.state))
         if not candidates:
             raise RuntimeError("Nonterminal rack has no nine-ball candidate")
@@ -144,16 +150,20 @@ class NineBallMCTS:
         return float(np.clip(float(prediction.reshape(-1)[0].item()), -1.0, 1.0))
 
     def _select_edge(self, node, *, root=False):
+        # A failed native transition is not a low-reward legal candidate.
+        eligible = [e for e in node.edges if e.invalid_reason is None]
+        if not eligible:
+            return None
         if root and self.root_min_visits:
-            least = min(edge.visits for edge in node.edges)
+            least = min(edge.visits for edge in eligible)
             if least < self.root_min_visits:
                 return max(
-                    (e for e in node.edges if e.visits == least),
+                    (e for e in eligible if e.visits == least),
                     key=lambda e: e.prior,
                 )
         scale = math.sqrt(max(1, node.visits))
         return max(
-            node.edges,
+            eligible,
             key=lambda e: (
                 e.q + self.c_puct * e.prior * scale / (1 + e.visits),
                 e.prior,
@@ -161,13 +171,25 @@ class NineBallMCTS:
         )
 
     def _step(self, node, edge):
-        """Every counterfactual shot restores this EXACT parent board."""
-        plan = self.micro_agent.plan_goal(node.state, edge.goal, node.context)
-        self.simulator.restore(node.state)
-        physical = self.simulator.step(
-            target_ball=plan.target_ball, shot=plan.shot,
-        )
-        outcome = self.rules.apply(node.state, physical, node.context)
+        """Return False only for a diagnosed physically invalid shot."""
+        try:
+            validate_rack_layout(node.state)
+            plan = self.micro_agent.plan_goal(node.state, edge.goal, node.context)
+            self.simulator.restore(node.state)
+            physical = self.simulator.step(
+                target_ball=plan.target_ball, shot=plan.shot,
+            )
+            validate_physical_step(physical)
+            outcome = self.rules.apply(node.state, physical, node.context)
+            validate_rack_layout(outcome.next_state)
+        except InvalidPhysicalTransition as exc:
+            edge.invalid_reason = str(exc)
+            return False
+        except RuntimeError as exc:
+            if "Bad Shot Exception" not in str(exc):
+                raise
+            edge.invalid_reason = f"FastFiz Bad Shot Exception: {exc}"
+            return False
         edge.child = SearchNode(
             state=outcome.next_state,
             context=outcome.next_context,
@@ -177,6 +199,7 @@ class NineBallMCTS:
             edge.terminal_reward = (
                 1.0 if edge.child.winner == node.state.current_player else -1.0
             )
+        return True
 
     def _simulate(self, root):
         node = root
@@ -185,9 +208,22 @@ class NineBallMCTS:
         for depth in range(self.max_depth):
             self._expand(node)
             edge = self._select_edge(node, root=(node is root))
+            if edge is None:
+                if not path:
+                    raise InvalidPhysicalTransition(
+                        "No executable nine-ball root MCTS candidate: " +
+                        "; ".join(
+                            f"{i}: {e.invalid_reason}"
+                            for i, e in enumerate(root.edges)
+                        )
+                    )
+                # Discard a simulated path whose continuation has no
+                # executable native action; never invent a leaf reward.
+                path[-1][1].invalid_reason = "no executable descendant"
+                return False
             fresh = edge.child is None
-            if fresh:
-                self._step(node, edge)
+            if fresh and not self._step(node, edge):
+                return False
             path.append((node, edge))
             node = edge.child
             if node.winner is not None:
@@ -217,6 +253,7 @@ class NineBallMCTS:
             edge.visits += 1
             edge.value_sum += value
             parent.visits += 1
+        return True
 
     def search(self, state, context=None):
         if state.ball_in_hand:
@@ -224,13 +261,35 @@ class NineBallMCTS:
         context = NineBallContext() if context is None else context
         root = SearchNode(state=state, context=context)
         self._expand(root)
-        for _ in range(self.simulations):
-            self._simulate(root)
+        successful, rejected = 0, 0
+        # Each rejected attempt invalidates an edge; future attempts
+        # then explore other paths. Also cap unexpected loops explicitly.
+        max_attempts = self.simulations + max(
+            128, 8 * self.simulations * self.max_depth,
+        )
+        while successful < self.simulations:
+            if successful + rejected >= max_attempts:
+                raise InvalidPhysicalTransition(
+                    f"MCTS invalid-transition limit reached: "
+                    f"valid={successful}, rejected={rejected}"
+                )
+            if self._simulate(root):
+                successful += 1
+            else:
+                rejected += 1
         self.last_root = root
+        valid_edges = [e for e in root.edges if e.invalid_reason is None]
+        if not valid_edges:
+            raise InvalidPhysicalTransition("No executable root candidate")
         # Resolve visit ties by observed parent-perspective Q, then prior.
-        chosen = max(root.edges, key=lambda e: (e.visits, e.q, e.prior))
+        chosen = max(valid_edges, key=lambda e: (e.visits, e.q, e.prior))
         self.last_report = {
-            "simulations": self.simulations,
+            "simulations": successful,
+            "requested_simulations": self.simulations,
+            "rejected_invalid_simulations": rejected,
+            "root_invalid_reasons": [
+                e.invalid_reason for e in root.edges
+            ],
             "max_depth": self.max_depth,
             "uses_learned_state_v": self.value is not None,
             "uses_selected_action_q": False,
