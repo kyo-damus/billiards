@@ -433,3 +433,19 @@ python -m pytest \
 ```
 
 新規StageのDGX物理学習は未検証。全体フローは`docs/PHASE15_PROPOSAL_ALIGNMENT.md`。
+
+## Phase15: native Bad Shot 対処と安全な実験再開
+
+```bash
+python -m pytest \
+  tests/unit/game/test_nine_ball_physics_guard.py \
+  tests/unit/game/test_nine_ball_mcts_v3.py \
+  tests/unit/game/test_nine_ball_self_play.py \
+  tests/pipelines/macro/test_nine_ball_hierarchical_iteration_v3.py \
+  tests/integration/game/test_nine_ball_native_session.py -v
+```
+
+`src/game/nine_ball_physics_guard.py`の厳格な契約とMCTS訪問の不正値除外、
+Collectorの未完了試合分離、run rootを変えた新実験のテスト。
+旧runをそのまま複製や上書きせず、Gitリビジョンが異なるデータは
+`--resume --accept-unverified-code-change`によるデバッグ目的に限定。
