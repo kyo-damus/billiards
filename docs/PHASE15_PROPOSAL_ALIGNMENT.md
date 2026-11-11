@@ -130,4 +130,10 @@ python -m scripts.collect_nine_ball_self_play \
   --device cuda
 ```
 
-**DGX未実行**: 上記テスト・再現ショットの成功はまだ確認されていない。
+**2026-11-11実機追記:** seed=510040の単独再実行は `finished=True winner=0 rack_wins=[1,0] shots=13 fouls=4` で完走済み。ただし修正後の関連pytestは未報告、2反復学習も未完走。この1試合だけでFastFizの根本原因解消や学習性能向上を主張しない。
+
+## 2026-11-11追加: Micro SAC学習段階の物理ガード
+
+自己対戦とMCTSに加え、`scripts/train_nine_ball_micro_sac.py`でも実行前後の球重なり・Native precondition/placementの非ゼロ・`Bad Shot Exception`を不正物理として検出する。**不正試行をReplay Bufferに入れたり、失敗報酬に変えたりしない。** 正常な物理遷移のみ学習ステップに数える。ログの`invalid_physics_attempts`と`skipped_no_goal_attempts`で欠落を記録し、連続128件の不正物理等では上限停止する。意図しないRuntimeErrorは握りつぶさない。
+
+対象コミット：`459ae255`（学習ガード）と`36da0754`（3回帰テスト）。**DGX pytestでの実行検証は未報告。** 既存重み、旧Phase15 run、seed=510040単独成功runは保持。次は関連テストをDGXで確認後、未使用の`artifacts/runs/phase15_hierarchical_iteration_v2`で2反復×32試合を最初から実行する。
