@@ -14,6 +14,7 @@ from src.game.match import MatchConfig
 from src.game.nine_ball_agents import GeometryNineBallAgent
 from src.game.nine_ball_encoding_v3 import encode_goal_v3
 from src.game.nine_ball_session import NineBallMatchSession
+from src.game.nine_ball_physics_guard import InvalidPhysicalTransition
 
 
 def rack_state_json(state):
@@ -42,6 +43,7 @@ def play_match(
         raise ValueError("Expected exactly two player agents.")
     records = []
     rack_shots = 0
+    physics_failure = None
     while not match.match.snapshot().finished:
         if rack_shots >= max_shots_per_rack:
             break  # No invented winner for a truncated rack.
@@ -69,8 +71,21 @@ def play_match(
             "consecutive_fouls": list(context.consecutive_fouls),
             "push_out_available": bool(context.push_out_available),
         } if context is not None else None
-        plan = agent.choose_shot(state, context=context)
-        result = match.step(target_ball=plan.target_ball, shot=plan.shot)
+        try:
+            plan = agent.choose_shot(state, context=context)
+            result = match.step(target_ball=plan.target_ball, shot=plan.shot)
+        except InvalidPhysicalTransition as exc:
+            # This is a simulator failure, NOT a billiards foul or winner.
+            # Keep earlier valid turns, flag the match as unfinished, and
+            # proceed to the next independent seed.
+            physics_failure = {
+                "error": str(exc),
+                "player": player,
+                "state": rack_state_json(state),
+                "rule_context": context_before,
+                "shot_index": len(records),
+            }
+            break
         physical = getattr(
             match, "last_physical",
             getattr(match.rack, "last_physical", None),
@@ -136,7 +151,12 @@ def play_match(
         "match_winner": snapshot.match_winner,
         "rack_wins": list(snapshot.rack_wins),
         "racks_completed": int(snapshot.racks_completed),
-        "stop_reason": "race_to_reached" if snapshot.finished else "rack_shot_limit",
+        "stop_reason": (
+            "invalid_physics" if physics_failure is not None
+            else "race_to_reached" if snapshot.finished
+            else "rack_shot_limit"
+        ),
+        "physics_failure": physics_failure,
         "shots": len(records),
         "fouls": sum(int(row["rule_result"]["foul"]) for row in records),
         "rack_history": list(match.rack_history),
@@ -219,6 +239,9 @@ def collect_matches(
         "racks_completed": sum(s["racks_completed"] for s in summaries),
         "shots": sum(s["shots"] for s in summaries),
         "fouls": sum(s["fouls"] for s in summaries),
+        "invalid_physics_matches": sum(
+            s.get("stop_reason") == "invalid_physics" for s in summaries
+        ),
         "per_match": summaries,
         "note": (
             "Partial nine-ball rules. Model kind is recorded in run_type/players. "
