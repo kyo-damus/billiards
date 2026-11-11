@@ -94,3 +94,11 @@ python -m scripts.iterate_nine_ball_hierarchical_v3 \
 - 2026-11-09付tarバックアップ：`~/billiards_research_backup_20261109.tar.gz`、旧build成果物退避：`~/billiards_refactor_quarantine_20261109/`。これらと旧checkpointは保護。旧2球Macroと9-ball v3を混同しない。
 - 大きな機能完成・方針変更時には`docs/RESEARCH_CONTEXT.md`を更新。新チャットへの最新版まとめは本ファイルを保守。
 - 重要な診断の原則：物理不正を「反則」「失敗報酬」「負け」と混同せず、結果/候補の欠落は欠落として記録する。性能向上や勝率の主張は独立評価で初めて行う。
+
+## 7. 2026-11-11 新チャットの追記（Micro物理ガード、DGX再検証待ち）
+
+- 引き継ぎ時のリモートHEADは `84fd009ae943470bffdf316c6f7e32c316caa4d4` と照合済み。その後同じ安全ブランチに `459ae255`（`scripts/train_nine_ball_micro_sac.py` の物理ガードと再試行）、`36da0754`（`tests/pipelines/micro/test_train_nine_ball_micro_sac.py` に3回帰テスト）、`2be081ac`（監査記録更新）を積んだ。**現在の正確なHEADはリモートで再確認すること。**
+- Micro継続SACは、ショット前後の重なり・ネイティブ未実行コード・`Bad Shot Exception`を不正物理として除外し、Replay Bufferへ追加しない。成功した物理実行のみで指定`--steps`を計数し、不正試行件数をログ・summaryに出す。連続128不正試行では停止する。関連テストのDGX実行結果は未確認。
+- 既存の修正後seed=510040単独完走ログと旧v1の20試合は保護。旧runを新runのデータへ混ぜない。
+- **次のアクション：** `bill_sub1`で `git status --short --branch` を確認し、未コミット作業を保護してから `git pull --ff-only`。その後、§5記載の6ファイルの関連pytestを実行し、失敗があれば修正。すべて成功したら、旧ファイルに触らず `test ! -e artifacts/runs/phase15_hierarchical_iteration_v2` を確認し、§5の新runで2反復×32試合を収集する。GPU環境の `CUDA_VISIBLE_DEVICES` を変更しない。
+- 修正は予防的な学習側ガードであり、FastFizで重なりが発生する根本原因を解消した証拠ではない。1試合の正常終了を大規模検証成功と解釈しない。
