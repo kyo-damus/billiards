@@ -174,14 +174,25 @@ def collect_matches(
     simulator_factory=MultiBallFastFizSimulator,
     agent_factory=GeometryNineBallAgent,
     match_factory=None,
+    resume: bool = False,
 ):
-    """Write each match once; fail if output directory already exists."""
+    """Write each match once; optional validated completion of interrupted batch.
+
+    This method cannot verify source code/checkpoint history by itself.
+    Use the higher-level hierarchical runner for provenance-aware recovery.
+    """
     if matches < 1 or race_to < 1 or max_shots_per_rack < 1:
         raise ValueError("matches, race_to and max_shots_per_rack must be >=1")
     output_dir = Path(output_dir)
-    if output_dir.exists():
-        raise FileExistsError(f"Refusing to reuse output directory: {output_dir}")
-    output_dir.mkdir(parents=True, exist_ok=False)
+    if resume:
+        if not output_dir.is_dir():
+            raise FileNotFoundError(f"Resume directory absent: {output_dir}")
+        if (output_dir / "summary.json").exists():
+            raise FileExistsError("Refusing to resume completed collector summary")
+    else:
+        if output_dir.exists():
+            raise FileExistsError(f"Refusing to reuse output directory: {output_dir}")
+        output_dir.mkdir(parents=True, exist_ok=False)
     agents = (agent_factory(), agent_factory())
     players = [type(agent).__name__ for agent in agents]
     if players == ["GeometryNineBallAgent", "GeometryNineBallAgent"]:
@@ -189,10 +200,43 @@ def collect_matches(
     else:
         run_type = "learned_micro_self_play"
     summaries = []
+    allowed_seeds = {
+        start_seed + index * (2 * race_to) for index in range(matches)
+    }
+    existing = {}
+    if resume:
+        for file in output_dir.glob("match_seed_*.json"):
+            try:
+                seed_from_name = int(file.stem.removeprefix("match_seed_"))
+            except ValueError as exc:
+                raise ValueError(f"Malformed seed filename: {file}") from exc
+            if seed_from_name not in allowed_seeds:
+                raise ValueError(f"Unexpected seed in resumed run: {file}")
+            payload = json.loads(file.read_text(encoding="utf-8"))
+            if (
+                payload.get("seed") != seed_from_name
+                or payload.get("race_to") != race_to
+                or payload.get("max_shots_per_rack") != max_shots_per_rack
+                or payload.get("run_type") != run_type
+                or payload.get("players") != players
+                or payload.get("format_version") != 1
+                or not isinstance(payload.get("trajectory"), list)
+                or not isinstance(payload.get("match_finished"), bool)
+                or payload.get("shots") != len(payload["trajectory"])
+            ):
+                raise ValueError(f"Resume file identity/content mismatch: {file}")
+            existing[seed_from_name] = payload
     for index in range(matches):
-        # Reserve 2*race_to seeds per match. A race-to-N lasts at most
-        # 2*N-1 racks, so independently collected matches do not share racks.
+        # Reserve 2*race_to seeds per match; no independent match shares a rack seed.
         seed = start_seed + index * (2 * race_to)
+        if seed in existing:
+            payload = existing[seed]
+            summaries.append({
+                k: v for k, v in payload.items()
+                if k not in ("trajectory", "rack_history")
+            })
+            print(f"seed={seed} reused=existing (read-only)", flush=True)
+            continue
         if match_factory is None:
             match = NineBallMatchSession(
                 simulator_factory=simulator_factory,
@@ -261,6 +305,8 @@ def parse_args(argv=None):
     p.add_argument("--start-seed", type=int, default=310000)
     p.add_argument("--max-shots-per-rack", type=int, default=60)
     p.add_argument("--output-dir", type=Path, required=True)
+    p.add_argument("--resume", action="store_true",
+                   help="Complete only missing match_seed files in an incomplete directory")
     p.add_argument("--agent-kind", choices=("geometry", "micro_sac", "micro_mcts"), default="geometry")
     p.add_argument("--micro-checkpoint", type=Path)
     p.add_argument("--macro-policy-checkpoint", type=Path)
@@ -321,6 +367,7 @@ if __name__ == "__main__":
         max_shots_per_rack=args.max_shots_per_rack,
         output_dir=args.output_dir,
         agent_factory=agent_factory,
+        resume=args.resume,
     )
     print(
         "=== Completed nine-ball data collection ===\n"
