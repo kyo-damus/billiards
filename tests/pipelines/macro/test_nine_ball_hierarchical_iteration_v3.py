@@ -83,3 +83,48 @@ def test_missing_checkpoint_and_gpu_guard_fails_without_creating_output(tmp_path
     with pytest.raises(ValueError, match="exactly one"):
         run(args)
     assert not args.output_root.exists()
+
+
+def test_resume_requires_explicit_acknowledgement_when_source_revision_unknown(
+    tmp_path, monkeypatch,
+):
+    import json
+    import scripts.iterate_nine_ball_hierarchical_v3 as runner
+
+    args = _args(tmp_path)
+    def interrupt(*unused, **kwargs):
+        raise RuntimeError("synthetic interruption before first collector")
+    monkeypatch.setattr(runner, "_run_logged", interrupt)
+    with pytest.raises(RuntimeError, match="synthetic interruption"):
+        run(args)
+    manifest_path = args.output_root / "run_manifest.json"
+    manifest = json.loads(manifest_path.read_text())
+    assert manifest["status"] == "interrupted"
+    assert manifest["stages"][0]["status"] == "running"
+
+    # This is how the original Phase15 interrupted run is recorded:
+    # it predates source_git_commit metadata.
+    manifest.pop("source_git_commit", None)
+    manifest_path.write_text(json.dumps(manifest))
+    args.resume = True
+    with pytest.raises(ValueError, match="Git revision differs"):
+        run(args)
+    args.accept_unverified_code_change = True
+    with pytest.raises(RuntimeError, match="synthetic interruption"):
+        run(args)
+    resumed = json.loads(manifest_path.read_text())
+    assert resumed["status"] == "interrupted"
+    assert resumed["cross_revision_resume"] is True
+    assert "debug-only" in resumed["warning"]
+
+
+def test_stage_expected_outputs_never_treat_partial_collector_as_done(tmp_path):
+    from scripts.iterate_nine_ball_hierarchical_v3 import _stage_outputs
+    args = _args(tmp_path)
+    stages, _ = build_plan(args)
+    assert _stage_outputs(stages[0]) == (
+        tmp_path / "runs" / "iteration_000" / "rollouts" / "summary.json",
+    )
+    assert _stage_outputs(stages[2]) == (
+        tmp_path / "runs" / "iteration_000" / "macro_policy_v3.pt",
+    )
