@@ -72,3 +72,62 @@ python -m scripts.iterate_nine_ball_hierarchical_v3 \
 ```
 
 今後：独立seedで旧・新Policyの対戦、先攻交代、完全ルールとより妥当なSAFETY、Micro回収データの多様化を優先。
+
+## 2026-11-11: 物理遷移エラーと安全な再開
+
+DGXの最初の32試合バッチで最初の20試合は保存済みだが、次seedで
+`RuntimeError: Bad Shot Exception`。FastFizからの出力に
+`Two overlaps Five`の約29.4mm深い球重なりが観察される。
+これは通常のショット失敗や反則とは異なり、物理遷移を信頼できない。
+
+`src/game/nine_ball_physics_guard.py`ではNative未実行コード、
+`Bad Shot Exception`、1µm超の球同士の重なりを区別する。
+MCTSは無効edgeに0訪問・理由を保存し、有効なsimulation回数を
+指定値に合わせる。`root_invalid_reasons`と
+`rejected_invalid_simulations`をroot診断に保存する。
+すべて無効なら不正盤面・候補を明示して中断する。
+
+実対戦では物理不正を本当のゲームファウル/勝者に変換しない。
+これが発生した試合は`invalid_physics`の未完了試合として保存。
+先行する有効な行動記録は残すが、終端MC Q/Vには使えない。
+エラー内容とstate/contextは`physics_failure`に保存。
+
+**再開とデータ一貫性の区別:**
+
+- 修正後の動作確認は、再現用`--matches 1 --start-seed 510040`
+  を独立した出力先で実行する。
+- 中断runを引き続き試す場合は**デバッグ目的に限定**して
+  元の全引数を付け`--resume --accept-unverified-code-change`。
+  過去のファイルは読み取りのみ、残りだけ実行し、stageログは別名で追記。
+  旧実行manifestにgit HEADが無いためバージョン混在警告を記録。
+- **研究用の比較・学習には別run IDで全試合を取り直すのを推奨**。
+  以前の20試合と新しい修正後の試合では物理異常を扱う仕様が異なる。
+  新runはgit HEADとモデルSHA-256をmanifestに記録する。
+- 既存のCheckpoint/旧runを削除・上書きしない。
+
+```bash
+cd ~/research
+conda activate bill_sub1
+git pull --ff-only
+export BILLIARDS_FASTFIZ_BUILD_DIR=/tmp/billiards-fastfiz-phase7
+
+python -m pytest \
+  tests/unit/game/test_nine_ball_physics_guard.py \
+  tests/unit/game/test_nine_ball_mcts_v3.py \
+  tests/unit/game/test_nine_ball_self_play.py \
+  tests/pipelines/macro/test_nine_ball_hierarchical_iteration_v3.py \
+  tests/integration/game/test_nine_ball_native_session.py -v
+
+# まず失敗した21番目のseedを別出力先で再現確認
+python -m scripts.collect_nine_ball_self_play \
+  --matches 1 --race-to 1 --start-seed 510040 \
+  --max-shots-per-rack 80 --agent-kind micro_mcts \
+  --micro-checkpoint artifacts/runs/phase8_micro5d_first/outputs/micro_sac_5d.pt \
+  --macro-policy-checkpoint artifacts/runs/phase14_nineball_macro_visit_policy_smoke_v1/outputs/macro_policy_visits_v3.pt \
+  --state-value-checkpoint artifacts/runs/phase12_nineball_qv_smoke_v1/outputs/state_v_v3.pt \
+  --mcts-simulations 24 --mcts-max-depth 2 \
+  --output-dir artifacts/runs/phase15_badshot_replay_seed510040_v1/outputs \
+  --device cuda
+```
+
+**DGX未実行**: 上記テスト・再現ショットの成功はまだ確認されていない。
