@@ -443,3 +443,9 @@ sign = +1 (同じプレイヤー) / -1 (相手へ手番交代)
 - 重要な報酬設計誤りを修正: POSITION_ATTACKの手球位置ボーナスが目標球の指定ポケット成功なしでも加算されていた。今後は**目標球の指定ポケット成功時のみ**加算し、Goal-conditioned「ポケット成功+配置」の契約に合わせる。
 - Microの継続学習時はActor/Critic/Target Critic/エントロピーを読み、optimizer/replayはリセットする設計（メタデータで明示）。完全な同一ラン再開ではなく、新しい収集分布へのfine-tune。新旧Microチェックポイントは厳格なv3/108D/5Dのみ。GPUはユーザー選択済みの可視1枚を利用。
 - 未達成: Macro Policy/MCTS+Micro更新を完全な一つの自動反復、MicroのSAFETY/Break条件付き学習、弱いPosition/SAFETY候補改善、独立seed・モデル別対戦、本格的な反復学習実験。Phase15のtest実機確認後に高優先で接続する。**これを階層型RL性能改善とはまだ主張しない。**
+
+## 39. Phase15 Macro/Micro反復実験入口（2026-11-11）
+
+- `scripts/iterate_nine_ball_hierarchical_v3.py` を追加。Phase14のroot visits→Macro Policy蒸留、Phase12の完了試合MC→Q/V更新、Phase15のMacro選択Goal→5D Micro fine-tuneを同一ループに接続。次iterationは更新したMacro Policy, State V, Microのモデルを使用。
+- 個別stageのCLIを子プロセスで実行し、各出力を`iteration_###`に分離。各段階のログ・状態を`run_manifest.json`に逐次記録。前roundのモデルや既存結果の上書きを拒否し、失敗時は成果物保全。反復間seed分離。複数ラックrace-to-Nは未対応、race-to-1のみ。
+- これは**一式がDGXで実際に完走する前の実装段階**。実機テストと物理自己対戦の再実行が必要。最終自己対戦後の実力比較は未実施で、Phase15で動作保証や性能改善を主張しない。

@@ -39,3 +39,36 @@ python -m scripts.train_nine_ball_micro_sac \
 ```
 
 データ不足で結果が不安定になり得る。ここでは学習経路を確認し、次は新MicroとMacroを固定して別seed自己対戦→更新Macro→新Microの再学習という循環を実装・検証する。
+
+
+## Phase15 反復統合ランナー
+
+\`scripts/iterate_nine_ball_hierarchical_v3.py\` で、各反復を
+MCTS自己対戦→root訪問分布のMacro Policy更新→終端MCリターンの選択行動Q/V更新→
+**実際にMacro選択されたDIRECT/POSITION目標**から5D Micro SACを継続学習、
+という順で実施する。次反復は更新済みPolicy, State V, Microを使用する。
+これはMacroとMicroの相互**データ依存・交互更新**であり、両者の同時勾配最適化ではない。
+
+- race-to-1のみ（状態72Dにマッチスコアがない）。未完了試合はvisit教師に使用可だが、Q/Vには使用しない。完成試合が2未満なら修正せず停止。
+- 各段階で実行コマンド・標準出力/エラーのlog、モデルの初期SHA-256、反復ごとのseedを\`run_manifest.json\`に保存。失敗しても既存成果物を消去しない。途中再開はまだなく、新run rootを指定する設計。
+- GPUは指定済み\`CUDA_VISIBLE_DEVICES\`1枚だけを使用。旧Phase14の評価や実験結果、旧checkpointは不変。
+- 方策変更後の独立評価・異種モデル間head-to-headは次の段階。各反復同一自己対戦の勝率を実力向上と扱わない。
+
+\`\`\`bash
+cd ~/research
+export BILLIARDS_FASTFIZ_BUILD_DIR=/tmp/billiards-fastfiz-phase7
+python -m pytest \
+  tests/pipelines/micro/test_train_nine_ball_micro_sac.py \
+  tests/pipelines/macro/test_nine_ball_hierarchical_iteration_v3.py -v
+
+python -m scripts.iterate_nine_ball_hierarchical_v3 \
+  --base-micro-checkpoint artifacts/runs/phase8_micro5d_first/outputs/micro_sac_5d.pt \
+  --base-policy-checkpoint artifacts/runs/phase14_nineball_macro_visit_policy_smoke_v1/outputs/macro_policy_visits_v3.pt \
+  --base-state-v-checkpoint artifacts/runs/phase12_nineball_qv_smoke_v1/outputs/state_v_v3.pt \
+  --iterations 2 --matches-per-iteration 32 \
+  --mcts-simulations 24 --micro-steps 5000 \
+  --output-root artifacts/runs/phase15_hierarchical_iteration_v1 \
+  --device cuda
+\`\`\`
+
+今後：独立seedで旧・新Policyの対戦、先攻交代、完全ルールとより妥当なSAFETY、Micro回収データの多様化を優先。

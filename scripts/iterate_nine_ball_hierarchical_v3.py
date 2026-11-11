@@ -1,0 +1,276 @@
+"""Run bounded 9-ball hierarchical improvement iterations without overwrites.
+
+This alternates MCTS self-play -> Macro visit imitation -> behavior-return
+Q/V -> goal-conditioned Micro fine-tuning.  It is NOT an independent
+strength evaluation, converged joint RL, or WPA-compliant official match.
+
+Existing checkpoints are read-only. Each round has distinct match seeds and
+a complete command log. Failure preserves every completed artifact for
+inspection; restarting the same run ID deliberately refuses to overwrite.
+"""
+
+import argparse
+from dataclasses import dataclass
+import hashlib
+import json
+import os
+from pathlib import Path
+import subprocess
+import sys
+
+
+@dataclass(frozen=True)
+class Stage:
+    name: str
+    argv: tuple[str, ...]
+
+
+def _sha256(path):
+    digest = hashlib.sha256()
+    with Path(path).open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _ensure_options(args):
+    if (
+        args.iterations < 1
+        or args.matches_per_iteration < 2
+        or args.start_seed < 0
+        or args.max_shots_per_rack < 1
+        or args.mcts_simulations < 1
+        or args.mcts_max_depth < 1
+        or args.mcts_root_min_visits < 0
+        or args.mcts_c_puct < 0
+        or args.policy_epochs < 1
+        or args.qv_epochs < 0
+        or args.micro_steps < 0
+        or not 0.0 < args.gamma <= 1.0
+    ):
+        raise ValueError("Invalid hierarchical iteration parameters")
+    if args.device == "cuda":
+        visible = os.environ.get("CUDA_VISIBLE_DEVICES", "")
+        if not visible or len(visible.split(",")) != 1 or not visible.split(",")[0].strip():
+            raise ValueError("Use exactly one existing CUDA_VISIBLE_DEVICES GPU ID")
+    for name in (
+        "base_micro_checkpoint", "base_policy_checkpoint",
+        "base_state_v_checkpoint",
+    ):
+        value = getattr(args, name, None)
+        if value is not None and not Path(value).is_file():
+            raise FileNotFoundError(f"Missing {name}: {value}")
+
+
+def build_plan(args):
+    """Pure planned commands; no subprocess, GPU allocation, or filesystem writes."""
+    _ensure_options(args)
+    root = Path(args.output_root)
+    initial_micro = Path(args.base_micro_checkpoint)
+    initial_policy = Path(args.base_policy_checkpoint)
+    state_v = (
+        Path(args.base_state_v_checkpoint)
+        if args.base_state_v_checkpoint else None
+    )
+    stages = []
+    iteration_summaries = []
+    python = sys.executable
+    for index in range(args.iterations):
+        folder = root / f"iteration_{index:03d}"
+        rollouts = folder / "rollouts"
+        visits = folder / "visits.npz"
+        policy = folder / "macro_policy_v3.pt"
+        returns = folder / "selected_returns.npz"
+        qv = folder / "qv"
+        micro_dir = folder / "micro"
+        # 2N-1 racks max per race-to-N; collector reserves 2N seeds per match.
+        # Leave 1000 additional seed IDs between separate iterations.
+        seed = args.start_seed + index * (2 * args.matches_per_iteration + 1000)
+        collect = [
+            python, "-m", "scripts.collect_nine_ball_self_play",
+            "--matches", str(args.matches_per_iteration),
+            "--race-to", "1",
+            "--start-seed", str(seed),
+            "--max-shots-per-rack", str(args.max_shots_per_rack),
+            "--agent-kind", "micro_mcts",
+            "--micro-checkpoint", str(initial_micro),
+            "--macro-policy-checkpoint", str(initial_policy),
+            "--mcts-simulations", str(args.mcts_simulations),
+            "--mcts-max-depth", str(args.mcts_max_depth),
+            "--mcts-root-min-visits", str(args.mcts_root_min_visits),
+            "--mcts-c-puct", str(args.mcts_c_puct),
+            "--device", args.device,
+            "--output-dir", str(rollouts),
+        ]
+        if state_v is not None:
+            collect.extend(["--state-value-checkpoint", str(state_v)])
+        stages.append(Stage(f"{index:03d}_self_play", tuple(collect)))
+        stages.append(Stage(f"{index:03d}_visit_dataset", (
+            python, "-m", "scripts.build_nine_ball_mcts_visit_dataset_v3",
+            "--rollout-dir", str(rollouts), "--output", str(visits),
+        )))
+        stages.append(Stage(f"{index:03d}_macro_policy", (
+            python, "-m", "scripts.train_nine_ball_macro_visits_v3",
+            "--dataset", str(visits),
+            "--base-policy-checkpoint", str(initial_policy),
+            "--output", str(policy),
+            "--epochs", str(args.policy_epochs),
+            "--device", args.device,
+            "--seed", str(args.train_seed + index),
+        )))
+        if args.qv_epochs:
+            stages.append(Stage(f"{index:03d}_return_dataset", (
+                python, "-m", "scripts.build_nine_ball_macro_returns_v3",
+                "--rollout-dir", str(rollouts), "--output", str(returns),
+                "--gamma", str(args.gamma),
+            )))
+            stages.append(Stage(f"{index:03d}_macro_qv", (
+                python, "-m", "scripts.train_nine_ball_macro_qv_v3",
+                "--dataset", str(returns), "--output-dir", str(qv),
+                "--epochs", str(args.qv_epochs),
+                "--device", args.device,
+                "--seed", str(args.train_seed + 10000 + index),
+            )))
+            state_v = qv / "state_v_v3.pt"
+        if args.micro_steps:
+            stages.append(Stage(f"{index:03d}_micro_finetune", (
+                python, "-m", "scripts.train_nine_ball_micro_sac",
+                "--rollout-dir", str(rollouts),
+                "--init-checkpoint", str(initial_micro),
+                "--goal-source", "logged",
+                "--warmup-steps", "0",
+                "--output-dir", str(micro_dir),
+                "--steps", str(args.micro_steps),
+                "--seed", str(args.train_seed + 20000 + index),
+                "--device", args.device,
+            )))
+            initial_micro = micro_dir / "micro_sac_5d.pt"
+        initial_policy = policy
+        iteration_summaries.append({
+            "iteration": index,
+            "start_seed": seed,
+            "matches": args.matches_per_iteration,
+            "rollouts": str(rollouts),
+            "policy": str(initial_policy),
+            "micro": str(initial_micro),
+            "state_v": str(state_v) if state_v else None,
+            "qv_trained": bool(args.qv_epochs),
+            "micro_trained": bool(args.micro_steps),
+        })
+    return stages, iteration_summaries
+
+
+def _run_logged(stage, root):
+    log_path = root / "logs" / f"{stage.name}.log"
+    if log_path.exists():
+        raise FileExistsError(f"Existing stage log: {log_path}")
+    print(f"\n=== {stage.name} ===", flush=True)
+    print(" ".join(stage.argv), flush=True)
+    with log_path.open("x", encoding="utf-8") as log:
+        with subprocess.Popen(
+            stage.argv, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            text=True, bufsize=1,
+        ) as process:
+            for line in process.stdout:
+                print(line, end="", flush=True)
+                log.write(line)
+            code = process.wait()
+    if code != 0:
+        raise RuntimeError(
+            f"Stage {stage.name} failed (exit {code}); "
+            f"logs and prior outputs preserved in {root}"
+        )
+    return str(log_path)
+
+
+def run(args):
+    _ensure_options(args)
+    root = Path(args.output_root)
+    if root.exists():
+        raise FileExistsError(f"Refusing existing run directory: {root}")
+    stages, rounds = build_plan(args)
+    # Resolve model file identities before any output creation or GPU work.
+    inputs = {
+        name: {
+            "path": str(value),
+            "sha256": _sha256(value),
+        }
+        for name, value in (
+            ("micro", args.base_micro_checkpoint),
+            ("policy", args.base_policy_checkpoint),
+            ("state_v", args.base_state_v_checkpoint),
+        ) if value is not None
+    }
+    manifest = {
+        "kind": "nine_ball_macro_micro_alternating_v3",
+        "status": "running",
+        "source": "version_3_self_play",
+        "objective": (
+            "MCTS visit Policy imitation + selected-action terminal-return "
+            "Q/V regression + fixed-rollout-goal Micro SAC fine-tuning. "
+            "Not independent evaluation; partial nine-ball rules."
+        ),
+        "source_checkpoints": inputs,
+        "settings": {
+            key: str(value) if isinstance(value, Path) else value
+            for key, value in vars(args).items()
+        },
+        "rounds": rounds,
+        "stages": [
+            {"name": stage.name, "argv": list(stage.argv), "status": "pending"}
+            for stage in stages
+        ],
+    }
+    root.mkdir(parents=True, exist_ok=False)
+    (root / "logs").mkdir()
+    location = root / "run_manifest.json"
+
+    def save():
+        location.write_text(
+            json.dumps(manifest, indent=2, ensure_ascii=False) + "\n",
+            encoding="utf-8",
+        )
+
+    save()
+    try:
+        for i, stage in enumerate(stages):
+            manifest["stages"][i]["status"] = "running"
+            save()
+            log = _run_logged(stage, root)
+            manifest["stages"][i].update(status="completed", log=log)
+            save()
+        manifest["status"] = "completed"
+    except BaseException as exc:
+        manifest["status"] = "interrupted"
+        manifest["error"] = f"{type(exc).__name__}: {exc}"
+        raise
+    finally:
+        save()
+    print(f"Saved complete iteration manifest: {location}")
+
+
+def parse_args(argv=None):
+    p = argparse.ArgumentParser(description=__doc__)
+    p.add_argument("--base-micro-checkpoint", type=Path, required=True)
+    p.add_argument("--base-policy-checkpoint", type=Path, required=True)
+    p.add_argument("--base-state-v-checkpoint", type=Path)
+    p.add_argument("--iterations", type=int, default=2)
+    p.add_argument("--matches-per-iteration", type=int, default=32)
+    p.add_argument("--start-seed", type=int, default=510000)
+    p.add_argument("--max-shots-per-rack", type=int, default=80)
+    p.add_argument("--mcts-simulations", type=int, default=24)
+    p.add_argument("--mcts-max-depth", type=int, default=2)
+    p.add_argument("--mcts-root-min-visits", type=int, default=1)
+    p.add_argument("--mcts-c-puct", type=float, default=1.5)
+    p.add_argument("--gamma", type=float, default=0.99)
+    p.add_argument("--policy-epochs", type=int, default=10)
+    p.add_argument("--qv-epochs", type=int, default=5)
+    p.add_argument("--micro-steps", type=int, default=5000)
+    p.add_argument("--train-seed", type=int, default=610000)
+    p.add_argument("--device", choices=("cpu", "cuda"), default="cpu")
+    p.add_argument("--output-root", type=Path, required=True)
+    return p.parse_args(argv)
+
+
+if __name__ == "__main__":
+    run(parse_args())
