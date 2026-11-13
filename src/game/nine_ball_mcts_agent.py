@@ -19,12 +19,14 @@ class NineBallMCTSAgent(NineBallMicroSACAgent):
         root_min_visits=1,
         device="cpu",
         learned_safety=False,
+        outcome_position=False,
     ):
         super().__init__(
             micro_checkpoint,
             macro_policy_checkpoint=macro_policy_checkpoint,
             deterministic=True,
             learned_safety=learned_safety,
+            outcome_position=outcome_position,
             device=device,
         )
         state_v = None
@@ -40,6 +42,7 @@ class NineBallMCTSAgent(NineBallMicroSACAgent):
             gamma=gamma,
             root_min_visits=root_min_visits,
             learned_safety=learned_safety,
+            outcome_position=outcome_position,
         )
 
     def choose_shot(self, state, context=None):

@@ -523,3 +523,27 @@ python -m scripts.iterate_nine_ball_hierarchical_v3 \
   --learned-safety --device cuda \
   --output-root artifacts/runs/phase16_learned_safety_smoke_v1
 ```
+
+## 44. 2026-11-13 9-ballのPOSITION_ATTACK停止目標
+
+- DGXのPhase16確認ではSAFETYを含む2反復の12ステージが完了した。試合完了数は7/8、8/8で、各160有効MicroステップのうちSAFETYは5、17ステップだった。
+- `--outcome-position` を追加した。Macroは指定球・指定ポケットごとに、Microと同じ5D制御範囲で速度と上下撞点を変えた最大9通りのショットをFastFizで試す。合法に指定入球し、次の最小番号球を残して手番を継続でき、次の球の直線入球経路が幾何的に空いている結果を採用候補とする。その中で次の球の狙い点までの手球距離が最短の結果を選び、手球の停止点を中心とする半径10 cmのGoalを1ポケットにつき最大1個作る。
+- 探索用の試し撞きはCPUで実行する。MCTSのedgeと実対戦は停止領域を入力に受けた5D Microの出力で撞く。SACの位置ボーナスは合法な指定入球と次球を残した手番継続を条件とする。試し撞きの成功は停止領域を設定する根拠で、学習済みMicroの再現性は別途測定する。
+- 自己対戦で選択された36DのGoalをMicro学習で再利用する。MCTSの記録がある場合は選択候補との一致を確認する。反復manifestと収集ログにモードを記録し、評価時は起点・最終モデルとも同じモードを用いる。既定の候補生成とv3モデルの入出力形式を維持する。
+- 仮の初期重みとネイティブFastFizで2反復の12ステージが完了。各反復で8/8試合が完了し、各160有効MicroステップのうちPOSITION_ATTACKは18、6ステップだった。DGXでは新規出力で同じ経路を確認する。学習が選択目標を受け取ったことは `micro/summary.json` の `accepted_steps_by_goal.POSITION_ATTACK` で確認する。残る実装課題はBREAKの学習経路と9-ballルールの未対応項目。
+
+```bash
+conda activate bill_sub1
+cd ~/research
+git pull --ff-only &&
+BILLIARDS_FASTFIZ_BUILD_DIR=/tmp/billiards-fastfiz-phase7 \
+python -m scripts.iterate_nine_ball_hierarchical_v3 \
+  --base-micro-checkpoint artifacts/runs/phase16_learned_safety_smoke_v1/iteration_001/micro/micro_sac_5d.pt \
+  --base-policy-checkpoint artifacts/runs/phase16_learned_safety_smoke_v1/iteration_001/macro_policy_v3.pt \
+  --base-state-v-checkpoint artifacts/runs/phase16_learned_safety_smoke_v1/iteration_001/qv/state_v_v3.pt \
+  --iterations 2 --matches-per-iteration 8 --start-seed 850000 \
+  --mcts-simulations 12 --mcts-max-depth 2 \
+  --policy-epochs 1 --qv-epochs 1 --micro-steps 160 \
+  --learned-safety --outcome-position --device cuda \
+  --output-root artifacts/runs/phase17_outcome_position_smoke_v1
+```

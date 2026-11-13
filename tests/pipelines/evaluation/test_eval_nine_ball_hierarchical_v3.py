@@ -36,7 +36,8 @@ def evaluation_args(tmp_path):
     ])
 
 
-def test_pairs_share_rack_and_exchange_breaker(evaluation_args, monkeypatch):
+@pytest.mark.parametrize("outcome_position", (False, True))
+def test_pairs_share_rack_and_exchange_breaker(evaluation_args, monkeypatch, outcome_position):
     import numpy as np
     import scripts.collect_nine_ball_self_play as collector
 
@@ -63,10 +64,15 @@ def test_pairs_share_rack_and_exchange_breaker(evaluation_args, monkeypatch):
     def fake_agent(micro_checkpoint, **kwargs):
         assert kwargs["simulations"] == 24
         assert kwargs["max_depth"] == 2
+        assert kwargs["outcome_position"] is outcome_position
         return "base" if "base_micro.pt" in micro_checkpoint else "final"
 
     monkeypatch.setattr(collector, "play_match", fake_play)
     args = evaluation_args
+    if outcome_position:
+        training = json.loads(args.training_manifest.read_text())
+        training["settings"]["outcome_position"] = True
+        args.training_manifest.write_text(json.dumps(training))
     summary = evaluate(args, agent_factory=fake_agent, simulator_factory=lambda _: Physics())
     assert [(seed, breaker, players) for seed, breaker, players, _ in initial] == [
         (200, 0, ("final", "base")), (200, 1, ("final", "base")),

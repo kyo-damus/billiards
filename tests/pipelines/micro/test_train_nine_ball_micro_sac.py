@@ -296,6 +296,66 @@ def test_logged_safety_uses_only_micro_controlled_goal(tmp_path):
                 load_training_states(folder, goal_source="logged", learned_safety=True)
 
 
+def test_logged_outcome_position_reuses_exact_selected_candidate(tmp_path):
+    from src.game.nine_ball_encoding_v3 import encode_goal_v3
+    from src.game.nine_ball_position import POSITION_RADIUS_M
+
+    folder = tmp_path / "rollouts"
+    _rollout(folder)
+    path = folder / "match_seed_0.json"
+    payload = json.loads(path.read_text())
+    row = payload["trajectory"][0]
+    row["state"]["positions"] = [(0.0, 0.0)] * 10
+    row["state"]["pocket_indices"] = [0] * 10
+    for ball, xy in {0: (0.52, 1.68), 1: (0.28, 1.94), 9: (0.75, 1.2)}.items():
+        row["state"]["positions"][ball] = xy
+        row["state"]["pocket_indices"][ball] = -1
+    goal = NineBallGoal("POSITION_ATTACK", 1, 2, (0.847203, 1.383479), POSITION_RADIUS_M)
+    encoded = encode_goal_v3(goal).tolist()
+    action = {
+        "goal_v3": encoded,
+        "macro_search": {"chosen_index": 0, "goal_v3": [encoded.copy()]},
+    }
+    payload["outcome_position"] = True
+    row["chosen_action"] = action
+    path.write_text(json.dumps(payload))
+    with pytest.raises(ValueError, match="mode differs"):
+        load_training_states(folder, goal_source="logged")
+    sample, = load_training_states(folder, goal_source="logged", outcome_position=True)
+    np.testing.assert_array_equal(encode_goal_v3(sample.selected_goal), encoded)
+
+    action["macro_search"]["goal_v3"][0][26] += 0.01
+    path.write_text(json.dumps(payload))
+    with pytest.raises(ValueError, match="differs from selected MCTS candidate"):
+        load_training_states(folder, goal_source="logged", outcome_position=True)
+
+
+def test_outcome_position_bonus_requires_the_next_ball_to_remain(tmp_path):
+    from types import SimpleNamespace
+
+    folder = tmp_path / "rollouts"
+    _rollout(folder)
+    rack = load_training_states(folder)[0].state
+    goal = NineBallGoal("POSITION_ATTACK", 1, 2, tuple(rack.ball_positions[0]), 0.10)
+    pockets = rack.ball_pocket_indices.copy()
+    pockets[1] = 2
+    physical = SimpleNamespace(
+        pocket_indices=pockets, positions=rack.ball_positions, first_contact_ball=1,
+    )
+    after = replace(rack, ball_pocket_indices=pockets)
+    outcome = SimpleNamespace(
+        next_state=after, foul=False, turn_changed=False, rack_winner=None,
+        newly_pocketed=(1,),
+    )
+    reward, exact = micro_reward(goal, rack, physical, outcome, outcome_position=True)
+    assert exact and reward == pytest.approx(2.6)
+    pockets[2] = 2
+    outcome.next_state = replace(rack, ball_pocket_indices=pockets)
+    outcome.newly_pocketed = (1, 2)
+    reward, exact = micro_reward(goal, rack, physical, outcome, outcome_position=True)
+    assert exact and reward == pytest.approx(2.1)
+
+
 def test_safety_reward_requires_legal_handoff_and_reduced_opponent_options():
     from types import SimpleNamespace
     from src.game.nine_ball_encoding_v3 import direct_pocket_candidates

@@ -10,6 +10,7 @@ from pathlib import Path
 import numpy as np
 import torch
 
+from src.env.multi_ball_fastfiz import MultiBallFastFizSimulator
 from src.game.nine_ball_agents import GeometryNineBallAgent, ShotPlan
 from src.game.nine_ball_encoding_v3 import (
     ENCODING_VERSION, MACRO_GOAL_V3_DIM, MACRO_STATE_V3_DIM,
@@ -17,6 +18,8 @@ from src.game.nine_ball_encoding_v3 import (
     encode_goal_v3, encode_rack_v3, generate_nine_ball_goals,
     reference_angle_deg,
 )
+from src.game.nine_ball_position import generate_outcome_position_goals
+from src.game.nine_ball_rules import NineBallContext, NineBallRules
 from src.macro.candidate_policy import MacroCandidatePolicyNetwork
 from src.micro.actor import GaussianActor
 from src.micro.shot_control import Shot5DDecoder
@@ -53,6 +56,7 @@ class NineBallMicroSACAgent(GeometryNineBallAgent):
         device="cpu",
         deterministic=True,
         learned_safety=False,
+        outcome_position=False,
     ):
         super().__init__()
         self.device = torch.device(device)
@@ -73,6 +77,8 @@ class NineBallMicroSACAgent(GeometryNineBallAgent):
         self.actor.eval()
         self.deterministic = deterministic
         self.learned_safety = learned_safety
+        self.outcome_position = outcome_position
+        self.position_simulator = None
         self.decoder = Shot5DDecoder()
         self.macro_policy = None
         if macro_policy_checkpoint is not None:
@@ -94,7 +100,15 @@ class NineBallMicroSACAgent(GeometryNineBallAgent):
             self.macro_policy.eval()
 
     def _choose_goal(self, state, context=None):
-        goals = generate_nine_ball_goals(state, learned_safety=self.learned_safety)
+        if self.outcome_position:
+            if self.position_simulator is None:
+                self.position_simulator = MultiBallFastFizSimulator(state.config)
+            goals = generate_outcome_position_goals(
+                state, context or NineBallContext(), self.position_simulator, NineBallRules(),
+                learned_safety=self.learned_safety,
+            )
+        else:
+            goals = generate_nine_ball_goals(state, learned_safety=self.learned_safety)
         if len(goals) == 1:
             return goals[0]
         if self.macro_policy is not None:

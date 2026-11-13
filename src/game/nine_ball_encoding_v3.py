@@ -154,11 +154,14 @@ def direct_pocket_candidates(state, target):
         yield pocket_id
 
 
-def generate_nine_ball_goals(state, *, learned_safety=False) -> tuple[NineBallGoal, ...]:
+def generate_nine_ball_goals(
+    state, *, learned_safety=False, position_goal=None,
+) -> tuple[NineBallGoal, ...]:
     """Unweighted candidate set; no equal-frequency strategy balancing.
 
     Break uses an explicit physical action. With learned_safety, the
     SAFETY goal is a condition for the same 5-D Micro as the attack goals.
+    A position_goal callback may replace or omit each legacy stop region.
     """
     if state.ball_in_hand:
         raise ValueError("Cue placement must precede shot candidate generation")
@@ -180,8 +183,15 @@ def generate_nine_ball_goals(state, *, learned_safety=False) -> tuple[NineBallGo
     candidates = []
     next_balls = sorted(n for n in on_table if n > target)
     for pocket_id in direct_pocket_candidates(state, target):
-        candidates.append(NineBallGoal("DIRECT_ATTACK", target, pocket_id))
-        if next_balls:
+        direct = NineBallGoal("DIRECT_ATTACK", target, pocket_id)
+        candidates.append(direct)
+        if not next_balls:
+            continue
+        if position_goal is not None:
+            position = position_goal(state, direct, next_balls[0])
+            if position is not None:
+                candidates.append(position)
+        else:
             next_pos = state.ball_positions[
                 state.array_index_for_ball(next_balls[0])
             ]

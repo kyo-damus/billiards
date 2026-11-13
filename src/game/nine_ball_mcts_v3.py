@@ -21,8 +21,9 @@ from src.game.nine_ball_encoding_v3 import (
 from src.game.nine_ball_rules import NineBallContext, NineBallRules
 from src.game.nine_ball_session import NineBallRackSession
 from src.game.nine_ball_physics_guard import (
-    InvalidPhysicalTransition, validate_physical_step, validate_rack_layout,
+    InvalidPhysicalTransition, simulate_nine_ball_shot, validate_rack_layout,
 )
+from src.game.nine_ball_position import generate_outcome_position_goals
 from src.game.rack_state import TableGameConfig
 
 
@@ -67,6 +68,7 @@ class NineBallMCTS:
         gamma=0.99,
         root_min_visits=1,
         learned_safety=False,
+        outcome_position=False,
     ):
         if simulations < 1 or max_depth < 1 or root_min_visits < 0:
             raise ValueError("simulations and max_depth must be positive")
@@ -86,6 +88,7 @@ class NineBallMCTS:
         self.gamma = gamma
         self.root_min_visits = root_min_visits
         self.learned_safety = learned_safety
+        self.outcome_position = outcome_position
         self.last_root = None
         self.last_report = None
 
@@ -111,7 +114,13 @@ class NineBallMCTS:
         validate_rack_layout(node.state)
         self._prepare(node)
         validate_rack_layout(node.state)
-        candidates = generate_nine_ball_goals(node.state, learned_safety=self.learned_safety)
+        if self.outcome_position:
+            candidates = generate_outcome_position_goals(
+                node.state, node.context, self.simulator, self.rules,
+                learned_safety=self.learned_safety,
+            )
+        else:
+            candidates = generate_nine_ball_goals(node.state, learned_safety=self.learned_safety)
         if not candidates:
             raise RuntimeError("Nonterminal rack has no nine-ball candidate")
         if self.policy is None:
@@ -139,7 +148,9 @@ class NineBallMCTS:
         """Perspective: player to act in node.state; rewards are +/-1."""
         if node.winner is not None:
             return 0.0  # terminal rewards live on the parent edge
-        self._expand(node)
+        # Expand candidates only if a subsequent simulation traverses this leaf.
+        self._prepare(node)
+        validate_rack_layout(node.state)
         if self.value is None:
             return 0.0
         encoded = torch.as_tensor(
@@ -175,22 +186,13 @@ class NineBallMCTS:
     def _step(self, node, edge):
         """Return False only for a diagnosed physically invalid shot."""
         try:
-            validate_rack_layout(node.state)
             plan = self.micro_agent.plan_goal(node.state, edge.goal, node.context)
-            self.simulator.restore(node.state)
-            physical = self.simulator.step(
+            _, outcome = simulate_nine_ball_shot(
+                self.simulator, self.rules, node.state, node.context,
                 target_ball=plan.target_ball, shot=plan.shot,
             )
-            validate_physical_step(physical)
-            outcome = self.rules.apply(node.state, physical, node.context)
-            validate_rack_layout(outcome.next_state)
         except InvalidPhysicalTransition as exc:
             edge.invalid_reason = str(exc)
-            return False
-        except RuntimeError as exc:
-            if "Bad Shot Exception" not in str(exc):
-                raise
-            edge.invalid_reason = f"FastFiz Bad Shot Exception: {exc}"
             return False
         edge.child = SearchNode(
             state=outcome.next_state,

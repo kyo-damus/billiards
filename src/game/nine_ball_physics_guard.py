@@ -56,3 +56,19 @@ def validate_rack_layout(state, *, tolerance_m=1e-6):
                     f"penetration={overlap:.9f} m; "
                     "discard simulated transition rather than score as foul"
                 )
+
+
+def simulate_nine_ball_shot(simulator, rules, state, context, *, target_ball, shot):
+    """Simulate from an independent rack snapshot and validate the successor."""
+    validate_rack_layout(state)
+    simulator.restore(state)
+    try:
+        physical = simulator.step(target_ball=target_ball, shot=shot)
+    except RuntimeError as exc:
+        if "Bad Shot Exception" not in str(exc):
+            raise
+        raise InvalidPhysicalTransition(f"FastFiz rejected shot: {exc}") from exc
+    validate_physical_step(physical)
+    outcome = rules.apply(state, physical, context)
+    validate_rack_layout(outcome.next_state)
+    return physical, outcome

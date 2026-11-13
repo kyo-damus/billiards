@@ -17,15 +17,19 @@ import random
 import numpy as np
 import torch
 
+from src.common.table import TABLE_LENGTH, TABLE_WIDTH
 from src.env.multi_ball_fastfiz import MultiBallFastFizSimulator
 from src.game.nine_ball_encoding_v3 import (
     ENCODING_VERSION, GOAL_KINDS, MACRO_GOAL_V3_DIM, MICRO_CONDITIONED_V3_DIM,
-    conditioned_observation_v3, direct_pocket_candidates, encode_goal_v3,
+    NineBallGoal, conditioned_observation_v3, direct_pocket_candidates, encode_goal_v3,
     generate_nine_ball_goals, reference_angle_deg,
 )
 from src.game.nine_ball_rules import NineBallContext, NineBallRules
 from src.game.nine_ball_physics_guard import (
-    InvalidPhysicalTransition, validate_physical_step, validate_rack_layout,
+    InvalidPhysicalTransition, simulate_nine_ball_shot,
+)
+from src.game.nine_ball_position import (
+    POSITION_RADIUS_M, continues_to_next_ball, generate_outcome_position_goals,
 )
 from src.game.rack_state import RackState, TableGameConfig
 from src.micro.replay_buffer import ReplayBuffer
@@ -40,9 +44,34 @@ class TrainingSample:
     selected_goal: object | None = None
 
 
-def _selected_micro_goal(state, row, *, learned_safety):
+def _logged_outcome_position(state, action, selected):
+    """Read the recorded condition without rerunning FastFiz during SAC loading."""
+    target = int(np.argmax(selected[4:20]))
+    pocket = int(np.argmax(selected[20:26]))
+    x, y = selected[26:28] * np.array([TABLE_WIDTH, TABLE_LENGTH])
+    goal = NineBallGoal("POSITION_ATTACK", target, pocket, (float(x), float(y)), POSITION_RADIUS_M)
+    remaining = state.on_table_object_balls()
+    if (
+        len(remaining) < 2 or target != min(remaining)
+        or not (0 < x < TABLE_WIDTH and 0 < y < TABLE_LENGTH)
+        or pocket not in direct_pocket_candidates(state, target)
+        or not np.array_equal(encode_goal_v3(goal), selected)
+    ):
+        raise ValueError("Invalid logged outcome POSITION_ATTACK Goal")
+    search = action.get("macro_search")
+    if search is not None:
+        index, candidates = search["chosen_index"], search["goal_v3"]
+        if not 0 <= index < len(candidates) or not np.array_equal(
+            selected, np.asarray(candidates[index], dtype=np.float32),
+        ):
+            raise ValueError("Logged POSITION_ATTACK Goal differs from selected MCTS candidate")
+    return goal
+
+
+def _selected_micro_goal(state, row, *, learned_safety, outcome_position=False):
     """Recover the exact logged goal under the active candidate configuration."""
-    chosen = (row.get("chosen_action") or {}).get("goal_v3")
+    action = row.get("chosen_action") or {}
+    chosen = action.get("goal_v3")
     if chosen is None:
         return None
     selected = np.asarray(chosen, dtype=np.float32)
@@ -56,6 +85,8 @@ def _selected_micro_goal(state, row, *, learned_safety):
         not learned_safety or np.isclose(selected[29], 1.0, atol=1e-5)
     )):
         return None
+    if outcome_position and kind == "POSITION_ATTACK":
+        return _logged_outcome_position(state, action, selected)
     matches = [
         goal for goal in generate_nine_ball_goals(state, learned_safety=learned_safety)
         if goal.explicit_shot is None
@@ -71,6 +102,7 @@ def _selected_micro_goal(state, row, *, learned_safety):
 
 def load_training_states(
     rollout_dir: Path, *, goal_source: str = "uniform", learned_safety=False,
+    outcome_position=False,
 ) -> tuple[TrainingSample, ...]:
     """Load observed pre-shot states; optionally use exact selected Macro goals."""
     if goal_source not in ("uniform", "logged"):
@@ -89,6 +121,8 @@ def load_training_states(
             "learned_micro_self_play",
         ):
             raise ValueError(f"Unexpected rollout kind in {path}")
+        if goal_source == "logged" and data.get("outcome_position", False) != outcome_position:
+            raise ValueError(f"Outcome position mode differs from logged collection in {path}")
         for row in data.get("trajectory", []):
             raw = row["state"]
             if tuple(raw["ball_numbers"]) != cfg.ball_numbers:
@@ -121,7 +155,9 @@ def load_training_states(
                 )
             if not state.break_shot and state.on_table_object_balls():
                 chosen = (
-                    _selected_micro_goal(state, row, learned_safety=learned_safety)
+                    _selected_micro_goal(
+                        state, row, learned_safety=learned_safety, outcome_position=outcome_position,
+                    )
                     if goal_source == "logged" else None
                 )
                 if goal_source == "logged" and chosen is None:
@@ -135,7 +171,7 @@ def load_training_states(
     return tuple(training)
 
 
-def micro_reward(goal, before, physical, outcome) -> tuple[float, bool]:
+def micro_reward(goal, before, physical, outcome, *, outcome_position=False) -> tuple[float, bool]:
     """Physics-grounded one-shot reward (not the final match objective)."""
     if goal.kind == "SAFETY":
         if outcome.foul:
@@ -166,12 +202,26 @@ def micro_reward(goal, before, physical, outcome) -> tuple[float, bool]:
         reward -= 0.5
     # POSITION means pot the specified ball in the specified pocket AND
     # place the cue. Do not reward cue position after a missed pot.
-    if goal.cue_stop_xy is not None and exact and not outcome.foul:
-        cue = np.asarray(physical.positions[0], dtype=np.float64)
-        desired = np.asarray(goal.cue_stop_xy, dtype=np.float64)
-        d = float(np.linalg.norm(cue - desired))
+    if goal.cue_stop_xy is not None and exact and not outcome.foul and (
+        not outcome_position or _continues_position_goal(before, goal, outcome)
+    ):
+        d = _cue_stop_distance(goal, physical)
         reward += 0.5 * max(0.0, 1.0 - d / goal.cue_stop_radius)
     return float(reward), exact and not outcome.foul
+
+
+def _cue_stop_distance(goal, physical):
+    return float(np.linalg.norm(
+        np.asarray(physical.positions[0], dtype=np.float64) - goal.cue_stop_xy
+    ))
+
+
+def _continues_position_goal(before, goal, outcome):
+    next_ball = min(
+        (ball for ball in before.on_table_object_balls() if ball != goal.target_ball),
+        default=None,
+    )
+    return continues_to_next_ball(next_ball, outcome)
 
 
 def resolve_device(name: str) -> str:
@@ -226,20 +276,9 @@ def restore_micro_checkpoint(agent: SACAgent, checkpoint: Path) -> int:
 
 def execute_valid_training_shot(simulator, rules, state, goal, context, shot):
     """Never label a native non-shot or impossible successor as SAC experience."""
-    validate_rack_layout(state)
-    simulator.restore(state)
-    try:
-        physical = simulator.step(target_ball=goal.target_ball, shot=shot)
-    except RuntimeError as exc:
-        if "Bad Shot Exception" not in str(exc):
-            raise
-        raise InvalidPhysicalTransition(
-            f"FastFiz rejected Micro training shot: {exc}"
-        ) from exc
-    validate_physical_step(physical)
-    outcome = rules.apply(state, physical, context)
-    validate_rack_layout(outcome.next_state)
-    return physical, outcome
+    return simulate_nine_ball_shot(
+        simulator, rules, state, context, target_ball=goal.target_ball, shot=shot,
+    )
 
 
 def train(args, *, simulator_factory=MultiBallFastFizSimulator):
@@ -252,6 +291,7 @@ def train(args, *, simulator_factory=MultiBallFastFizSimulator):
         raise FileExistsError(f"Refusing to overwrite {args.output_dir}")
     samples = load_training_states(
         args.rollout_dir, goal_source=args.goal_source, learned_safety=args.learned_safety,
+        outcome_position=args.outcome_position,
     )
     device = resolve_device(args.device)
     np.random.seed(args.seed)
@@ -276,8 +316,10 @@ def train(args, *, simulator_factory=MultiBallFastFizSimulator):
     simulator = simulator_factory(TableGameConfig.nine_ball_inventory())
     rules = NineBallRules()
     decoder = Shot5DDecoder()
+    witnessed_goals = {}
     logs = []
     window_rewards, window_pots, window_safety = [], [], []
+    window_positions = []
     accepted_steps_by_goal = Counter()
     print(
         f"=== Nine-ball 5D goal-conditioned Micro SAC ===\n"
@@ -292,17 +334,23 @@ def train(args, *, simulator_factory=MultiBallFastFizSimulator):
         # "steps" counts accepted physical transitions, not rejected native
         # attempts. Do not push invalid shots or invent a negative reward.
         while True:
-            sample = samples[int(rng.integers(0, len(samples)))]
+            sample_index = int(rng.integers(0, len(samples)))
+            sample = samples[sample_index]
             state, context = sample.state, sample.context
             if args.goal_source == "logged":
                 goal = sample.selected_goal
                 if goal is None:
                     raise RuntimeError("Logged-goal training sample has no selected goal")
             else:
-                candidate_goals = tuple(
-                    g for g in generate_nine_ball_goals(state, learned_safety=args.learned_safety)
-                    if g.explicit_shot is None
-                )
+                if args.outcome_position:
+                    if sample_index not in witnessed_goals:
+                        witnessed_goals[sample_index] = generate_outcome_position_goals(
+                            state, context, simulator, rules, learned_safety=args.learned_safety,
+                        )
+                    goals = witnessed_goals[sample_index]
+                else:
+                    goals = generate_nine_ball_goals(state, learned_safety=args.learned_safety)
+                candidate_goals = tuple(g for g in goals if g.explicit_shot is None)
                 if not candidate_goals:
                     skipped_no_goal_attempts += 1
                     consecutive_no_goal += 1
@@ -333,7 +381,9 @@ def train(args, *, simulator_factory=MultiBallFastFizSimulator):
                 continue
             consecutive_invalid_physics = 0
             break
-        reward, success = micro_reward(goal, state, physical, outcome)
+        reward, success = micro_reward(
+            goal, state, physical, outcome, outcome_position=args.outcome_position,
+        )
         replay.push(
             encoded, action, reward, np.zeros_like(encoded), True
         )
@@ -347,6 +397,11 @@ def train(args, *, simulator_factory=MultiBallFastFizSimulator):
             window_safety.append(success)
         else:
             window_pots.append(success)
+        if args.outcome_position and goal.kind == "POSITION_ATTACK":
+            window_positions.append(
+                success and _continues_position_goal(state, goal, outcome)
+                and _cue_stop_distance(goal, physical) <= goal.cue_stop_radius
+            )
         if step == args.steps or step % args.report_interval == 0:
             log = {
                 "step": step,
@@ -354,6 +409,8 @@ def train(args, *, simulator_factory=MultiBallFastFizSimulator):
                 "exact_target_pot_rate": float(np.mean(window_pots)) if window_pots else None,
                 "safety_goal_success_rate": float(np.mean(window_safety)) if window_safety else None,
                 "safety_steps": len(window_safety),
+                "position_goal_success_rate": float(np.mean(window_positions)) if window_positions else None,
+                "position_steps": len(window_positions),
                 "replay_size": len(replay),
                 "invalid_physics_attempts": invalid_physics_attempts,
                 "skipped_no_goal_attempts": skipped_no_goal_attempts,
@@ -366,6 +423,7 @@ def train(args, *, simulator_factory=MultiBallFastFizSimulator):
             window_rewards.clear()
             window_pots.clear()
             window_safety.clear()
+            window_positions.clear()
 
     args.output_dir.mkdir(parents=True, exist_ok=False)
     checkpoint = {
@@ -380,6 +438,7 @@ def train(args, *, simulator_factory=MultiBallFastFizSimulator):
         "optimizer_state_carried_over": False,
         "goal_source": args.goal_source,
         "learned_safety": args.learned_safety,
+        "outcome_position": args.outcome_position,
         "actor": agent.actor.state_dict(),
         "critic": agent.critic.state_dict(),
         "critic_target": agent.critic_target.state_dict(),
@@ -397,6 +456,7 @@ def train(args, *, simulator_factory=MultiBallFastFizSimulator):
         "source_rollout_dir": str(args.rollout_dir),
         "goal_source": args.goal_source,
         "learned_safety": args.learned_safety,
+        "outcome_position": args.outcome_position,
         "init_checkpoint": str(args.init_checkpoint) if args.init_checkpoint else None,
         "previous_trained_steps": initial_steps,
         "training_steps_this_run": args.steps,
@@ -426,6 +486,7 @@ def parse_args(argv=None):
         help="uniform candidates or exact Micro-controlled Goals from collected Macro decisions",
     )
     parser.add_argument("--learned-safety", action="store_true")
+    parser.add_argument("--outcome-position", action="store_true")
     parser.add_argument("--output-dir", required=True, type=Path)
     parser.add_argument("--steps", type=int, default=5000)
     parser.add_argument("--warmup-steps", type=int, default=400)
