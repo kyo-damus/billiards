@@ -104,3 +104,15 @@ def test_rejects_training_seeds_and_changed_starting_models(evaluation_args):
     with pytest.raises(ValueError, match="differs from the training manifest"):
         evaluate(args)
     assert not args.output_dir.exists()
+
+
+def test_multirack_evaluation_rejects_overlap_with_later_training_rack(evaluation_args):
+    args = evaluation_args
+    training = json.loads(args.training_manifest.read_text())
+    training["settings"]["race_to"] = 3
+    training["rounds"][0]["race_to"] = 3
+    args.training_manifest.write_text(json.dumps(training))
+    args.start_seed = 104
+    with pytest.raises(ValueError, match="overlap with training rack seeds"):
+        evaluate(args)
+    assert not args.output_dir.exists()

@@ -137,3 +137,15 @@ def test_goal_mode_is_passed_to_collection_and_micro_training(tmp_path, flag):
     assert enabled_stages == {
         "000_self_play", "000_micro_finetune", "001_self_play", "001_micro_finetune",
     }
+
+
+def test_multirack_plan_reserves_seeds_and_uses_match_return(tmp_path):
+    args = _args(tmp_path, ("--race-to", "9", "--break-policy", "winner"))
+    stages, rounds = build_plan(args)
+    assert args.gamma == 1.0
+    assert rounds[1]["start_seed"] >= rounds[0]["start_seed"] + 18 * args.matches_per_iteration
+    assert all(round_info["race_to"] == 9 for round_info in rounds)
+    collect = stages[0].argv
+    assert collect[collect.index("--race-to") + 1] == "9"
+    assert collect[collect.index("--break-policy") + 1] == "winner"
+    assert "--match-aware" in stages[1].argv and "--match-aware" in stages[3].argv

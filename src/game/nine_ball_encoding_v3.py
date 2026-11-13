@@ -20,6 +20,7 @@ from src.micro.shot_control import PhysicalShot5D
 ENCODING_VERSION = 3
 MAX_BALL_NUMBER = 15
 MACRO_STATE_V3_DIM = 72
+MATCH_MACRO_STATE_DIM = MACRO_STATE_V3_DIM + 6
 MACRO_GOAL_V3_DIM = 36
 MICRO_CONDITIONED_V3_DIM = MACRO_STATE_V3_DIM + MACRO_GOAL_V3_DIM
 GOAL_KINDS = ("BREAK", "DIRECT_ATTACK", "POSITION_ATTACK", "SAFETY")
@@ -76,6 +77,24 @@ def encode_rack_v3(state, context=None) -> np.ndarray:
         out[70] = min(context.consecutive_fouls[1], 3) / 3.0
         out[71] = float(context.push_out_available)
     return out
+
+
+def encode_macro_state(state, context=None, match_position=None) -> np.ndarray:
+    """Append match context from the acting player's perspective when present."""
+    rack = encode_rack_v3(state, context)
+    if match_position is None:
+        return rack
+    own = state.current_player
+    race_to = match_position.race_to
+    features = np.asarray([
+        (race_to - match_position.rack_wins[own]) / race_to,
+        (race_to - match_position.rack_wins[1 - own]) / race_to,
+        1.0 / race_to,
+        match_position.breaker == own,
+        match_position.break_policy == "winner",
+        match_position.break_policy == "loser",
+    ], dtype=np.float32)
+    return np.concatenate((rack, features))
 
 
 def encode_goal_v3(goal: NineBallGoal) -> np.ndarray:

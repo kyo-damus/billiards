@@ -17,7 +17,7 @@ import torch.nn.functional as F
 from scripts.build_nine_ball_macro_returns_v3 import REWARD_KIND, TARGET_KIND
 from scripts.train_nine_ball_macro_policy_v3 import split_by_match
 from src.game.nine_ball_encoding_v3 import (
-    ENCODING_VERSION, MACRO_GOAL_V3_DIM, MACRO_STATE_V3_DIM,
+    ENCODING_VERSION, MACRO_GOAL_V3_DIM, MACRO_STATE_V3_DIM, MATCH_MACRO_STATE_DIM,
 )
 from src.macro.candidate_value import MacroCandidateValueNetwork
 from src.macro.value import MacroValueNetwork
@@ -40,12 +40,13 @@ def load_returns(path):
         ):
             raise ValueError("Wrong v3 turn-aware terminal-return dataset contract")
         states = np.asarray(d["states"], dtype=np.float32)
+        state_dim = MATCH_MACRO_STATE_DIM if bool(d.get("match_aware", False)) else MACRO_STATE_V3_DIM
         goals = np.asarray(d["candidates"], dtype=np.float32)
         targets = np.asarray(d["q_target"], dtype=np.float32)
         match_ids = np.asarray(d["match_seeds"], dtype=np.int64)
     n = len(targets)
     if (
-        n < 2 or states.shape != (n, MACRO_STATE_V3_DIM)
+        n < 2 or states.shape != (n, state_dim)
         or goals.shape != (n, MACRO_GOAL_V3_DIM)
         or match_ids.shape != (n,)
         or not all(np.all(np.isfinite(x)) for x in (states, goals, targets))
@@ -125,6 +126,7 @@ def train(args):
         torch.cuda.manual_seed_all(args.seed)
     torch.set_num_threads(min(2, max(1, torch.get_num_threads())))
     states, goals, y, match_ids = load_returns(args.dataset)
+    state_dim = states.shape[1]
     train_ids, val_ids, val_matches = split_by_match(
         match_ids, validation_fraction=args.validation_fraction, seed=args.seed,
     )
@@ -137,12 +139,12 @@ def train(args):
     goal = torch.as_tensor(goals, device=device)
     target = torch.as_tensor(y, device=device)
     q = MacroCandidateValueNetwork(
-        state_dim=MACRO_STATE_V3_DIM,
+        state_dim=state_dim,
         candidate_dim=MACRO_GOAL_V3_DIM,
         hidden_dim=args.hidden_dim,
     ).to(device)
     v = MacroValueNetwork(
-        state_dim=MACRO_STATE_V3_DIM, hidden_dim=args.hidden_dim,
+        state_dim=state_dim, hidden_dim=args.hidden_dim,
     ).to(device)
     q_weights, q_epoch, q_mse = fit_model(
         "q", q, state, goal, target, train_ids, val_ids, args, device,
@@ -152,7 +154,7 @@ def train(args):
     )
     common = {
         "format_version": ENCODING_VERSION,
-        "state_dim": MACRO_STATE_V3_DIM,
+        "state_dim": state_dim,
         "hidden_dim": args.hidden_dim,
         "target_kind": TARGET_KIND,
         "reward_kind": REWARD_KIND,

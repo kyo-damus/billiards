@@ -18,8 +18,9 @@ import torch.nn.functional as F
 from scripts.build_nine_ball_mcts_visit_dataset_v3 import TARGET_KIND
 from scripts.train_nine_ball_macro_policy_v3 import split_by_match
 from src.game.nine_ball_encoding_v3 import (
-    ENCODING_VERSION, MACRO_GOAL_V3_DIM, MACRO_STATE_V3_DIM,
+    ENCODING_VERSION, MACRO_GOAL_V3_DIM, MACRO_STATE_V3_DIM, MATCH_MACRO_STATE_DIM,
 )
+from src.game.nine_ball_policy_v3 import load_macro_policy
 from src.macro.candidate_policy import MacroCandidatePolicyNetwork
 
 
@@ -38,6 +39,7 @@ def load_visits(path):
         ):
             raise ValueError("Not a nine-ball version-3 MCTS visit dataset")
         state = np.asarray(d["states"], dtype=np.float32)
+        state_dim = MATCH_MACRO_STATE_DIM if bool(d.get("match_aware", False)) else MACRO_STATE_V3_DIM
         goal = np.asarray(d["candidates"], dtype=np.float32)
         visits = np.asarray(d["visits"])
         offsets = np.asarray(d["offsets"], dtype=np.int64)
@@ -45,7 +47,7 @@ def load_visits(path):
         chosen = np.asarray(d["chosen_indices"], dtype=np.int64)
     n = len(state)
     if (
-        n < 2 or state.shape != (n, MACRO_STATE_V3_DIM)
+        n < 2 or state.shape != (n, state_dim)
         or goal.ndim != 2 or goal.shape[1] != MACRO_GOAL_V3_DIM
         or visits.shape != (len(goal),)
         or not np.issubdtype(visits.dtype, np.integer)
@@ -101,26 +103,6 @@ def evaluate(model, data, indices, device):
     }
 
 
-def load_base_policy(path, device):
-    ckpt = torch.load(path, map_location="cpu", weights_only=True)
-    if (
-        ckpt.get("format_version") != ENCODING_VERSION
-        or ckpt.get("model_kind") != "nine_ball_macro_candidate_policy_v3"
-        or ckpt.get("state_dim") != MACRO_STATE_V3_DIM
-        or ckpt.get("candidate_dim") != MACRO_GOAL_V3_DIM
-        or not isinstance(ckpt.get("hidden_dim"), int)
-        or ckpt["hidden_dim"] < 1
-    ):
-        raise ValueError("Incompatible base Macro Candidate Policy v3 checkpoint")
-    model = MacroCandidatePolicyNetwork(
-        state_dim=MACRO_STATE_V3_DIM,
-        candidate_dim=MACRO_GOAL_V3_DIM,
-        hidden_dim=ckpt["hidden_dim"],
-    ).to(device)
-    model.load_state_dict(ckpt["candidate_policy_network"], strict=True)
-    return model, int(ckpt["hidden_dim"])
-
-
 def train(args):
     if (
         args.epochs < 1 or args.learning_rate <= 0
@@ -146,15 +128,16 @@ def train(args):
     torch.set_num_threads(min(2, max(1, torch.get_num_threads())))
     data = load_visits(args.dataset)
     states, goals, visits, offsets, seeds, chosen = data
+    state_dim = states.shape[1]
     train_ids, val_ids, val_matches = split_by_match(
         seeds, validation_fraction=args.validation_fraction, seed=args.seed,
     )
     if args.base_policy_checkpoint is not None:
-        model, hidden_dim = load_base_policy(args.base_policy_checkpoint, device)
+        model, hidden_dim = load_macro_policy(args.base_policy_checkpoint, device=device, state_dim=state_dim)
     else:
         hidden_dim = args.hidden_dim
         model = MacroCandidatePolicyNetwork(
-            state_dim=MACRO_STATE_V3_DIM,
+            state_dim=state_dim,
             candidate_dim=MACRO_GOAL_V3_DIM,
             hidden_dim=hidden_dim,
         ).to(device)
@@ -195,7 +178,7 @@ def train(args):
     torch.save({
         "format_version": ENCODING_VERSION,
         "model_kind": "nine_ball_macro_candidate_policy_v3",
-        "state_dim": MACRO_STATE_V3_DIM,
+        "state_dim": state_dim,
         "candidate_dim": MACRO_GOAL_V3_DIM,
         "hidden_dim": hidden_dim,
         "candidate_policy_network": model.cpu().state_dict(),

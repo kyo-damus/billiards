@@ -1,7 +1,7 @@
 """Build v3 9-ball selected-action Q and state-V match-return training data.
 
-ONLY complete single-rack (race-to-1) matches with exact logged v3 Macro goals
-are supported. These labels are realized behavior-policy terminal returns,
+Only complete matches with exact logged v3 Macro goals are supported.
+These labels are realized behavior-policy terminal returns,
 NOT unexecuted candidate Q targets and NOT a claim of an optimal value function.
 No incomplete matches are zero-bootstrapped.
 """
@@ -13,8 +13,9 @@ from pathlib import Path
 import numpy as np
 
 from src.game.nine_ball_encoding_v3 import (
-    MACRO_GOAL_V3_DIM, MACRO_STATE_V3_DIM, encode_rack_v3,
+    MACRO_GOAL_V3_DIM, MACRO_STATE_V3_DIM, MATCH_MACRO_STATE_DIM, encode_macro_state,
 )
+from src.game.match import MatchConfig, RaceToMatch
 from src.game.nine_ball_rules import NineBallContext
 from src.game.rack_state import RackState, TableGameConfig
 
@@ -42,7 +43,7 @@ def turn_aware_returns(players, winner, gamma):
     return target
 
 
-def read_state_and_goal(row):
+def read_state_and_goal(row, match_position=None):
     """Recover state, rule context, and *exact logged chosen* v3 candidate."""
     raw = row["state"]
     config = TableGameConfig.nine_ball_inventory()
@@ -80,7 +81,45 @@ def read_state_and_goal(row):
         raise ValueError("Invalid 36D chosen Macro Goal")
     if not np.isclose(float(goal[:4].sum()), 1.0, atol=1e-5):
         raise ValueError("Chosen Macro Goal kind must be one-hot")
-    return encode_rack_v3(state, context), goal
+    return encode_macro_state(state, context, match_position), goal
+
+
+def logged_match_positions(match, rows):
+    """Replay the rack-winner evidence to verify each pre-shot match context."""
+    first = rows[0].get("match_context")
+    if first is None:
+        raise ValueError("Match-aware training requires logged pre-shot match context")
+    tracker = RaceToMatch(MatchConfig(
+        race_to=match["race_to"], rule_id="nine_ball",
+        first_breaker=first["breaker"], break_policy=match.get("break_policy", "alternate"),
+    ))
+    positions = []
+    for row in rows:
+        position = tracker.position
+        raw = row.get("match_context")
+        if (
+            raw is None
+            or position.winner is not None
+            or raw["race_to"] != position.race_to
+            or tuple(raw["rack_wins"]) != position.rack_wins
+            or raw["breaker"] != position.breaker
+            or raw["break_policy"] != position.break_policy
+            or row["rack_index"] != sum(position.rack_wins)
+        ):
+            raise ValueError("Inconsistent pre-shot match score or rack order")
+        positions.append(position)
+        winner = row["rule_result"]["rack_winner"]
+        if winner is not None:
+            tracker.finish_rack(winner)
+    snapshot = tracker.snapshot()
+    if (
+        tuple(match["rack_wins"]) != snapshot.rack_wins
+        or match["racks_completed"] != snapshot.racks_completed
+        or match["match_finished"] != snapshot.finished
+        or match["match_winner"] != snapshot.match_winner
+    ):
+        raise ValueError("Logged match result does not match the rack winner sequence")
+    return positions
 
 
 def build(args):
@@ -93,12 +132,15 @@ def build(args):
         raise ValueError(f"No match_seed_*.json in {args.rollout_dir}")
     states, goals, returns, groups, step_indices, winner_labels = [], [], [], [], [], []
     completed, unfinished, unsupported = 0, 0, 0
+    state_dim = MATCH_MACRO_STATE_DIM if args.match_aware else MACRO_STATE_V3_DIM
     for file in files:
         match = json.loads(file.read_text(encoding="utf-8"))
         if not match.get("match_finished"):
             unfinished += 1
             continue
-        if int(match.get("race_to", -1)) != 1 or int(match.get("racks_completed", -1)) != 1:
+        if not args.match_aware and (
+            int(match.get("race_to", -1)) != 1 or int(match.get("racks_completed", -1)) != 1
+        ):
             unsupported += 1
             continue
         winner = match["match_winner"]
@@ -110,8 +152,9 @@ def build(args):
         seed = int(match["seed"])
         if seed != int(file.stem.removeprefix("match_seed_")):
             raise ValueError(f"Match seed mismatch in {file}")
-        for i, row in enumerate(rows):
-            state, goal = read_state_and_goal(row)
+        positions = logged_match_positions(match, rows) if args.match_aware else [None] * len(rows)
+        for i, (row, position) in enumerate(zip(rows, positions)):
+            state, goal = read_state_and_goal(row, position)
             states.append(state)
             goals.append(goal)
             returns.append(float(targets[i]))
@@ -122,17 +165,18 @@ def build(args):
 
     if completed < 2:
         raise ValueError(
-            "Need >=2 complete race-to-1 matches with logged v3 goals "
+            "Need >=2 complete matches with logged v3 goals "
             "for disjoint train/validation splitting."
         )
     arrays = {
-        "states": np.asarray(states, dtype=np.float32).reshape(-1, MACRO_STATE_V3_DIM),
+        "states": np.asarray(states, dtype=np.float32).reshape(-1, state_dim),
         "candidates": np.asarray(goals, dtype=np.float32).reshape(-1, MACRO_GOAL_V3_DIM),
         "q_target": np.asarray(returns, dtype=np.float32),
         "match_seeds": np.asarray(groups, dtype=np.int64),
         "step_indices": np.asarray(step_indices, dtype=np.int64),
         "winners": np.asarray(winner_labels, dtype=np.int64),
         "format_version": np.array(3, dtype=np.int64),
+        "match_aware": np.array(args.match_aware),
         "turn_aware": np.array(True),
         "target_kind": np.array(TARGET_KIND),
         "reward_kind": np.array(REWARD_KIND),
@@ -142,6 +186,7 @@ def build(args):
     np.savez_compressed(args.output, **arrays)
     summary = {
         "format_version": 3,
+        "match_aware": args.match_aware,
         "target_kind": TARGET_KIND,
         "reward_kind": REWARD_KIND,
         "turn_aware": True,
@@ -171,6 +216,7 @@ def parse_args(argv=None):
     parser.add_argument("--rollout-dir", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--gamma", type=float, default=0.99)
+    parser.add_argument("--match-aware", action="store_true")
     return parser.parse_args(argv)
 
 

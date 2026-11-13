@@ -13,20 +13,19 @@ import torch
 from src.env.multi_ball_fastfiz import MultiBallFastFizSimulator
 from src.game.nine_ball_agents import GeometryNineBallAgent, ShotPlan
 from src.game.nine_ball_encoding_v3 import (
-    ENCODING_VERSION, MACRO_GOAL_V3_DIM, MACRO_STATE_V3_DIM,
+    ENCODING_VERSION, MACRO_STATE_V3_DIM,
     MICRO_CONDITIONED_V3_DIM, conditioned_observation_v3,
-    encode_goal_v3, encode_rack_v3, generate_nine_ball_goals,
+    MATCH_MACRO_STATE_DIM, encode_goal_v3, encode_macro_state, generate_nine_ball_goals,
     reference_angle_deg,
 )
 from src.game.nine_ball_position import generate_outcome_position_goals
 from src.game.nine_ball_rules import NineBallContext, NineBallRules
-from src.macro.candidate_policy import MacroCandidatePolicyNetwork
+from src.game.nine_ball_policy_v3 import load_macro_policy
 from src.micro.actor import GaussianActor
 from src.micro.shot_control import NINE_BALL_BREAK_DECODER, Shot5DDecoder
 
 
 MICRO_KIND = "nine_ball_goal_conditioned_micro_sac_5d"
-MACRO_KIND = "nine_ball_macro_candidate_policy_v3"
 
 
 def _load_versioned(checkpoint, *, model_kind, state_dim, action_dim=None):
@@ -58,6 +57,7 @@ class NineBallMicroSACAgent(GeometryNineBallAgent):
         learned_safety=False,
         learned_break=False,
         outcome_position=False,
+        match_aware=False,
     ):
         super().__init__()
         self.device = torch.device(device)
@@ -80,28 +80,17 @@ class NineBallMicroSACAgent(GeometryNineBallAgent):
         self.learned_safety = learned_safety
         self.learned_break = learned_break
         self.outcome_position = outcome_position
+        self.match_aware = match_aware
         self.position_simulator = None
         self.decoder = Shot5DDecoder()
         self.macro_policy = None
         if macro_policy_checkpoint is not None:
-            macro = _load_versioned(
-                macro_policy_checkpoint,
-                model_kind=MACRO_KIND,
-                state_dim=MACRO_STATE_V3_DIM,
+            self.macro_policy, _ = load_macro_policy(
+                macro_policy_checkpoint, device=self.device,
+                state_dim=MATCH_MACRO_STATE_DIM if match_aware else MACRO_STATE_V3_DIM,
             )
-            if int(macro.get("candidate_dim", -1)) != MACRO_GOAL_V3_DIM:
-                raise ValueError("Macro v3 candidate dimension mismatch")
-            self.macro_policy = MacroCandidatePolicyNetwork(
-                state_dim=MACRO_STATE_V3_DIM,
-                candidate_dim=MACRO_GOAL_V3_DIM,
-                hidden_dim=int(macro["hidden_dim"]),
-            ).to(self.device)
-            self.macro_policy.load_state_dict(
-                macro["candidate_policy_network"], strict=True
-            )
-            self.macro_policy.eval()
 
-    def _choose_goal(self, state, context=None):
+    def _choose_goal(self, state, context=None, match_position=None):
         if self.outcome_position and not state.break_shot:
             if self.position_simulator is None:
                 self.position_simulator = MultiBallFastFizSimulator(state.config)
@@ -116,7 +105,7 @@ class NineBallMicroSACAgent(GeometryNineBallAgent):
         if len(goals) == 1:
             return goals[0]
         if self.macro_policy is not None:
-            s = torch.from_numpy(encode_rack_v3(state, context)).to(self.device)
+            s = torch.from_numpy(encode_macro_state(state, context, match_position)).to(self.device)
             c = torch.from_numpy(np.stack([
                 encode_goal_v3(goal) for goal in goals
             ])).to(self.device)
@@ -176,7 +165,12 @@ class NineBallMicroSACAgent(GeometryNineBallAgent):
         )
 
     def choose_shot(self, state, context=None) -> ShotPlan:
+        return self.choose_match_shot(state, context, None)
+
+    def choose_match_shot(self, state, context, match_position) -> ShotPlan:
         if state.ball_in_hand:
             raise ValueError("Place cue ball before Micro shot generation")
-        goal = self._choose_goal(state, context)
+        if self.match_aware and match_position is None:
+            raise ValueError("Match-aware Macro requires a match position")
+        goal = self._choose_goal(state, context, match_position if self.match_aware else None)
         return self.plan_goal(state, goal, context)

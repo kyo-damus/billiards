@@ -37,6 +37,7 @@ def _ensure_options(args):
     if (
         args.iterations < 1
         or args.matches_per_iteration < 2
+        or args.race_to < 1
         or args.start_seed < 0
         or args.max_shots_per_rack < 1
         or args.mcts_simulations < 1
@@ -75,6 +76,8 @@ def build_plan(args):
     stages = []
     iteration_summaries = []
     python = sys.executable
+    match_flags = ("--match-aware",) if args.race_to > 1 else ()
+    break_flags = ("--break-policy", args.break_policy) if args.break_policy != "alternate" else ()
     goal_flags = tuple(
         flag for flag, enabled in (
             ("--learned-safety", args.learned_safety),
@@ -92,11 +95,11 @@ def build_plan(args):
         micro_dir = folder / "micro"
         # 2N-1 racks max per race-to-N; collector reserves 2N seeds per match.
         # Leave 1000 additional seed IDs between separate iterations.
-        seed = args.start_seed + index * (2 * args.matches_per_iteration + 1000)
+        seed = args.start_seed + index * (2 * args.race_to * args.matches_per_iteration + 1000)
         collect = [
             python, "-m", "scripts.collect_nine_ball_self_play",
             "--matches", str(args.matches_per_iteration),
-            "--race-to", "1",
+            "--race-to", str(args.race_to),
             "--start-seed", str(seed),
             "--max-shots-per-rack", str(args.max_shots_per_rack),
             "--agent-kind", "micro_mcts",
@@ -109,6 +112,7 @@ def build_plan(args):
             "--mcts-gamma", str(args.gamma),
             "--device", args.device,
             "--output-dir", str(rollouts),
+            *break_flags,
         ]
         if state_v is not None:
             collect.extend(["--state-value-checkpoint", str(state_v)])
@@ -117,6 +121,7 @@ def build_plan(args):
         stages.append(Stage(f"{index:03d}_visit_dataset", (
             python, "-m", "scripts.build_nine_ball_mcts_visit_dataset_v3",
             "--rollout-dir", str(rollouts), "--output", str(visits),
+            *match_flags,
         )))
         stages.append(Stage(f"{index:03d}_macro_policy", (
             python, "-m", "scripts.train_nine_ball_macro_visits_v3",
@@ -132,6 +137,7 @@ def build_plan(args):
                 python, "-m", "scripts.build_nine_ball_macro_returns_v3",
                 "--rollout-dir", str(rollouts), "--output", str(returns),
                 "--gamma", str(args.gamma),
+                *match_flags,
             )))
             stages.append(Stage(f"{index:03d}_macro_qv", (
                 python, "-m", "scripts.train_nine_ball_macro_qv_v3",
@@ -160,6 +166,7 @@ def build_plan(args):
             "iteration": index,
             "start_seed": seed,
             "matches": args.matches_per_iteration,
+            "race_to": args.race_to,
             "rollouts": str(rollouts),
             "policy": str(initial_policy),
             "micro": str(initial_micro),
@@ -303,6 +310,8 @@ def run(args):
         previous_settings.setdefault("learned_safety", False)
         previous_settings.setdefault("learned_break", False)
         previous_settings.setdefault("outcome_position", False)
+        previous_settings.setdefault("race_to", 1)
+        previous_settings.setdefault("break_policy", "alternate")
         if previous_settings != current_settings:
             raise ValueError("Resume settings differ from previous run")
         original_commit = manifest.get("source_git_commit")
@@ -373,13 +382,15 @@ def parse_args(argv=None):
     p.add_argument("--base-state-v-checkpoint", type=Path)
     p.add_argument("--iterations", type=int, default=2)
     p.add_argument("--matches-per-iteration", type=int, default=32)
+    p.add_argument("--race-to", type=int, default=1)
+    p.add_argument("--break-policy", choices=("alternate", "winner", "loser"), default="alternate")
     p.add_argument("--start-seed", type=int, default=510000)
     p.add_argument("--max-shots-per-rack", type=int, default=80)
     p.add_argument("--mcts-simulations", type=int, default=24)
     p.add_argument("--mcts-max-depth", type=int, default=2)
     p.add_argument("--mcts-root-min-visits", type=int, default=1)
     p.add_argument("--mcts-c-puct", type=float, default=1.5)
-    p.add_argument("--gamma", type=float, default=0.99)
+    p.add_argument("--gamma", type=float)
     p.add_argument("--policy-epochs", type=int, default=10)
     p.add_argument("--qv-epochs", type=int, default=5)
     p.add_argument("--micro-steps", type=int, default=5000)
@@ -393,7 +404,10 @@ def parse_args(argv=None):
                    help="Resume an interrupted run without overwriting completed files")
     p.add_argument("--accept-unverified-code-change", action="store_true",
                    help="Allow mixed/unknown code-revision debug-only continuation")
-    return p.parse_args(argv)
+    args = p.parse_args(argv)
+    if args.gamma is None:
+        args.gamma = 1.0 if args.race_to > 1 else 0.99
+    return args
 
 
 if __name__ == "__main__":

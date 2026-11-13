@@ -1,4 +1,4 @@
-"""Evaluate a completed 9-ball v3 run against its starting models on paired racks."""
+"""Evaluate a completed 9-ball v3 run against its starting models on paired matches."""
 
 import argparse
 from collections import Counter
@@ -23,11 +23,14 @@ def _model_inputs(training):
     final = training["rounds"][-1]
     models = {}
     for label, paths in (
-        ("base", {key: base[key]["path"] for key in MODEL_KEYS}),
+        ("base", {key: base.get(key, {}).get("path") for key in MODEL_KEYS}),
         ("final", {key: final[key] for key in MODEL_KEYS}),
     ):
         models[label] = {}
         for key, path in paths.items():
+            if key == "state_v" and path is None:
+                models[label][key] = {"path": None, "sha256": None}
+                continue
             with Path(path).open("rb") as stream:
                 digest = hashlib.file_digest(stream, "sha256").hexdigest()
             if label == "base" and digest != base[key]["sha256"]:
@@ -64,14 +67,21 @@ def evaluate(args, *, agent_factory=None, simulator_factory=None):
         or not training.get("rounds")
     ):
         raise ValueError("Expected a completed nine-ball v3 training run from one code revision")
-    seeds = range(args.start_seed, args.start_seed + args.pairs)
+    settings = training["settings"]
+    race_to = settings.get("race_to", 1)
+    break_policy = settings.get("break_policy", "alternate")
+    stride = 2 * race_to if race_to > 1 else 1
+    seeds = range(args.start_seed, args.start_seed + args.pairs * stride, stride)
     for round_info in training["rounds"]:
         start = round_info["start_seed"]
-        training_seeds = range(start, start + 2 * round_info["matches"], 2)
-        if any(seed in training_seeds for seed in seeds):
-            raise ValueError("Evaluation seeds overlap with training matches")
+        training_race = round_info.get("race_to", race_to)
+        training_stride = 2 * training_race
+        stop = start + training_stride * round_info["matches"]
+        for seed in seeds:
+            for rack_seed in range(seed, seed + 2 * race_to - 1):
+                if start <= rack_seed < stop and (rack_seed - start) % training_stride < training_stride - 1:
+                    raise ValueError("Evaluation seeds overlap with training rack seeds")
 
-    settings = training["settings"]
     search = {
         "simulations": settings["mcts_simulations"],
         "max_depth": settings["mcts_max_depth"],
@@ -81,6 +91,7 @@ def evaluate(args, *, agent_factory=None, simulator_factory=None):
         "learned_safety": settings.get("learned_safety", False),
         "learned_break": settings.get("learned_break", False),
         "outcome_position": settings.get("outcome_position", False),
+        "match_aware": race_to > 1,
     }
     checkpoints = _model_inputs(training)
     if args.device == "cuda":
@@ -115,7 +126,8 @@ def evaluate(args, *, agent_factory=None, simulator_factory=None):
         "training_manifest": str(args.training_manifest),
         "training_git_commit": training.get("source_git_commit"),
         "checkpoints": checkpoints,
-        "race_to": 1,
+        "race_to": race_to,
+        "break_policy": break_policy,
         "pairs": args.pairs,
         "start_seed": args.start_seed,
         "max_shots_per_rack": settings["max_shots_per_rack"],
@@ -133,7 +145,9 @@ def evaluate(args, *, agent_factory=None, simulator_factory=None):
         for breaker in (final_player, 1 - final_player):
             match = NineBallMatchSession(
                 simulator_factory=simulator_factory,
-                match_config=MatchConfig(race_to=1, rule_id="nine_ball", first_breaker=breaker),
+                match_config=MatchConfig(
+                    race_to=race_to, rule_id="nine_ball", first_breaker=breaker, break_policy=break_policy,
+                ),
                 seed=seed,
             )
             outcome = play_match(

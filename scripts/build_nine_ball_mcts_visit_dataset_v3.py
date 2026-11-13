@@ -11,13 +11,13 @@ from pathlib import Path
 
 import numpy as np
 
-from scripts.build_nine_ball_macro_returns_v3 import read_state_and_goal
-from src.game.nine_ball_encoding_v3 import MACRO_GOAL_V3_DIM, MACRO_STATE_V3_DIM
+from scripts.build_nine_ball_macro_returns_v3 import logged_match_positions, read_state_and_goal
+from src.game.nine_ball_encoding_v3 import MACRO_GOAL_V3_DIM, MACRO_STATE_V3_DIM, MATCH_MACRO_STATE_DIM
 
 TARGET_KIND = "nine_ball_mcts_root_visit_distribution_v3"
 
 
-def read_root(row):
+def read_root(row, match_position=None):
     """Read and validate search evidence with exact selected-action identity."""
     action = row.get("chosen_action", {})
     root = action.get("macro_search")
@@ -52,7 +52,7 @@ def read_root(row):
         or np.any(goal_array[:, 4:20] < -1e-5)
     ):
         raise ValueError("Inconsistent v3 root candidate/visit/prior metadata")
-    state, executed = read_state_and_goal(row)
+    state, executed = read_state_and_goal(row, match_position)
     if not np.allclose(executed, goal_array[chosen], rtol=0, atol=1e-5):
         raise ValueError("Selected shot's exact Goal differs from MCTS root choice")
     reasons = root.get("root_invalid_reasons", [None] * count)
@@ -84,21 +84,24 @@ def build(args):
         [], [], [], [], [], [0]
     )
     skipped_single, complete, unfinished, boards_total = 0, 0, 0, 0
+    state_dim = MATCH_MACRO_STATE_DIM if args.match_aware else MACRO_STATE_V3_DIM
     for file in files:
         data = json.loads(file.read_text(encoding="utf-8"))
         seed = int(file.stem.removeprefix("match_seed_"))
         if int(data["seed"]) != seed:
             raise ValueError(f"Match-seed mismatch in {file}")
-        if int(data.get("race_to", 0)) != 1:
+        if not args.match_aware and int(data.get("race_to", 0)) != 1:
             raise ValueError("Only race-to-1 v3 MCTS visit logs supported")
         if data.get("match_finished"):
             complete += 1
         else:
             unfinished += 1
-        for row in data.get("trajectory", []):
+        rows = data.get("trajectory", [])
+        positions = logged_match_positions(data, rows) if args.match_aware and rows else [None] * len(rows)
+        for row, position in zip(rows, positions):
             # Each actual root search is a target; the final match winner is
             # deliberately unused. Verify logs before applying filters.
-            state, goals, visits, chosen = read_root(row)
+            state, goals, visits, chosen = read_root(row, position)
             boards_total += 1
             if args.exclude_single_candidate and len(visits) == 1:
                 skipped_single += 1
@@ -120,17 +123,19 @@ def build(args):
     args.output.parent.mkdir(parents=True, exist_ok=True)
     np.savez_compressed(
         args.output,
-        states=np.asarray(states, dtype=np.float32).reshape(-1, MACRO_STATE_V3_DIM),
+        states=np.asarray(states, dtype=np.float32).reshape(-1, state_dim),
         candidates=np.asarray(candidates, dtype=np.float32).reshape(-1, MACRO_GOAL_V3_DIM),
         visits=np.asarray(target_visits, dtype=np.int64),
         offsets=np.asarray(offsets, dtype=np.int64),
         match_seeds=np.asarray(seeds, dtype=np.int64),
         chosen_indices=np.asarray(chosen_indices, dtype=np.int64),
         format_version=np.asarray(3),
+        match_aware=np.asarray(args.match_aware),
         target_kind=np.asarray(TARGET_KIND),
     )
     summary = {
         "format_version": 3,
+        "match_aware": args.match_aware,
         "target_kind": TARGET_KIND,
         "all_logged_roots": boards_total,
         "policy_training_roots": len(states),
@@ -157,6 +162,7 @@ def parse_args(argv=None):
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--rollout-dir", type=Path, required=True)
     p.add_argument("--output", type=Path, required=True)
+    p.add_argument("--match-aware", action="store_true")
     p.add_argument(
         "--include-single-candidate", dest="exclude_single_candidate",
         action="store_false",

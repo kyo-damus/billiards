@@ -2,6 +2,7 @@
 
 from dataclasses import replace
 
+from src.game.nine_ball_encoding_v3 import MACRO_STATE_V3_DIM
 from src.game.nine_ball_learned_agent import NineBallMicroSACAgent
 from src.game.nine_ball_mcts_v3 import NineBallMCTS
 from src.game.nine_ball_value_v3 import load_state_v_v3
@@ -21,6 +22,7 @@ class NineBallMCTSAgent(NineBallMicroSACAgent):
         learned_safety=False,
         learned_break=False,
         outcome_position=False,
+        match_aware=False,
     ):
         super().__init__(
             micro_checkpoint,
@@ -29,11 +31,16 @@ class NineBallMCTSAgent(NineBallMicroSACAgent):
             learned_safety=learned_safety,
             learned_break=learned_break,
             outcome_position=outcome_position,
+            match_aware=match_aware,
             device=device,
         )
         state_v = None
+        rack_value = False
         if state_value_checkpoint is not None:
-            state_v, _ = load_state_v_v3(state_value_checkpoint, device=device)
+            state_v, metadata = load_state_v_v3(
+                state_value_checkpoint, device=device, match_aware=match_aware,
+            )
+            rack_value = metadata["state_dim"] == MACRO_STATE_V3_DIM
         self.searcher = NineBallMCTS(
             self,
             policy_network=self.macro_policy,
@@ -46,10 +53,15 @@ class NineBallMCTSAgent(NineBallMicroSACAgent):
             learned_safety=learned_safety,
             learned_break=learned_break,
             outcome_position=outcome_position,
+            match_aware=match_aware,
+            rack_value=rack_value,
         )
 
     def choose_shot(self, state, context=None):
-        goal = self.searcher.search(state, context)
+        return self.choose_match_shot(state, context, None)
+
+    def choose_match_shot(self, state, context, match_position):
+        goal = self.searcher.search(state, context, match_position)
         plan = self.plan_goal(state, goal, context)
         return replace(
             plan,

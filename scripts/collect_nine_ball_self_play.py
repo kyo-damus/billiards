@@ -66,13 +66,23 @@ def play_match(
             if cue_placement is None:
                 raise RuntimeError("No valid cue placement found for ball-in-hand.")
         state = match.state
+        match_position = match.match.position
+        match_context = {
+            "race_to": match_position.race_to,
+            "rack_wins": list(match_position.rack_wins),
+            "breaker": match_position.breaker,
+            "break_policy": match_position.break_policy,
+        }
         context = getattr(match.rack, "context", None)
         context_before = {
             "consecutive_fouls": list(context.consecutive_fouls),
             "push_out_available": bool(context.push_out_available),
         } if context is not None else None
         try:
-            plan = agent.choose_shot(state, context=context)
+            if match_position.race_to > 1 and hasattr(agent, "choose_match_shot"):
+                plan = agent.choose_match_shot(state, context, match_position)
+            else:
+                plan = agent.choose_shot(state, context=context)
             result = match.step(target_ball=plan.target_ball, shot=plan.shot)
         except InvalidPhysicalTransition as exc:
             # This is a simulator failure, NOT a billiards foul or winner.
@@ -82,6 +92,7 @@ def play_match(
                 "error": str(exc),
                 "player": player,
                 "state": rack_state_json(state),
+                "match_context": match_context,
                 "rule_context": context_before,
                 "shot_index": len(records),
             }
@@ -95,6 +106,7 @@ def play_match(
                 - (1 if result.rack_winner is not None else 0),
             "player": player,
             "state": rack_state_json(state),
+            "match_context": match_context,
             "rule_context": context_before,
             "cue_placement": cue_placement,
             "chosen_action": {
@@ -178,6 +190,7 @@ def collect_matches(
     learned_safety: bool = False,
     learned_break: bool = False,
     outcome_position: bool = False,
+    break_policy: str = "alternate",
 ):
     """Write each match once; optional validated completion of interrupted batch.
 
@@ -186,6 +199,7 @@ def collect_matches(
     """
     if matches < 1 or race_to < 1 or max_shots_per_rack < 1:
         raise ValueError("matches, race_to and max_shots_per_rack must be >=1")
+    MatchConfig(race_to=race_to, rule_id="nine_ball", break_policy=break_policy)
     output_dir = Path(output_dir)
     if resume:
         if not output_dir.is_dir():
@@ -219,6 +233,7 @@ def collect_matches(
             if (
                 payload.get("seed") != seed_from_name
                 or payload.get("race_to") != race_to
+                or payload.get("break_policy", "alternate") != break_policy
                 or payload.get("max_shots_per_rack") != max_shots_per_rack
                 or payload.get("run_type") != run_type
                 or payload.get("players") != players
@@ -250,6 +265,7 @@ def collect_matches(
                     race_to=race_to,
                     rule_id="nine_ball",
                     first_breaker=index % 2,
+                    break_policy=break_policy,
                 ),
                 seed=seed,
             )
@@ -263,6 +279,7 @@ def collect_matches(
             "run_type": run_type,
             "seed": seed,
             "race_to": race_to,
+            "break_policy": break_policy,
             "max_shots_per_rack": max_shots_per_rack,
             "players": players,
             "learned_safety": learned_safety,
@@ -287,6 +304,8 @@ def collect_matches(
     result = {
         "run_type": run_type,
         "matches": matches,
+        "race_to": race_to,
+        "break_policy": break_policy,
         "learned_safety": learned_safety,
         "learned_break": learned_break,
         "outcome_position": outcome_position,
@@ -314,6 +333,7 @@ def parse_args(argv=None):
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--matches", type=int, default=2)
     p.add_argument("--race-to", type=int, default=2)
+    p.add_argument("--break-policy", choices=("alternate", "winner", "loser"), default="alternate")
     p.add_argument("--start-seed", type=int, default=310000)
     p.add_argument("--max-shots-per-rack", type=int, default=60)
     p.add_argument("--output-dir", type=Path, required=True)
@@ -357,6 +377,7 @@ if __name__ == "__main__":
                 learned_safety=args.learned_safety,
                 learned_break=args.learned_break,
                 outcome_position=args.outcome_position,
+                match_aware=args.race_to > 1,
                 device=args.device,
             )
         else:
@@ -374,6 +395,7 @@ if __name__ == "__main__":
                 learned_safety=args.learned_safety,
                 learned_break=args.learned_break,
                 outcome_position=args.outcome_position,
+                match_aware=args.race_to > 1,
                 device=args.device,
             )
     elif any(v is not None for v in (
@@ -384,6 +406,7 @@ if __name__ == "__main__":
     summary = collect_matches(
         matches=args.matches,
         race_to=args.race_to,
+        break_policy=args.break_policy,
         start_seed=args.start_seed,
         max_shots_per_rack=args.max_shots_per_rack,
         output_dir=args.output_dir,

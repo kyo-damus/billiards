@@ -11,6 +11,7 @@ from src.game.nine_ball_agents import GeometryNineBallAgent, ShotPlan
 from src.game.nine_ball_encoding_v3 import NineBallGoal
 from src.game.nine_ball_mcts_v3 import NineBallMCTS, SearchNode
 from src.game.nine_ball_rules import NineBallContext
+from src.game.match import MatchPosition
 from src.game.nine_ball_session import create_nine_ball_rack
 
 
@@ -276,3 +277,30 @@ def test_invalidated_descendant_rolls_back_preliminary_root_visits(monkeypatch, 
     assert report["discarded_invalidated_simulations"] == depth - 1
     assert search.last_root.visits == 4
     assert search.last_root.edges[0].child.visits == 0
+
+
+def test_match_search_bootstraps_next_rack_with_updated_score(monkeypatch):
+    goal = NineBallGoal("BREAK", 1)
+    board = create_nine_ball_rack(breaker=0, seed=7)
+    monkeypatch.setattr(module, "generate_nine_ball_goals", lambda *args, **kw: (goal,))
+    observed = []
+
+    def value(inputs):
+        observed.append(inputs[0, 72:].tolist())
+        return torch.tensor([-0.4])
+
+    class Rules:
+        def apply(self, before, physical, context):
+            return SimpleNamespace(next_state=board, next_context=context, rack_winner=0)
+
+    search = NineBallMCTS(
+        FakeMicro(), simulator=FakePhysics(), rules=Rules(),
+        value_network=value, match_aware=True, simulations=1, gamma=0.5,
+    )
+    position = MatchPosition(2, (0, 0), 0)
+    assert search.search(board, match_position=position) == goal
+    assert observed == [[1.0, 0.5, 0.5, 1.0, 0.0, 0.0]]
+    assert search.last_report["root_empirical_q"] == pytest.approx([0.2])
+    search.search(board, match_position=position.after_rack(0))
+    assert len(observed) == 1
+    assert search.last_report["root_empirical_q"] == [1.0]

@@ -128,6 +128,22 @@ def test_legacy_invalidated_candidate_is_removed_and_chosen_index_is_remapped():
         read_root(row)
 
 
+def test_match_policy_initialization_preserves_rack_only_logits(tmp_path):
+    from src.game.nine_ball_policy_v3 import load_macro_policy
+
+    old = MacroCandidatePolicyNetwork(state_dim=72, candidate_dim=36, hidden_dim=16)
+    path = tmp_path / "old.pt"
+    torch.save({
+        "format_version": 3, "model_kind": "nine_ball_macro_candidate_policy_v3",
+        "state_dim": 72, "candidate_dim": 36, "hidden_dim": 16,
+        "candidate_policy_network": old.state_dict(),
+    }, path)
+    model, _ = load_macro_policy(path, device="cpu", state_dim=78)
+    rack, match, candidates = torch.randn(72), torch.randn(6), torch.randn(4, 36)
+    torch.testing.assert_close(model(torch.cat((rack, match)), candidates), old(rack, candidates))
+    assert torch.count_nonzero(model.network[0].weight[:, 72:78]) == 0
+
+
 def test_policy_visit_training_splits_matches_and_loads_checkpoint(tmp_path):
     directory = tmp_path / "matches"
     directory.mkdir()

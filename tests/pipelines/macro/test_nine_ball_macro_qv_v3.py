@@ -167,3 +167,43 @@ def test_q_v_loader_rejects_unversioned_or_wrong_target(tmp_path):
     }, path)
     with pytest.raises(ValueError, match="Incompatible"):
         load_macro_q_v3(path)
+
+
+def test_match_returns_use_final_winner_across_racks_and_validate_scores(tmp_path):
+    from src.game.match import MatchPosition
+
+    folder = tmp_path / "matches"
+    folder.mkdir()
+    rows = []
+    position = MatchPosition(2, (0, 0), 0)
+    for i, winner in enumerate((0, 1, 1)):
+        row = make_row(position.breaker)
+        row["rack_index"] = i
+        row["match_context"] = {
+            "race_to": 2, "rack_wins": list(position.rack_wins),
+            "breaker": position.breaker, "break_policy": "alternate",
+        }
+        row["rule_result"]["rack_winner"] = winner
+        rows.append(row)
+        position = position.after_rack(winner)
+    payload = {
+        "race_to": 2, "racks_completed": 3, "rack_wins": [1, 2],
+        "match_finished": True, "match_winner": 1, "trajectory": rows,
+    }
+    for seed in (10, 20):
+        (folder / f"match_seed_{seed}.json").write_text(json.dumps({**payload, "seed": seed}))
+    dataset = tmp_path / "returns.npz"
+    build(parse_build_args([
+        "--rollout-dir", str(folder), "--output", str(dataset), "--match-aware", "--gamma", "1",
+    ]))
+    states, _, targets, _ = load_returns(dataset)
+    assert states.shape == (6, 78)
+    np.testing.assert_allclose(states[:3, 72:74], [[1, 1], [1, 0.5], [0.5, 0.5]])
+    np.testing.assert_array_equal(targets[:3], [-1, 1, -1])
+
+    rows[1]["match_context"]["rack_wins"] = [0, 0]
+    (folder / "match_seed_20.json").write_text(json.dumps({**payload, "seed": 20}))
+    with pytest.raises(ValueError, match="Inconsistent pre-shot match score"):
+        build(parse_build_args([
+            "--rollout-dir", str(folder), "--output", str(tmp_path / "bad.npz"), "--match-aware",
+        ]))

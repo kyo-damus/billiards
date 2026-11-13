@@ -9,6 +9,7 @@ not a learned dynamics model or proof of game-strength improvement.
 """
 
 from dataclasses import dataclass, field
+import hashlib
 import math
 
 import numpy as np
@@ -16,10 +17,11 @@ import torch
 
 from src.env.multi_ball_fastfiz import MultiBallFastFizSimulator
 from src.game.nine_ball_encoding_v3 import (
-    encode_goal_v3, encode_rack_v3, generate_nine_ball_goals,
+    encode_goal_v3, encode_macro_state, generate_nine_ball_goals,
 )
 from src.game.nine_ball_rules import NineBallContext, NineBallRules
-from src.game.nine_ball_session import NineBallRackSession
+from src.game.nine_ball_session import NineBallRackSession, create_nine_ball_rack
+from src.game.match import MatchPosition
 from src.game.nine_ball_physics_guard import (
     InvalidPhysicalTransition, simulate_nine_ball_shot, validate_rack_layout,
 )
@@ -48,6 +50,7 @@ class SearchNode:
     state: object
     context: NineBallContext
     winner: int | None = None
+    match_position: MatchPosition | None = None
     visits: int = 0
     expanded: bool = False
     edges: list[SearchEdge] = field(default_factory=list)
@@ -70,6 +73,8 @@ class NineBallMCTS:
         learned_safety=False,
         learned_break=False,
         outcome_position=False,
+        match_aware=False,
+        rack_value=False,
     ):
         if simulations < 1 or max_depth < 1 or root_min_visits < 0:
             raise ValueError("simulations and max_depth must be positive")
@@ -91,6 +96,8 @@ class NineBallMCTS:
         self.learned_safety = learned_safety
         self.learned_break = learned_break
         self.outcome_position = outcome_position
+        self.match_aware = match_aware
+        self.rack_value = rack_value
         self.last_root = None
         self.last_report = None
 
@@ -131,7 +138,7 @@ class NineBallMCTS:
             priors = np.full(len(candidates), 1.0 / len(candidates))
         else:
             s = torch.as_tensor(
-                encode_rack_v3(node.state, node.context),
+                encode_macro_state(node.state, node.context, node.match_position),
                 dtype=torch.float32, device=self.device,
             )
             c = torch.as_tensor(
@@ -149,22 +156,28 @@ class NineBallMCTS:
         node.expanded = True
 
     def _leaf_value(self, node):
-        """Perspective: player to act in node.state; rewards are +/-1."""
+        """Estimate value from the perspective of the player to act."""
         if node.winner is not None:
-            return 0.0  # terminal rewards live on the parent edge
+            return 0.0  # Rack-boundary values live on the parent edge.
         # Expand candidates only if a subsequent simulation traverses this leaf.
         self._prepare(node)
         validate_rack_layout(node.state)
-        if self.value is None:
-            return 0.0
-        encoded = torch.as_tensor(
-            encode_rack_v3(node.state, node.context),
-            dtype=torch.float32, device=self.device,
-        )
-        with torch.no_grad():
-            prediction = self.value(encoded.unsqueeze(0))
-        # MC return targets are bounded by [-1,1].
-        return float(np.clip(float(prediction.reshape(-1)[0].item()), -1.0, 1.0))
+        position = node.match_position
+        value = 0.0
+        if self.value is not None:
+            encoded = torch.as_tensor(
+                encode_macro_state(node.state, node.context, None if self.rack_value else position),
+                dtype=torch.float32, device=self.device,
+            )
+            with torch.no_grad():
+                prediction = self.value(encoded.unsqueeze(0))
+            value = float(np.clip(float(prediction.reshape(-1)[0].item()), -1.0, 1.0))
+        if position is not None and (self.value is None or self.rack_value):
+            player = node.state.current_player
+            win = position.after_rack(player).fair_match_value(player)
+            loss = position.after_rack(1 - player).fair_match_value(player)
+            return (win + loss + value * (win - loss)) * 0.5
+        return value
 
     def _select_edge(self, node, *, root=False):
         # A failed native transition is not a low-reward legal candidate.
@@ -202,11 +215,27 @@ class NineBallMCTS:
             state=outcome.next_state,
             context=outcome.next_context,
             winner=outcome.rack_winner,
+            match_position=node.match_position,
         )
         if edge.child.winner is not None:
-            edge.terminal_reward = (
-                1.0 if edge.child.winner == node.state.current_player else -1.0
-            )
+            player = node.state.current_player
+            if node.match_position is None:
+                edge.terminal_reward = 1.0 if edge.child.winner == player else -1.0
+            else:
+                after = node.match_position.after_rack(edge.child.winner)
+                if after.winner is not None:
+                    edge.terminal_reward = after.fair_match_value(player)
+                elif self.value is None or self.rack_value:
+                    edge.terminal_reward = self.gamma * after.fair_match_value(player)
+                else:
+                    # The future rack order is unknown to both players. Use an
+                    # independent layout shared across branches of this search.
+                    next_rack = create_nine_ball_rack(breaker=after.breaker, seed=self._bootstrap_seed)
+                    continuation = self._leaf_value(SearchNode(
+                        next_rack, NineBallContext(), match_position=after,
+                    ))
+                    sign = 1.0 if after.breaker == player else -1.0
+                    edge.terminal_reward = self.gamma * sign * continuation
         return True
 
     @staticmethod
@@ -262,7 +291,8 @@ class NineBallMCTS:
             leaf = self._leaf_value(node)
 
         # Each backed-up value belongs to that edge's ACTING player.
-        # Terminal +/-1 reward is immediate; child value is discounted
+        # Rack-boundary values are already in the parent perspective.
+        # Within a rack, child value is discounted
         # and sign-flipped when the next player differs.
         value = leaf
         backup = []
@@ -284,11 +314,18 @@ class NineBallMCTS:
         accepted_paths.append(backup)
         return True
 
-    def search(self, state, context=None):
+    def search(self, state, context=None, match_position=None):
         if state.ball_in_hand:
             raise ValueError("Live match must place cue ball before searching")
         context = NineBallContext() if context is None else context
-        root = SearchNode(state=state, context=context)
+        if self.match_aware and (match_position is None or match_position.winner is not None):
+            raise ValueError("Match-aware MCTS requires an unfinished match position")
+        if self.match_aware and self.value is not None and not self.rack_value:
+            digest = hashlib.blake2b(state.ball_positions.tobytes(), digest_size=8).digest()
+            self._bootstrap_seed = int.from_bytes(digest, "little")
+        root = SearchNode(
+            state=state, context=context, match_position=match_position if self.match_aware else None,
+        )
         self._expand(root)
         accepted_paths = []
         attempts, rejected = 0, 0
