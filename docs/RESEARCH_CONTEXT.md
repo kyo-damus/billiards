@@ -585,10 +585,12 @@ python -m scripts.iterate_nine_ball_hierarchical_v3 \
 - 比較候補は、毎回の合法入球を優先するGreedy、非学習の探索型PickPocketまたはCueCard、9-ballのChen & Li型Macro–Microを優先する。CueTipのPoolMaster代理モデルは近年の対戦型候補。実装を9-ballに移植したものには、変更した候補生成・ルール・探索予算を明示する。単発入球率、取り切り率、対戦勝率を別々に比較する。
 - 戦術に近い先行研究には、相手の入球能力をモデル化して攻守を切り替えるNierhoffらのロボット8-ball、守備時に相手の次手を難しくするMiniPool、手球の停止位置を先に選ぶPoolMasterがある。新規性の候補は、複数ラック9-ballの試合状態を入力として、戦術を明示的なMacro目標にし、Goal-conditioned 5D Microと自己対戦で交互更新する構成に置く。
 
-- [WPA Rules of Play and Rule Regulations](https://wpapool.com/rules/)
+- [WPA Rules of Play, 2026-10-21](https://wpapool.com/wp-content/uploads/2026/10/WPA-Rules-2026-10-21-211.pdf) / [Playing Regulations, 2026-10-21](https://wpapool.com/wp-content/uploads/2026/10/WPA-Regs-2026-10-21-211.pdf)
 - [Smith, PickPocket (2007)](https://doi.org/10.1016/j.artint.2007.04.011)
 - [Archibald et al., CueCard (2009)](https://ijcai.org/proceedings/2009/231)
 - [Chen & Li, Macro and Micro Reinforcement Learning (2019)](https://doi.org/10.1109/CIG.2019.8848113)
 - [Memery et al., CueTip (2025)](https://doi.org/10.1145/3721238.3730742)
+- [Schiøtt et al., pix2pockets (2025)](https://arxiv.org/abs/2504.12045)
+- [Kim et al., SCOOT (2022)](https://doi.org/10.1145/3561975.3562943)
 - [Nierhoff et al., Robotic Billiards (2016)](https://doi.org/10.1109/TCYB.2015.2457404)
-- [Da Silva & Rui, MiniPool (2017)](https://rcc.dcet.uab.pt/index.php/rcc/article/download/13/13)
+- [Silva & Prada, MiniPool (2017)](https://rcc.dcet.uab.pt/index.php/rcc/article/download/13/13)
