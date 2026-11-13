@@ -4,14 +4,19 @@ Run against the isolated CMake build via BILLIARDS_FASTFIZ_BUILD_DIR.
 """
 
 from dataclasses import replace
+from types import SimpleNamespace
 
 import numpy as np
+import pytest
 
 from src.env.multi_ball_fastfiz import MultiBallFastFizSimulator
+from src.game.nine_ball_agents import ShotPlan
 from src.game.nine_ball_encoding_v3 import (
-    generate_nine_ball_goals, reference_angle_deg,
+    NineBallGoal, generate_nine_ball_goals, reference_angle_deg,
 )
-from src.game.nine_ball_physics_guard import simulate_nine_ball_shot
+from src.game.nine_ball_mcts_agent import NineBallMCTSAgent
+from src.game.nine_ball_mcts_v3 import NineBallMCTS
+from src.game.nine_ball_physics_guard import NativeShotRejected, simulate_nine_ball_shot
 from src.game.nine_ball_position import generate_outcome_position_goals
 from src.game.nine_ball_rules import NineBallContext, NineBallRules
 from src.game.nine_ball_session import (
@@ -89,3 +94,51 @@ def test_position_goal_has_a_native_witness_and_leaves_the_next_ball():
             ):
                 witnesses.append(outcome.next_state.ball_positions[0].tolist())
     assert list(position.cue_stop_xy) in witnesses
+
+
+@pytest.mark.parametrize("obstruction", ("rail", "ball"))
+def test_mcts_replays_the_cue_clearance_adjustment_in_the_live_rack(monkeypatch, obstruction):
+    import src.game.nine_ball_mcts_v3 as mcts
+
+    rack = create_nine_ball_rack(breaker=0, seed=12345)
+    positions = np.zeros_like(rack.ball_positions)
+    positions[[0, 1, 9]] = (
+        [(0.5, 0.038), (0.5, 0.21), (0.85, 1.1)] if obstruction == "rail"
+        else [(0.5, 0.6), (0.5, 0.8), (0.5, 0.52)]
+    )
+    pockets = np.zeros_like(rack.ball_pocket_indices)
+    pockets[[0, 1, 9]] = -1
+    rack = replace(rack, ball_positions=positions, ball_pocket_indices=pockets, break_shot=False)
+    simulator = MultiBallFastFizSimulator(rack.config)
+    rules, context = NineBallRules(), NineBallContext()
+    goal = NineBallGoal("DIRECT_ATTACK", 1)
+    shot = PhysicalShot5D(2.2, 90, 10, 0, 0)
+    with pytest.raises(NativeShotRejected) as exc:
+        simulate_nine_ball_shot(simulator, rules, rack, context, target_ball=1, shot=shot)
+    assert (exc.value.precondition, exc.value.placement) == (128, 0)
+
+    monkeypatch.setattr(mcts, "generate_nine_ball_goals", lambda *args, **kwargs: (goal,))
+    calls = []
+
+    def plan_goal(state, chosen, context):
+        calls.append(chosen)
+        return ShotPlan(1, shot, "DIRECT", macro_goal=chosen)
+
+    agent = NineBallMCTSAgent.__new__(NineBallMCTSAgent)
+    agent.device = "cpu"
+    agent.plan_goal = plan_goal
+    agent.searcher = NineBallMCTS(agent, simulator=simulator, rules=rules, simulations=2, max_depth=1)
+    plan = agent.choose_shot(rack, context)
+    assert calls == [goal]
+    assert plan.macro_goal == goal
+    assert plan.shot.elevation_deg > shot.elevation_deg
+    assert plan.macro_search["root_visits"] == [2]
+    assert plan.macro_search["chosen_cue_clearance_adjusted"]
+
+    live = NineBallRackSession(MultiBallFastFizSimulator(rack.config), rack)
+    outcome = live.step(target_ball=plan.target_ball, shot=plan.shot)
+    assert not outcome.foul
+    assert live.last_physical.precondition_code == 0
+    np.testing.assert_array_equal(
+        outcome.next_state.ball_positions, agent.searcher.last_root.edges[0].child.state.ball_positions,
+    )

@@ -13,6 +13,18 @@ class InvalidPhysicalTransition(RuntimeError):
     """The engine could not produce a trustworthy physical shot or next rack."""
 
 
+class NativeShotRejected(InvalidPhysicalTransition):
+    """FastFiz rejected execution and returned native diagnostic flags."""
+
+    def __init__(self, precondition, placement):
+        self.precondition = precondition
+        self.placement = placement
+        super().__init__(
+            f"native precondition={precondition}, placement={placement}; "
+            "no physical shot was executed"
+        )
+
+
 def validate_physical_step(physical):
     """Reject native nonexecution rather than passing it into game rules.
 
@@ -22,10 +34,7 @@ def validate_physical_step(physical):
     precondition = int(getattr(physical, "precondition_code", 0))
     placement = int(getattr(physical, "placement_code", 0))
     if precondition or placement:
-        raise InvalidPhysicalTransition(
-            f"native precondition={precondition}, placement={placement}; "
-            "no physical shot was executed"
-        )
+        raise NativeShotRejected(precondition, placement)
 
 
 def validate_rack_layout(state, *, tolerance_m=1e-6):

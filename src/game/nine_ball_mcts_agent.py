@@ -62,9 +62,8 @@ class NineBallMCTSAgent(NineBallMicroSACAgent):
 
     def choose_match_shot(self, state, context, match_position):
         goal = self.searcher.search(state, context, match_position)
-        plan = self.plan_goal(state, goal, context)
         return replace(
-            plan,
+            self.searcher.last_plan,
             goal_label=f"{goal.kind}_MCTS_V3",
             macro_search=self.searcher.last_report,
         )

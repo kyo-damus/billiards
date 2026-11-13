@@ -8,7 +8,7 @@ used to score unexecuted candidates. This is a bounded deterministic planner,
 not a learned dynamics model or proof of game-strength improvement.
 """
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 import hashlib
 import math
 
@@ -23,10 +23,13 @@ from src.game.nine_ball_rules import NineBallContext, NineBallRules
 from src.game.nine_ball_session import NineBallRackSession, create_nine_ball_rack
 from src.game.match import MatchPosition
 from src.game.nine_ball_physics_guard import (
-    InvalidPhysicalTransition, simulate_nine_ball_shot, validate_rack_layout,
+    InvalidPhysicalTransition, NativeShotRejected, simulate_nine_ball_shot, validate_rack_layout,
 )
 from src.game.nine_ball_position import generate_outcome_position_goals
 from src.game.rack_state import TableGameConfig
+
+
+CUE_STICK_COLLISION = 128  # FastFiz TableState precondition flag.
 
 
 @dataclass
@@ -38,6 +41,8 @@ class SearchEdge:
     child: object = None
     terminal_reward: float = 0.0
     invalid_reason: str | None = None
+    plan: object | None = None
+    cue_clearance_trials: int = 0
 
     @property
     def q(self):
@@ -100,6 +105,7 @@ class NineBallMCTS:
         self.rack_value = rack_value
         self.last_root = None
         self.last_report = None
+        self.last_plan = None
 
     def _prepare(self, node):
         """Reproduce live collector's deterministic ball-in-hand placement."""
@@ -200,17 +206,59 @@ class NineBallMCTS:
             ),
         )
 
+    def _simulate_plan(self, node, plan):
+        _, outcome = simulate_nine_ball_shot(
+            self.simulator, self.rules, node.state, node.context,
+            target_ball=plan.target_ball, shot=plan.shot,
+        )
+        return outcome
+
+    def _resolve_cue_clearance(self, node, edge, plan, rejected):
+        """Retry the same aiming line from the same board with a raised cue."""
+        shot = plan.shot
+        elevations = (20.0, 30.0, 40.0, 50.0, 60.0, 69.0)
+        # First retain the original power and spin. Then test a higher
+        # contact point and sufficient speed for the more elevated stroke.
+        variants = [replace(shot, elevation_deg=e) for e in elevations if e > shot.elevation_deg]
+        variants.extend(
+            replace(
+                shot, elevation_deg=e, speed_m_s=max(shot.speed_m_s, 2.2),
+                tip_x_mm=0.0, tip_y_mm=8.0,
+            )
+            for e in elevations if e >= max(30.0, shot.elevation_deg)
+        )
+        first_foul = None
+        for variant in variants:
+            edge.cue_clearance_trials += 1
+            retry = replace(plan, shot=variant)
+            try:
+                outcome = self._simulate_plan(node, retry)
+            except InvalidPhysicalTransition:
+                continue
+            if not outcome.foul:
+                return retry, outcome
+            if first_foul is None:
+                first_foul = (retry, outcome)
+        if first_foul is not None:
+            return first_foul
+        raise InvalidPhysicalTransition(
+            f"{rejected}; cue-clearance trials exhausted ({edge.cue_clearance_trials})"
+        ) from rejected
+
     def _step(self, node, edge):
         """Return False only for a diagnosed physically invalid shot."""
         try:
             plan = self.micro_agent.plan_goal(node.state, edge.goal, node.context)
-            _, outcome = simulate_nine_ball_shot(
-                self.simulator, self.rules, node.state, node.context,
-                target_ball=plan.target_ball, shot=plan.shot,
-            )
+            try:
+                outcome = self._simulate_plan(node, plan)
+            except NativeShotRejected as exc:
+                if exc.precondition != CUE_STICK_COLLISION or exc.placement != 0:
+                    raise
+                plan, outcome = self._resolve_cue_clearance(node, edge, plan, exc)
         except InvalidPhysicalTransition as exc:
             edge.invalid_reason = str(exc)
             return False
+        edge.plan = plan
         edge.child = SearchNode(
             state=outcome.next_state,
             context=outcome.next_context,
@@ -315,6 +363,9 @@ class NineBallMCTS:
         return True
 
     def search(self, state, context=None, match_position=None):
+        self.last_plan = None
+        self.last_report = None
+        self.last_root = None
         if state.ball_in_hand:
             raise ValueError("Live match must place cue ball before searching")
         context = NineBallContext() if context is None else context
@@ -349,6 +400,7 @@ class NineBallMCTS:
             raise InvalidPhysicalTransition("No executable root candidate")
         # Resolve visit ties by observed parent-perspective Q, then prior.
         chosen = max(valid_edges, key=lambda e: (e.visits, e.q, e.prior))
+        self.last_plan = chosen.plan
         self.last_report = {
             "simulations": len(accepted_paths),
             "requested_simulations": self.simulations,
@@ -357,6 +409,8 @@ class NineBallMCTS:
             "root_invalid_reasons": [
                 e.invalid_reason for e in root.edges
             ],
+            "root_cue_clearance_trials": [e.cue_clearance_trials for e in root.edges],
+            "chosen_cue_clearance_adjusted": chosen.cue_clearance_trials > 0,
             "max_depth": self.max_depth,
             "uses_learned_state_v": self.value is not None,
             "uses_selected_action_q": False,
