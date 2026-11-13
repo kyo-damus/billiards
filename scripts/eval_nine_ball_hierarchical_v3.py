@@ -78,6 +78,7 @@ def evaluate(args, *, agent_factory=None, simulator_factory=None):
         "c_puct": settings["mcts_c_puct"],
         "gamma": settings["gamma"],
         "root_min_visits": settings["mcts_root_min_visits"],
+        "learned_safety": settings.get("learned_safety", False),
     }
     checkpoints = _model_inputs(training)
     if args.device == "cuda":

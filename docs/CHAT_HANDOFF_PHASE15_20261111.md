@@ -107,3 +107,8 @@ python -m scripts.iterate_nine_ball_hierarchical_v3 \
 
 - `d3fd35a` で関連pytest 46件通過。新規 `phase15_hierarchical_iteration_v2` は12/12ステージ完了、両反復とも32/32試合完走。2反復目の自己対戦は1反復目のMacro Policy、State V、Micro SACを使用した。集計と次の独立対戦コマンドは [RESEARCH_CONTEXT.md](RESEARCH_CONTEXT.md#42-2026-11-13-phase15の2反復完走と独立対戦) §42を参照。
 - 次は `scripts.eval_nine_ball_hierarchical_v3.py` で最終モデル一式と起点モデル一式を比較する。新規seed 710000から32ペアを取り、同じラック配置でブレイク担当を入れ替える。評価出力は `artifacts/runs/phase15_hierarchical_head_to_head_v1`。DGXでの対戦結果を確認後、自己対戦規模の拡大へ進む。
+
+## 9. 2026-11-13 独立対戦の動作確認と実装の続き
+
+- Phase15の先攻交代対戦は64試合を処理し、60試合完了、4試合は物理エラーで未完了。小規模試験の目的はコードと提案手法の接続確認。未完の機構の実装を優先し、全体がつながった段階で大規模学習・評価へ進む。
+- 9-ballの `--learned-safety` を追加。Macro/MCTSの守備選択から5D Microのショット実行とSAC学習まで接続した。FastFizを使った短い2反復で動作を確認。DGXでの確認コマンドと残る機構は [RESEARCH_CONTEXT.md](RESEARCH_CONTEXT.md) §43。

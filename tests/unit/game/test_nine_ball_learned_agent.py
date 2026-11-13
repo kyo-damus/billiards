@@ -87,3 +87,21 @@ def test_macro_policy_requires_distinct_versioned_checkpoint(tmp_path):
     torch.save(ckp, macro_path)
     with pytest.raises(ValueError, match="candidate dimension"):
         NineBallMicroSACAgent(path, macro_policy_checkpoint=macro_path)
+
+
+def test_safety_goal_uses_micro_only_when_enabled(tmp_path):
+    from dataclasses import replace
+    from src.game.nine_ball_encoding_v3 import generate_nine_ball_goals
+
+    rack = replace(create_nine_ball_rack(breaker=0, seed=2), break_shot=False)
+    path = save_micro(tmp_path)
+    agent = NineBallMicroSACAgent(path, learned_safety=True)
+    heuristic = generate_nine_ball_goals(rack)[-1]
+    learned = generate_nine_ball_goals(rack, learned_safety=True)[-1]
+
+    assert heuristic.kind == learned.kind == "SAFETY"
+    assert agent.plan_goal(rack, heuristic).shot == heuristic.explicit_shot
+    assert learned.explicit_shot is None
+    plan = agent.plan_goal(rack, learned)
+    assert plan.macro_goal == learned
+    assert plan.goal_label.startswith("SAFETY_MICRO_SAC5D")

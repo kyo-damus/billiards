@@ -126,11 +126,39 @@ def reference_angle_deg(state, goal: NineBallGoal) -> float:
     return degrees(atan2(float(diff[1]), float(diff[0])))
 
 
-def generate_nine_ball_goals(state) -> tuple[NineBallGoal, ...]:
+def direct_pocket_candidates(state, target):
+    """Yield pockets with clear cue-to-ghost and object-to-pocket paths."""
+    cue = np.asarray(state.ball_positions[0], dtype=np.float64)
+    ball = np.asarray(
+        state.ball_positions[state.array_index_for_ball(target)], dtype=np.float64
+    )
+    other = [
+        np.asarray(state.ball_positions[i], dtype=np.float64)
+        for i, number in enumerate(state.config.ball_numbers)
+        if number not in (0, target) and state.ball_pocket_indices[i] < 0
+    ]
+    for pocket_id, pocket in POCKET_POSITIONS.items():
+        pocket = np.asarray(pocket, dtype=np.float64)
+        ghost = ghost_ball_position(ball, pocket)
+        if not (
+            BALL_DIAMETER / 2 < ghost[0] < TABLE_WIDTH - BALL_DIAMETER / 2
+            and BALL_DIAMETER / 2 < ghost[1] < TABLE_LENGTH - BALL_DIAMETER / 2
+        ):
+            continue
+        if any(
+            point_to_segment_distance(obj, cue, ghost) < BALL_DIAMETER + 0.004
+            or point_to_segment_distance(obj, ball, pocket) < BALL_DIAMETER + 0.004
+            for obj in other
+        ):
+            continue
+        yield pocket_id
+
+
+def generate_nine_ball_goals(state, *, learned_safety=False) -> tuple[NineBallGoal, ...]:
     """Unweighted candidate set; no equal-frequency strategy balancing.
 
-    Break/Safety have an explicit heuristic physical action. Direct/Position
-    are condition targets for a new 5-D Micro policy. MCTS is not yet wired.
+    Break uses an explicit physical action. With learned_safety, the
+    SAFETY goal is a condition for the same 5-D Micro as the attack goals.
     """
     if state.ball_in_hand:
         raise ValueError("Cue placement must precede shot candidate generation")
@@ -149,27 +177,9 @@ def generate_nine_ball_goals(state) -> tuple[NineBallGoal, ...]:
             explicit_shot=PhysicalShot5D(2.5, heading, 10.0, 0.0, 0.0),
         ),)
 
-    other = [
-        np.asarray(state.ball_positions[i], dtype=np.float64)
-        for i, number in enumerate(state.config.ball_numbers)
-        if number not in (0, target) and state.ball_pocket_indices[i] < 0
-    ]
     candidates = []
     next_balls = sorted(n for n in on_table if n > target)
-    for pocket_id, pocket in POCKET_POSITIONS.items():
-        pocket = np.asarray(pocket, dtype=np.float64)
-        ghost = ghost_ball_position(ball, pocket)
-        if not (
-            BALL_DIAMETER / 2 < ghost[0] < TABLE_WIDTH - BALL_DIAMETER / 2
-            and BALL_DIAMETER / 2 < ghost[1] < TABLE_LENGTH - BALL_DIAMETER / 2
-        ):
-            continue
-        if any(
-            point_to_segment_distance(obj, cue, ghost) < BALL_DIAMETER + 0.004
-            or point_to_segment_distance(obj, ball, pocket) < BALL_DIAMETER + 0.004
-            for obj in other
-        ):
-            continue
+    for pocket_id in direct_pocket_candidates(state, target):
         candidates.append(NineBallGoal("DIRECT_ATTACK", target, pocket_id))
         if next_balls:
             next_pos = state.ball_positions[
@@ -186,8 +196,6 @@ def generate_nine_ball_goals(state) -> tuple[NineBallGoal, ...]:
     # Preserve a lowest-ball fallback even without a visible direct pot.
     if not candidates:
         candidates.append(NineBallGoal("DIRECT_ATTACK", target))
-    candidates.append(NineBallGoal(
-        "SAFETY", target,
-        explicit_shot=PhysicalShot5D(0.8, heading, 10.0, 0.0, 0.0),
-    ))
+    safety_shot = None if learned_safety else PhysicalShot5D(0.8, heading, 10.0, 0.0, 0.0)
+    candidates.append(NineBallGoal("SAFETY", target, explicit_shot=safety_shot))
     return tuple(candidates)

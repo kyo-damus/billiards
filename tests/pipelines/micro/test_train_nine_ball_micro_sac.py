@@ -274,3 +274,49 @@ def test_micro_training_post_rule_overlaps_are_not_valid_experience():
         execute_valid_training_shot(
             Physics(), Rules(), rack, goal, NineBallContext(), object(),
         )
+
+
+def test_logged_safety_uses_only_micro_controlled_goal(tmp_path):
+    from src.game.nine_ball_encoding_v3 import encode_goal_v3, generate_nine_ball_goals
+
+    folder = tmp_path / "rollouts"
+    _rollout(folder)
+    path = folder / "match_seed_0.json"
+    payload = json.loads(path.read_text())
+    rack = replace(create_nine_ball_rack(breaker=0, seed=1), break_shot=False)
+    for enabled in (False, True):
+        goal = generate_nine_ball_goals(rack, learned_safety=enabled)[-1]
+        payload["trajectory"][0]["chosen_action"] = {"goal_v3": encode_goal_v3(goal).tolist()}
+        path.write_text(json.dumps(payload))
+        if enabled:
+            samples = load_training_states(folder, goal_source="logged", learned_safety=True)
+            assert samples[0].selected_goal == goal
+        else:
+            with pytest.raises(ValueError, match="No eligible"):
+                load_training_states(folder, goal_source="logged", learned_safety=True)
+
+
+def test_safety_reward_requires_legal_handoff_and_reduced_opponent_options():
+    from types import SimpleNamespace
+    from src.game.nine_ball_encoding_v3 import direct_pocket_candidates
+
+    rack = replace(create_nine_ball_rack(breaker=0, seed=1), break_shot=False)
+    positions = rack.ball_positions.copy()
+    pockets = rack.ball_pocket_indices.copy()
+    pockets[3:] = 0
+    positions[:3] = [[0.5, 0.6], [0.5, 1.4], [0.3, 1.8]]
+    before = replace(rack, ball_positions=positions, ball_pocket_indices=pockets)
+    positions = positions.copy()
+    positions[2] = [0.5, 1.0]
+    after = replace(before, current_player=1, ball_positions=positions)
+    assert len(tuple(direct_pocket_candidates(before, 1))) > len(tuple(direct_pocket_candidates(after, 1)))
+    goal = NineBallGoal("SAFETY", 1)
+    outcome = SimpleNamespace(foul=False, turn_changed=True, next_state=after)
+    reward, success = micro_reward(goal, before, None, outcome)
+    assert success and reward > 0.1
+    outcome.next_state = before
+    assert micro_reward(goal, before, None, outcome) == (0.1, False)
+    outcome.turn_changed = False
+    assert micro_reward(goal, before, None, outcome) == (-0.5, False)
+    outcome.foul = True
+    assert micro_reward(goal, before, None, outcome) == (-1.2, False)

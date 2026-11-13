@@ -66,6 +66,7 @@ class NineBallMCTS:
         c_puct=1.5,
         gamma=0.99,
         root_min_visits=1,
+        learned_safety=False,
     ):
         if simulations < 1 or max_depth < 1 or root_min_visits < 0:
             raise ValueError("simulations and max_depth must be positive")
@@ -84,6 +85,7 @@ class NineBallMCTS:
         self.c_puct = c_puct
         self.gamma = gamma
         self.root_min_visits = root_min_visits
+        self.learned_safety = learned_safety
         self.last_root = None
         self.last_report = None
 
@@ -109,7 +111,7 @@ class NineBallMCTS:
         validate_rack_layout(node.state)
         self._prepare(node)
         validate_rack_layout(node.state)
-        candidates = tuple(generate_nine_ball_goals(node.state))
+        candidates = generate_nine_ball_goals(node.state, learned_safety=self.learned_safety)
         if not candidates:
             raise RuntimeError("Nonterminal rack has no nine-ball candidate")
         if self.policy is None:

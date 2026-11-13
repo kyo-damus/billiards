@@ -1,7 +1,7 @@
 """Train or fine-tune versioned 5D goal-conditioned SAC on nine-ball shots.
 
 Each episode is one physical shot from an observed board. With --goal-source
-logged, learn against the exact selected attack Goal of self-play Macro;
+logged, learn against the exact selected Micro-controlled Goal of self-play Macro;
 uniform retains the original independent candidate pretraining. This script
 never updates Macro Policy/Q/V or claims gameplay strength.
 """
@@ -9,6 +9,7 @@ never updates Macro Policy/Q/V or claims gameplay strength.
 import argparse
 import json
 import os
+from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 import random
@@ -18,10 +19,11 @@ import torch
 
 from src.env.multi_ball_fastfiz import MultiBallFastFizSimulator
 from src.game.nine_ball_encoding_v3 import (
-    ENCODING_VERSION, MICRO_CONDITIONED_V3_DIM, conditioned_observation_v3,
+    ENCODING_VERSION, GOAL_KINDS, MACRO_GOAL_V3_DIM, MICRO_CONDITIONED_V3_DIM,
+    conditioned_observation_v3, direct_pocket_candidates, encode_goal_v3,
     generate_nine_ball_goals, reference_angle_deg,
 )
-from src.game.nine_ball_rules import NineBallContext, NineBallRules, TABLE_LENGTH_M, TABLE_WIDTH_M
+from src.game.nine_ball_rules import NineBallContext, NineBallRules
 from src.game.nine_ball_physics_guard import (
     InvalidPhysicalTransition, validate_physical_step, validate_rack_layout,
 )
@@ -38,32 +40,25 @@ class TrainingSample:
     selected_goal: object | None = None
 
 
-def _selected_attack_goal(state, row):
-    """Recover a *logged* Macro choice without silently inventing a new goal.
-
-    A generator/code revision can make an old goal unrecoverable. Fail rather
-    than training Micro on a different TacticalGoal from the executed one.
-    """
+def _selected_micro_goal(state, row, *, learned_safety):
+    """Recover the exact logged goal under the active candidate configuration."""
     chosen = (row.get("chosen_action") or {}).get("goal_v3")
     if chosen is None:
         return None
     selected = np.asarray(chosen, dtype=np.float32)
-    if selected.shape != (36,) or not np.all(np.isfinite(selected)):
+    if selected.shape != (MACRO_GOAL_V3_DIM,) or not np.all(np.isfinite(selected)):
         raise ValueError("Malformed logged 36D Macro Goal")
-    # Break and the present heuristic Safety have explicit physical shots.
-    # Micro SAC currently trains only attack goals, not these two kinds.
-    if not np.allclose(selected[:4], (0, 1, 0, 0), atol=1e-5) and not np.allclose(
-        selected[:4], (0, 0, 1, 0), atol=1e-5
-    ):
-        if not np.allclose(selected[:4], (1, 0, 0, 0), atol=1e-5) and not np.allclose(
-            selected[:4], (0, 0, 0, 1), atol=1e-5
-        ):
-            raise ValueError("Invalid logged Macro Goal kind")
+    kind_index = int(np.argmax(selected[:len(GOAL_KINDS)]))
+    if not np.allclose(selected[:len(GOAL_KINDS)], np.eye(len(GOAL_KINDS))[kind_index], atol=1e-5):
+        raise ValueError("Invalid logged Macro Goal kind")
+    kind = GOAL_KINDS[kind_index]
+    if kind == "BREAK" or (kind == "SAFETY" and (
+        not learned_safety or np.isclose(selected[29], 1.0, atol=1e-5)
+    )):
         return None
-    from src.game.nine_ball_encoding_v3 import encode_goal_v3
     matches = [
-        goal for goal in generate_nine_ball_goals(state)
-        if goal.kind in ("DIRECT_ATTACK", "POSITION_ATTACK")
+        goal for goal in generate_nine_ball_goals(state, learned_safety=learned_safety)
+        if goal.explicit_shot is None
         and np.allclose(encode_goal_v3(goal), selected, atol=1e-5, rtol=0)
     ]
     if len(matches) != 1:
@@ -75,7 +70,7 @@ def _selected_attack_goal(state, row):
 
 
 def load_training_states(
-    rollout_dir: Path, *, goal_source: str = "uniform",
+    rollout_dir: Path, *, goal_source: str = "uniform", learned_safety=False,
 ) -> tuple[TrainingSample, ...]:
     """Load observed pre-shot states; optionally use exact selected Macro goals."""
     if goal_source not in ("uniform", "logged"):
@@ -125,7 +120,10 @@ def load_training_states(
                     push_out_available=bool(raw_ctx["push_out_available"]),
                 )
             if not state.break_shot and state.on_table_object_balls():
-                chosen = _selected_attack_goal(state, row) if goal_source == "logged" else None
+                chosen = (
+                    _selected_micro_goal(state, row, learned_safety=learned_safety)
+                    if goal_source == "logged" else None
+                )
                 if goal_source == "logged" and chosen is None:
                     continue
                 training.append(TrainingSample(state, context, chosen))
@@ -139,6 +137,19 @@ def load_training_states(
 
 def micro_reward(goal, before, physical, outcome) -> tuple[float, bool]:
     """Physics-grounded one-shot reward (not the final match objective)."""
+    if goal.kind == "SAFETY":
+        if outcome.foul:
+            return -1.2, False
+        if not outcome.turn_changed:
+            return -0.5, False
+        after = outcome.next_state
+        before_count = len(tuple(direct_pocket_candidates(before, goal.target_ball)))
+        after_count = len(tuple(direct_pocket_candidates(
+            after, min(after.on_table_object_balls()),
+        )))
+        reduction = before_count - after_count
+        return 0.1 + reduction / 6.0, reduction > 0
+
     goal_id = before.array_index_for_ball(goal.target_ball)
     pocket = int(physical.pocket_indices[goal_id])
     exact = bool(
@@ -239,7 +250,9 @@ def train(args, *, simulator_factory=MultiBallFastFizSimulator):
         raise ValueError("Invalid replay capacity or update count")
     if args.output_dir.exists():
         raise FileExistsError(f"Refusing to overwrite {args.output_dir}")
-    samples = load_training_states(args.rollout_dir, goal_source=args.goal_source)
+    samples = load_training_states(
+        args.rollout_dir, goal_source=args.goal_source, learned_safety=args.learned_safety,
+    )
     device = resolve_device(args.device)
     np.random.seed(args.seed)
     random.seed(args.seed)
@@ -264,7 +277,8 @@ def train(args, *, simulator_factory=MultiBallFastFizSimulator):
     rules = NineBallRules()
     decoder = Shot5DDecoder()
     logs = []
-    window_rewards, window_success = [], []
+    window_rewards, window_pots, window_safety = [], [], []
+    accepted_steps_by_goal = Counter()
     print(
         f"=== Nine-ball 5D goal-conditioned Micro SAC ===\n"
         f"device={device}, training_states={len(samples)}, steps={args.steps}, "
@@ -286,14 +300,14 @@ def train(args, *, simulator_factory=MultiBallFastFizSimulator):
                     raise RuntimeError("Logged-goal training sample has no selected goal")
             else:
                 candidate_goals = tuple(
-                    g for g in generate_nine_ball_goals(state)
-                    if g.kind in ("DIRECT_ATTACK", "POSITION_ATTACK")
+                    g for g in generate_nine_ball_goals(state, learned_safety=args.learned_safety)
+                    if g.explicit_shot is None
                 )
                 if not candidate_goals:
                     skipped_no_goal_attempts += 1
                     consecutive_no_goal += 1
                     if consecutive_no_goal >= 128:
-                        raise RuntimeError("No eligible Micro attack Goal in 128 attempts")
+                        raise RuntimeError("No eligible Micro Goal in 128 attempts")
                     continue
                 goal = candidate_goals[int(rng.integers(0, len(candidate_goals)))]
             consecutive_no_goal = 0
@@ -319,7 +333,7 @@ def train(args, *, simulator_factory=MultiBallFastFizSimulator):
                 continue
             consecutive_invalid_physics = 0
             break
-        reward, exact = micro_reward(goal, state, physical, outcome)
+        reward, success = micro_reward(goal, state, physical, outcome)
         replay.push(
             encoded, action, reward, np.zeros_like(encoded), True
         )
@@ -328,12 +342,18 @@ def train(args, *, simulator_factory=MultiBallFastFizSimulator):
             for _ in range(args.updates_per_step):
                 losses = agent.update(replay.sample(args.batch_size, device))
         window_rewards.append(reward)
-        window_success.append(float(exact))
+        accepted_steps_by_goal[goal.kind] += 1
+        if goal.kind == "SAFETY":
+            window_safety.append(success)
+        else:
+            window_pots.append(success)
         if step == args.steps or step % args.report_interval == 0:
             log = {
                 "step": step,
                 "mean_reward": float(np.mean(window_rewards)),
-                "exact_target_pot_rate": float(np.mean(window_success)),
+                "exact_target_pot_rate": float(np.mean(window_pots)) if window_pots else None,
+                "safety_goal_success_rate": float(np.mean(window_safety)) if window_safety else None,
+                "safety_steps": len(window_safety),
                 "replay_size": len(replay),
                 "invalid_physics_attempts": invalid_physics_attempts,
                 "skipped_no_goal_attempts": skipped_no_goal_attempts,
@@ -344,7 +364,8 @@ def train(args, *, simulator_factory=MultiBallFastFizSimulator):
             logs.append(log)
             print(json.dumps(log, ensure_ascii=False))
             window_rewards.clear()
-            window_success.clear()
+            window_pots.clear()
+            window_safety.clear()
 
     args.output_dir.mkdir(parents=True, exist_ok=False)
     checkpoint = {
@@ -358,6 +379,7 @@ def train(args, *, simulator_factory=MultiBallFastFizSimulator):
         "init_checkpoint": str(args.init_checkpoint) if args.init_checkpoint else None,
         "optimizer_state_carried_over": False,
         "goal_source": args.goal_source,
+        "learned_safety": args.learned_safety,
         "actor": agent.actor.state_dict(),
         "critic": agent.critic.state_dict(),
         "critic_target": agent.critic_target.state_dict(),
@@ -369,10 +391,12 @@ def train(args, *, simulator_factory=MultiBallFastFizSimulator):
         "method": "one_shot_goal_conditioned_sac",
         "training_states": len(samples),
         "episodes": args.steps,
+        "accepted_steps_by_goal": dict(accepted_steps_by_goal),
         "invalid_physics_attempts": invalid_physics_attempts,
         "skipped_no_goal_attempts": skipped_no_goal_attempts,
         "source_rollout_dir": str(args.rollout_dir),
         "goal_source": args.goal_source,
+        "learned_safety": args.learned_safety,
         "init_checkpoint": str(args.init_checkpoint) if args.init_checkpoint else None,
         "previous_trained_steps": initial_steps,
         "training_steps_this_run": args.steps,
@@ -399,8 +423,9 @@ def parse_args(argv=None):
     parser.add_argument("--init-checkpoint", type=Path)
     parser.add_argument(
         "--goal-source", choices=("uniform", "logged"), default="uniform",
-        help="uniform candidates or exact attack Goals from collected Macro decisions",
+        help="uniform candidates or exact Micro-controlled Goals from collected Macro decisions",
     )
+    parser.add_argument("--learned-safety", action="store_true")
     parser.add_argument("--output-dir", required=True, type=Path)
     parser.add_argument("--steps", type=int, default=5000)
     parser.add_argument("--warmup-steps", type=int, default=400)

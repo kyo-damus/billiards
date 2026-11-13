@@ -128,3 +128,11 @@ def test_stage_expected_outputs_never_treat_partial_collector_as_done(tmp_path):
     assert _stage_outputs(stages[2]) == (
         tmp_path / "runs" / "iteration_000" / "macro_policy_v3.pt",
     )
+
+
+def test_learned_safety_is_passed_to_collection_and_micro_training(tmp_path):
+    stages, _ = build_plan(_args(tmp_path, ("--learned-safety",)))
+    enabled_stages = {stage.name for stage in stages if "--learned-safety" in stage.argv}
+    assert enabled_stages == {
+        "000_self_play", "000_micro_finetune", "001_self_play", "001_micro_finetune",
+    }

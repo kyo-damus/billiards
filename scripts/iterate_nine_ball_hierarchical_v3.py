@@ -105,6 +105,8 @@ def build_plan(args):
         ]
         if state_v is not None:
             collect.extend(["--state-value-checkpoint", str(state_v)])
+        if args.learned_safety:
+            collect.append("--learned-safety")
         stages.append(Stage(f"{index:03d}_self_play", tuple(collect)))
         stages.append(Stage(f"{index:03d}_visit_dataset", (
             python, "-m", "scripts.build_nine_ball_mcts_visit_dataset_v3",
@@ -134,6 +136,7 @@ def build_plan(args):
             )))
             state_v = qv / "state_v_v3.pt"
         if args.micro_steps:
+            safety_flag = ("--learned-safety",) if args.learned_safety else ()
             stages.append(Stage(f"{index:03d}_micro_finetune", (
                 python, "-m", "scripts.train_nine_ball_micro_sac",
                 "--rollout-dir", str(rollouts),
@@ -144,6 +147,7 @@ def build_plan(args):
                 "--steps", str(args.micro_steps),
                 "--seed", str(args.train_seed + 20000 + index),
                 "--device", args.device,
+                *safety_flag,
             )))
             initial_micro = micro_dir / "micro_sac_5d.pt"
         initial_policy = policy
@@ -291,6 +295,7 @@ def run(args):
             k: v for k, v in new_manifest["settings"].items()
             if k not in ("resume", "accept_unverified_code_change")
         }
+        previous_settings.setdefault("learned_safety", False)
         if previous_settings != current_settings:
             raise ValueError("Resume settings differ from previous run")
         original_commit = manifest.get("source_git_commit")
@@ -371,6 +376,7 @@ def parse_args(argv=None):
     p.add_argument("--policy-epochs", type=int, default=10)
     p.add_argument("--qv-epochs", type=int, default=5)
     p.add_argument("--micro-steps", type=int, default=5000)
+    p.add_argument("--learned-safety", action="store_true")
     p.add_argument("--train-seed", type=int, default=610000)
     p.add_argument("--device", choices=("cpu", "cuda"), default="cpu")
     p.add_argument("--output-root", type=Path, required=True)

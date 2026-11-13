@@ -500,3 +500,26 @@ python -m scripts.eval_nine_ball_hierarchical_v3 \
   --output-dir artifacts/runs/phase15_hierarchical_head_to_head_v1 \
   --pairs 32 --start-seed 710000 --device cuda
 ```
+
+## 43. 2026-11-13 実装優先の確認と9-ball SAFETY Micro
+
+- Phase15の先攻交代対戦は32ペア64試合を処理し、60試合完了、4試合は物理エラーで未完了。評価経路の動作確認として記録した。小規模の学習・対戦は、提案手法の接続と入出力を検証するために使う。優先課題は未完の機構をつなぎ、その後に大規模学習・評価と考察へ進むこと。
+- `--learned-safety` を付けた9-ball反復ランナーでは、MCTSが `SAFETY` を選ぶと、攻撃と共通のGoal-conditioned 5D SACがショットを生成する。そのGoalを自己対戦ログに保存し、次のMicro学習で同一のGoalを照合して使う。従来の固定SAFETYと既存v3チェックポイント・ログの読込は既定モードで使える。
+- 暫定の守備報酬は合法に手番を渡した後、相手が最小番号球を直接狙えるポケット候補数の減少を評価する。候補判定はMacroと共通の幾何判定を用いる。学習ログには指定ポケットへの入球率と守備目標達成率を別々に記録し、`accepted_steps_by_goal` で各戦術の有効学習件数を確認できる。戦術の選択比率はMCTSの結果に従う。
+- 仮の初期重みとネイティブFastFizで2反復の12ステージが完了し、各反復でSAFETYが選択・実行され、そのログに基づくMicro学習へ到達した。DGXの既存チェックポイントで確認する場合は次の短い実行を用いる。各反復の `micro/summary.json` で `accepted_steps_by_goal.SAFETY` を確認する。次の実装課題はPOSITION停止目標の生成、BREAKの学習経路、9-ballルールの残項目。
+
+```bash
+conda activate bill_sub1
+cd ~/research
+git pull --ff-only &&
+BILLIARDS_FASTFIZ_BUILD_DIR=/tmp/billiards-fastfiz-phase7 \
+python -m scripts.iterate_nine_ball_hierarchical_v3 \
+  --base-micro-checkpoint artifacts/runs/phase15_hierarchical_iteration_v2/iteration_001/micro/micro_sac_5d.pt \
+  --base-policy-checkpoint artifacts/runs/phase15_hierarchical_iteration_v2/iteration_001/macro_policy_v3.pt \
+  --base-state-v-checkpoint artifacts/runs/phase15_hierarchical_iteration_v2/iteration_001/qv/state_v_v3.pt \
+  --iterations 2 --matches-per-iteration 8 --start-seed 840000 \
+  --mcts-simulations 12 --mcts-max-depth 2 \
+  --policy-epochs 1 --qv-epochs 1 --micro-steps 160 \
+  --learned-safety --device cuda \
+  --output-root artifacts/runs/phase16_learned_safety_smoke_v1
+```

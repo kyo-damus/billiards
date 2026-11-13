@@ -49,7 +49,7 @@ def test_root_puct_prefers_observed_legal_terminal_win(monkeypatch):
 
     monkeypatch.setattr(
         module, "generate_nine_ball_goals",
-        lambda state: (direct, alternative),
+        lambda state, **kwargs: (direct, alternative),
     )
 
     class Rules:
@@ -87,7 +87,7 @@ def test_opponent_win_is_negative_to_root_even_if_its_own_value_is_positive(
 
     monkeypatch.setattr(
         module, "generate_nine_ball_goals",
-        lambda state: (first,) if state is root_state else (reply,),
+        lambda state, **kwargs: (first,) if state is root_state else (reply,),
     )
 
     class Rules:
@@ -168,7 +168,7 @@ def test_mcts_rejects_overlapping_next_state_without_fabricating_visits(monkeypa
 
     a = NineBallGoal("DIRECT_ATTACK", 1, 0)
     b = NineBallGoal("DIRECT_ATTACK", 1, 1)
-    monkeypatch.setattr(module, "generate_nine_ball_goals", lambda state: (a, b))
+    monkeypatch.setattr(module, "generate_nine_ball_goals", lambda state, **kwargs: (a, b))
 
     class Rules:
         def apply(self, before, physical, context):
@@ -197,7 +197,7 @@ def test_native_bad_shot_is_excluded_unrelated_runtime_error_is_not(monkeypatch)
     a = NineBallGoal("DIRECT_ATTACK", 1, 0)
     b = NineBallGoal("DIRECT_ATTACK", 1, 1)
     root = SimpleNamespace(current_player=0, ball_in_hand=False)
-    monkeypatch.setattr(module, "generate_nine_ball_goals", lambda state: (a, b))
+    monkeypatch.setattr(module, "generate_nine_ball_goals", lambda state, **kwargs: (a, b))
 
     class Physics(FakePhysics):
         def step(self, *, target_ball, shot):

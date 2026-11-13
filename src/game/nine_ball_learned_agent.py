@@ -52,6 +52,7 @@ class NineBallMicroSACAgent(GeometryNineBallAgent):
         macro_policy_checkpoint=None,
         device="cpu",
         deterministic=True,
+        learned_safety=False,
     ):
         super().__init__()
         self.device = torch.device(device)
@@ -71,6 +72,7 @@ class NineBallMicroSACAgent(GeometryNineBallAgent):
         self.actor.load_state_dict(micro["actor"], strict=True)
         self.actor.eval()
         self.deterministic = deterministic
+        self.learned_safety = learned_safety
         self.decoder = Shot5DDecoder()
         self.macro_policy = None
         if macro_policy_checkpoint is not None:
@@ -92,7 +94,7 @@ class NineBallMicroSACAgent(GeometryNineBallAgent):
             self.macro_policy.eval()
 
     def _choose_goal(self, state, context=None):
-        goals = generate_nine_ball_goals(state)
+        goals = generate_nine_ball_goals(state, learned_safety=self.learned_safety)
         if len(goals) == 1:
             return goals[0]
         if self.macro_policy is not None:
