@@ -480,3 +480,23 @@ sign = +1 (同じプレイヤー) / -1 (相手へ手番交代)
 - 現在の反復学習経路は自己対戦→MCTS visits Policy→選択行動MC Q/V→Macro選択Goalで5D Micro継続学習→次反復。完全自動2反復はまだ未完走。
 - チャット移行用の最新正本`docs/CHAT_HANDOFF_PHASE15_20261111.md`を新設。新チャットでは必ず最新HEAD・このファイル・現在のpytest/実験ログを照合。研究の優先は**9-ballの提案手法一通り完成、大規模自己対戦、独立評価、考察**であり、微細な最適化と既存研究比較は後回し。
 - ユーザーはGitHubのツール承認を「すべて許可」に設定。Private状態で一部書込手段に403が出たことがあるが、別経路`create_file`/`update_file`でのコミットは成功。ユーザーが一旦Publicへ戻し、2026-11-11時点のGitHub連携で`visibility=public`・`push=true`を確認した。アクセス状態は新チャットで再確認すること。
+
+## 42. 2026-11-13 Phase15の2反復完走と独立対戦
+
+- DGXの `d3fd35a` でFastFizネイティブ統合を含む関連pytestが46件通過（4.12秒）。新規 `artifacts/runs/phase15_hierarchical_iteration_v2` は全12ステージを完了し、`run_manifest.json` の `status` は `completed`。2反復目の自己対戦は1反復目のMacro Policy、State V、Micro SACの出力を読み込んだ。
+- 1反復目はseed 510000〜510062（偶数32試合）、2反復目は511064〜511126（偶数32試合）。両方32/32試合完了。ショット数は694 / 627、反則数は192 / 138。全ログroot数は694 / 627、単一候補を除いたPolicy教師は662 / 595。探索内の物理棄却件数は各試合JSONのroot診断で確認する。
+- Macro Policyは1反復目に初期重みを採用（best epoch 0）。2反復目の検証訪問CEは1.92721 → 1.92506（best epoch 4）、最大訪問候補との一致率は76.1% → 67.5%。State Vの検証MSEは1反復目0.75347（定数基準0.78380）、2反復目0.78695（定数基準0.77789）。検証集合は反復ごとに異なる。
+- Micro SACは各反復で有効5,000ステップを収集し、物理棄却は244 / 242試行。各反復末尾500有効ステップの指定球・指定ポケット成功率はともに13.2%。これらは学習中の値。対戦性能は以下の独立seedで評価する。
+
+`scripts/eval_nine_ball_hierarchical_v3.py` は学習manifestの起点モデルと最終反復モデルで、各seedの同一初期ラックをrace-to-1で2回対戦する。ペア内でブレイク担当を交代し、ペア間でプレイヤー番号を交代する。学習時の探索設定を両モデルに適用し、完了試合内勝率・先攻別の内訳・ペア別の結果・未完了理由を `summary.json` に保存する。学習seedとの重複と既存評価出力の再利用は拒否する。
+
+DGXの `bill_sub1` で、評価コードのコミットを取得してから実行する。
+
+```bash
+cd ~/research
+export BILLIARDS_FASTFIZ_BUILD_DIR=/tmp/billiards-fastfiz-phase7
+python -m scripts.eval_nine_ball_hierarchical_v3 \
+  --training-manifest artifacts/runs/phase15_hierarchical_iteration_v2/run_manifest.json \
+  --output-dir artifacts/runs/phase15_hierarchical_head_to_head_v1 \
+  --pairs 32 --start-seed 710000 --device cuda
+```

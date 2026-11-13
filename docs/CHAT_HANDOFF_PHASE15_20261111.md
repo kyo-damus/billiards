@@ -102,3 +102,8 @@ python -m scripts.iterate_nine_ball_hierarchical_v3 \
 - 既存の修正後seed=510040単独完走ログと旧v1の20試合は保護。旧runを新runのデータへ混ぜない。
 - **次のアクション：** `bill_sub1`で `git status --short --branch` を確認し、未コミット作業を保護してから `git pull --ff-only`。その後、§5記載の6ファイルの関連pytestを実行し、失敗があれば修正。すべて成功したら、旧ファイルに触らず `test ! -e artifacts/runs/phase15_hierarchical_iteration_v2` を確認し、§5の新runで2反復×32試合を収集する。GPU環境の `CUDA_VISIBLE_DEVICES` を変更しない。
 - 修正は予防的な学習側ガードであり、FastFizで重なりが発生する根本原因を解消した証拠ではない。1試合の正常終了を大規模検証成功と解釈しない。
+
+## 8. 2026-11-13 DGXでPhase15の2反復完走
+
+- `d3fd35a` で関連pytest 46件通過。新規 `phase15_hierarchical_iteration_v2` は12/12ステージ完了、両反復とも32/32試合完走。2反復目の自己対戦は1反復目のMacro Policy、State V、Micro SACを使用した。集計と次の独立対戦コマンドは [RESEARCH_CONTEXT.md](RESEARCH_CONTEXT.md#42-2026-11-13-phase15の2反復完走と独立対戦) §42を参照。
+- 次は `scripts.eval_nine_ball_hierarchical_v3.py` で最終モデル一式と起点モデル一式を比較する。新規seed 710000から32ペアを取り、同じラック配置でブレイク担当を入れ替える。評価出力は `artifacts/runs/phase15_hierarchical_head_to_head_v1`。DGXでの対戦結果を確認後、自己対戦規模の拡大へ進む。
