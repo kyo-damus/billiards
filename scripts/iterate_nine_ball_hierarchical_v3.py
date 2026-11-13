@@ -78,6 +78,7 @@ def build_plan(args):
     goal_flags = tuple(
         flag for flag, enabled in (
             ("--learned-safety", args.learned_safety),
+            ("--learned-break", args.learned_break),
             ("--outcome-position", args.outcome_position),
         ) if enabled
     )
@@ -300,6 +301,7 @@ def run(args):
             if k not in ("resume", "accept_unverified_code_change")
         }
         previous_settings.setdefault("learned_safety", False)
+        previous_settings.setdefault("learned_break", False)
         previous_settings.setdefault("outcome_position", False)
         if previous_settings != current_settings:
             raise ValueError("Resume settings differ from previous run")
@@ -382,6 +384,7 @@ def parse_args(argv=None):
     p.add_argument("--qv-epochs", type=int, default=5)
     p.add_argument("--micro-steps", type=int, default=5000)
     p.add_argument("--learned-safety", action="store_true")
+    p.add_argument("--learned-break", action="store_true")
     p.add_argument("--outcome-position", action="store_true")
     p.add_argument("--train-seed", type=int, default=610000)
     p.add_argument("--device", choices=("cpu", "cuda"), default="cpu")

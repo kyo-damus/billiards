@@ -68,6 +68,7 @@ class NineBallMCTS:
         gamma=0.99,
         root_min_visits=1,
         learned_safety=False,
+        learned_break=False,
         outcome_position=False,
     ):
         if simulations < 1 or max_depth < 1 or root_min_visits < 0:
@@ -88,6 +89,7 @@ class NineBallMCTS:
         self.gamma = gamma
         self.root_min_visits = root_min_visits
         self.learned_safety = learned_safety
+        self.learned_break = learned_break
         self.outcome_position = outcome_position
         self.last_root = None
         self.last_report = None
@@ -114,13 +116,15 @@ class NineBallMCTS:
         validate_rack_layout(node.state)
         self._prepare(node)
         validate_rack_layout(node.state)
-        if self.outcome_position:
+        if self.outcome_position and not node.state.break_shot:
             candidates = generate_outcome_position_goals(
                 node.state, node.context, self.simulator, self.rules,
                 learned_safety=self.learned_safety,
             )
         else:
-            candidates = generate_nine_ball_goals(node.state, learned_safety=self.learned_safety)
+            candidates = generate_nine_ball_goals(
+                node.state, learned_safety=self.learned_safety, learned_break=self.learned_break,
+            )
         if not candidates:
             raise RuntimeError("Nonterminal rack has no nine-ball candidate")
         if self.policy is None:

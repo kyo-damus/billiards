@@ -112,3 +112,9 @@ class Shot5DDecoder:
             tip_x_mm=float(tip[0]) * native_safe_radius,
             tip_y_mm=float(tip[1]) * native_safe_radius,
         )
+
+
+# Keep exploration around the apex-ball line while allowing all five controls.
+NINE_BALL_BREAK_DECODER = Shot5DDecoder(
+    min_speed=2.0, max_angle_offset_deg=2.0, max_elevation_deg=15.0, tip_radius_mm=6.0,
+)

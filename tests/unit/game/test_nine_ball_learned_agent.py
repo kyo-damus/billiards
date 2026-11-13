@@ -105,3 +105,26 @@ def test_safety_goal_uses_micro_only_when_enabled(tmp_path):
     plan = agent.plan_goal(rack, learned)
     assert plan.macro_goal == learned
     assert plan.goal_label.startswith("SAFETY_MICRO_SAC5D")
+
+
+def test_break_goal_uses_actor_and_break_action_bounds(tmp_path, monkeypatch):
+    rack = create_nine_ball_rack(breaker=0, seed=1)
+    agent = NineBallMicroSACAgent(save_micro(tmp_path), learned_break=True, outcome_position=True)
+    observed = []
+
+    def actor_output(observation):
+        observed.append(observation)
+        return torch.tensor([[1.0, -1.0, 1.0, 0.0, 1.0]])
+
+    monkeypatch.setattr(agent.actor, "deterministic", actor_output)
+    plan = agent.choose_shot(rack)
+    assert plan.macro_goal.kind == "BREAK"
+    assert plan.macro_goal.explicit_shot is None
+    assert plan.target_ball == 1 and plan.target_pocket is None
+    assert plan.goal_label.startswith("BREAK_MICRO_SAC5D")
+    assert len(observed) == 1
+    assert observed[0][0, MACRO_STATE_V3_DIM] == 1.0
+    assert plan.shot.speed_m_s == 3.0
+    assert plan.shot.azimuth_deg == pytest.approx(88.0)
+    assert plan.shot.elevation_deg == 15.0
+    assert plan.shot.tip_y_mm == 6.0

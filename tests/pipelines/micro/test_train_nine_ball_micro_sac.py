@@ -330,6 +330,52 @@ def test_logged_outcome_position_reuses_exact_selected_candidate(tmp_path):
         load_training_states(folder, goal_source="logged", outcome_position=True)
 
 
+def test_logged_break_requires_the_micro_controlled_goal(tmp_path):
+    from src.game.nine_ball_encoding_v3 import encode_goal_v3, generate_nine_ball_goals
+
+    folder = tmp_path / "rollouts"
+    _rollout(folder)
+    path = folder / "match_seed_0.json"
+    payload = json.loads(path.read_text())
+    row = payload["trajectory"][0]
+    row["state"]["break_shot"] = True
+    payload["learned_break"] = True
+    rack = create_nine_ball_rack(breaker=0, seed=1)
+    goal, = generate_nine_ball_goals(rack, learned_break=True)
+    row["chosen_action"] = {"goal_v3": encode_goal_v3(goal).tolist()}
+    path.write_text(json.dumps(payload))
+    with pytest.raises(ValueError, match="mode differs"):
+        load_training_states(folder, goal_source="logged")
+    sample, = load_training_states(folder, goal_source="logged", learned_break=True)
+    assert sample.state.break_shot
+    assert sample.selected_goal == goal
+    assert load_training_states(folder, learned_break=True)[0].state.break_shot
+
+    legacy_goal, = generate_nine_ball_goals(rack)
+    row["chosen_action"]["goal_v3"] = encode_goal_v3(legacy_goal).tolist()
+    path.write_text(json.dumps(payload))
+    with pytest.raises(ValueError, match="cannot be recovered"):
+        load_training_states(folder, goal_source="logged", learned_break=True)
+    row["state"]["break_shot"] = False
+    row["chosen_action"]["goal_v3"] = encode_goal_v3(goal).tolist()
+    path.write_text(json.dumps(payload))
+    with pytest.raises(ValueError, match="does not match rack break phase"):
+        load_training_states(folder, goal_source="logged", learned_break=True)
+
+
+@pytest.mark.parametrize(
+    "foul,pocketed,winner,expected",
+    [(True, (9,), 1, (-1.2, False)), (False, (), None, (0.1, False)),
+     (False, (3, 4), None, (1.1, True)), (False, (9,), 0, (2.1, True))],
+)
+def test_break_reward_uses_legal_pots_and_rack_winner(foul, pocketed, winner, expected):
+    from types import SimpleNamespace
+
+    rack = create_nine_ball_rack(breaker=0, seed=1)
+    outcome = SimpleNamespace(foul=foul, rack_winner=winner, newly_pocketed=pocketed)
+    assert micro_reward(NineBallGoal("BREAK", 1), rack, None, outcome) == expected
+
+
 def test_outcome_position_bonus_requires_the_next_ball_to_remain(tmp_path):
     from types import SimpleNamespace
 

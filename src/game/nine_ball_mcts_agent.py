@@ -19,6 +19,7 @@ class NineBallMCTSAgent(NineBallMicroSACAgent):
         root_min_visits=1,
         device="cpu",
         learned_safety=False,
+        learned_break=False,
         outcome_position=False,
     ):
         super().__init__(
@@ -26,6 +27,7 @@ class NineBallMCTSAgent(NineBallMicroSACAgent):
             macro_policy_checkpoint=macro_policy_checkpoint,
             deterministic=True,
             learned_safety=learned_safety,
+            learned_break=learned_break,
             outcome_position=outcome_position,
             device=device,
         )
@@ -42,6 +44,7 @@ class NineBallMCTSAgent(NineBallMicroSACAgent):
             gamma=gamma,
             root_min_visits=root_min_visits,
             learned_safety=learned_safety,
+            learned_break=learned_break,
             outcome_position=outcome_position,
         )
 

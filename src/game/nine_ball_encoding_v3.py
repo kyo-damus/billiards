@@ -155,12 +155,11 @@ def direct_pocket_candidates(state, target):
 
 
 def generate_nine_ball_goals(
-    state, *, learned_safety=False, position_goal=None,
+    state, *, learned_safety=False, learned_break=False, position_goal=None,
 ) -> tuple[NineBallGoal, ...]:
     """Unweighted candidate set; no equal-frequency strategy balancing.
 
-    Break uses an explicit physical action. With learned_safety, the
-    SAFETY goal is a condition for the same 5-D Micro as the attack goals.
+    Learned BREAK and SAFETY goals condition the same 5-D Micro as attacks.
     A position_goal callback may replace or omit each legacy stop region.
     """
     if state.ball_in_hand:
@@ -175,10 +174,8 @@ def generate_nine_ball_goals(
     )
     heading = degrees(atan2(ball[1] - cue[1], ball[0] - cue[0]))
     if state.break_shot:
-        return (NineBallGoal(
-            "BREAK", target,
-            explicit_shot=PhysicalShot5D(2.5, heading, 10.0, 0.0, 0.0),
-        ),)
+        shot = None if learned_break else PhysicalShot5D(2.5, heading, 10.0, 0.0, 0.0)
+        return (NineBallGoal("BREAK", target, explicit_shot=shot),)
 
     candidates = []
     next_balls = sorted(n for n in on_table if n > target)

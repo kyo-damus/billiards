@@ -130,7 +130,7 @@ def test_stage_expected_outputs_never_treat_partial_collector_as_done(tmp_path):
     )
 
 
-@pytest.mark.parametrize("flag", ("--learned-safety", "--outcome-position"))
+@pytest.mark.parametrize("flag", ("--learned-safety", "--learned-break", "--outcome-position"))
 def test_goal_mode_is_passed_to_collection_and_micro_training(tmp_path, flag):
     stages, _ = build_plan(_args(tmp_path, (flag,)))
     enabled_stages = {stage.name for stage in stages if flag in stage.argv}

@@ -547,3 +547,27 @@ python -m scripts.iterate_nine_ball_hierarchical_v3 \
   --learned-safety --outcome-position --device cuda \
   --output-root artifacts/runs/phase17_outcome_position_smoke_v1
 ```
+
+## 45. 2026-11-13 9-ballのBREAK Micro学習
+
+- DGXのPhase17は12ステージを完了した。各反復で8/8試合が完了し、各160有効MicroステップのうちPOSITION_ATTACKが3、6ステップ入った。
+- `--learned-break` を付けると、ラック開始時の単一のBREAK Goalを5D Micro SACに渡す。1番球への照準線を基準に、速度2〜3 m/s、方位角±2°、仰角0〜15°、撞点半径6 mm以内で5成分を制御する。自己対戦と学習に同じデコーダを使う。BREAKの36D Goalと108DのMicro入力は既存形式で表現する。既定モードのブレイクは従来の固定ショットを使う。
+- Micro学習は、自己対戦で記録したBREAK時点の盤面とGoalからショットを再試行する。暫定報酬は反則−1.2、合法なら0.1に入球数×0.5（最大3球）を加算し、9番球による合法勝利は2.1とする。既存の9-ballルール判定を用いる。ログではブレイクの合法率と合法入球率を通常の指定ポケット成功率と別に記録する。
+- 仮の初期重みとFastFizで12ステージを完了し、各160有効MicroステップのうちBREAKが12、11ステップ入った。試合完了数は6/8、8/8。1反復目の未完了2試合は、ブレイク後の局面で有効な子孫遷移が得られなかったMCTSの物理棄却として記録された。DGXでの新規確認では `run_manifest.json` の完了と `accepted_steps_by_goal.BREAK` の件数を見る。次の実装課題は9-ballルールの未対応項目。
+
+```bash
+conda activate bill_sub1
+cd ~/research
+base=artifacts/runs/phase17_outcome_position_smoke_v1/iteration_001
+git pull --ff-only &&
+BILLIARDS_FASTFIZ_BUILD_DIR=/tmp/billiards-fastfiz-phase7 \
+python -m scripts.iterate_nine_ball_hierarchical_v3 \
+  --base-micro-checkpoint "$base/micro/micro_sac_5d.pt" \
+  --base-policy-checkpoint "$base/macro_policy_v3.pt" \
+  --base-state-v-checkpoint "$base/qv/state_v_v3.pt" \
+  --iterations 2 --matches-per-iteration 8 --start-seed 860000 \
+  --mcts-simulations 12 --mcts-max-depth 2 \
+  --policy-epochs 1 --qv-epochs 1 --micro-steps 160 \
+  --learned-safety --outcome-position --learned-break --device cuda \
+  --output-root artifacts/runs/phase18_learned_break_smoke_v1
+```

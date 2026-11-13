@@ -65,6 +65,7 @@ def test_pairs_share_rack_and_exchange_breaker(evaluation_args, monkeypatch, out
         assert kwargs["simulations"] == 24
         assert kwargs["max_depth"] == 2
         assert kwargs["outcome_position"] is outcome_position
+        assert kwargs["learned_break"] is outcome_position
         return "base" if "base_micro.pt" in micro_checkpoint else "final"
 
     monkeypatch.setattr(collector, "play_match", fake_play)
@@ -72,6 +73,7 @@ def test_pairs_share_rack_and_exchange_breaker(evaluation_args, monkeypatch, out
     if outcome_position:
         training = json.loads(args.training_manifest.read_text())
         training["settings"]["outcome_position"] = True
+        training["settings"]["learned_break"] = True
         args.training_manifest.write_text(json.dumps(training))
     summary = evaluate(args, agent_factory=fake_agent, simulator_factory=lambda _: Physics())
     assert [(seed, breaker, players) for seed, breaker, players, _ in initial] == [

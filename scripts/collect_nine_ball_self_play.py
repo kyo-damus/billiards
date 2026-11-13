@@ -176,6 +176,7 @@ def collect_matches(
     match_factory=None,
     resume: bool = False,
     learned_safety: bool = False,
+    learned_break: bool = False,
     outcome_position: bool = False,
 ):
     """Write each match once; optional validated completion of interrupted batch.
@@ -222,6 +223,7 @@ def collect_matches(
                 or payload.get("run_type") != run_type
                 or payload.get("players") != players
                 or payload.get("learned_safety", False) != learned_safety
+                or payload.get("learned_break", False) != learned_break
                 or payload.get("outcome_position", False) != outcome_position
                 or payload.get("format_version") != 1
                 or not isinstance(payload.get("trajectory"), list)
@@ -264,6 +266,7 @@ def collect_matches(
             "max_shots_per_rack": max_shots_per_rack,
             "players": players,
             "learned_safety": learned_safety,
+            "learned_break": learned_break,
             "outcome_position": outcome_position,
             **outcome,
         }
@@ -285,6 +288,7 @@ def collect_matches(
         "run_type": run_type,
         "matches": matches,
         "learned_safety": learned_safety,
+        "learned_break": learned_break,
         "outcome_position": outcome_position,
         "finished_matches": sum(s["match_finished"] for s in summaries),
         "unfinished_matches": sum(not s["match_finished"] for s in summaries),
@@ -317,6 +321,7 @@ def parse_args(argv=None):
                    help="Complete only missing match_seed files in an incomplete directory")
     p.add_argument("--agent-kind", choices=("geometry", "micro_sac", "micro_mcts"), default="geometry")
     p.add_argument("--learned-safety", action="store_true")
+    p.add_argument("--learned-break", action="store_true")
     p.add_argument("--outcome-position", action="store_true")
     p.add_argument("--micro-checkpoint", type=Path)
     p.add_argument("--macro-policy-checkpoint", type=Path)
@@ -350,6 +355,7 @@ if __name__ == "__main__":
                 micro_checkpoint=args.micro_checkpoint,
                 macro_policy_checkpoint=args.macro_policy_checkpoint,
                 learned_safety=args.learned_safety,
+                learned_break=args.learned_break,
                 outcome_position=args.outcome_position,
                 device=args.device,
             )
@@ -366,13 +372,14 @@ if __name__ == "__main__":
                 gamma=args.mcts_gamma,
                 root_min_visits=args.mcts_root_min_visits,
                 learned_safety=args.learned_safety,
+                learned_break=args.learned_break,
                 outcome_position=args.outcome_position,
                 device=args.device,
             )
     elif any(v is not None for v in (
         args.micro_checkpoint, args.macro_policy_checkpoint,
         args.state_value_checkpoint,
-    )) or args.learned_safety or args.outcome_position:
+    )) or args.learned_safety or args.learned_break or args.outcome_position:
         raise ValueError("Checkpoints and learned goal options require a learned --agent-kind")
     summary = collect_matches(
         matches=args.matches,
@@ -383,6 +390,7 @@ if __name__ == "__main__":
         agent_factory=agent_factory,
         resume=args.resume,
         learned_safety=args.learned_safety,
+        learned_break=args.learned_break,
         outcome_position=args.outcome_position,
     )
     print(

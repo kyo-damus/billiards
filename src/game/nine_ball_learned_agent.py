@@ -22,7 +22,7 @@ from src.game.nine_ball_position import generate_outcome_position_goals
 from src.game.nine_ball_rules import NineBallContext, NineBallRules
 from src.macro.candidate_policy import MacroCandidatePolicyNetwork
 from src.micro.actor import GaussianActor
-from src.micro.shot_control import Shot5DDecoder
+from src.micro.shot_control import NINE_BALL_BREAK_DECODER, Shot5DDecoder
 
 
 MICRO_KIND = "nine_ball_goal_conditioned_micro_sac_5d"
@@ -56,6 +56,7 @@ class NineBallMicroSACAgent(GeometryNineBallAgent):
         device="cpu",
         deterministic=True,
         learned_safety=False,
+        learned_break=False,
         outcome_position=False,
     ):
         super().__init__()
@@ -77,6 +78,7 @@ class NineBallMicroSACAgent(GeometryNineBallAgent):
         self.actor.eval()
         self.deterministic = deterministic
         self.learned_safety = learned_safety
+        self.learned_break = learned_break
         self.outcome_position = outcome_position
         self.position_simulator = None
         self.decoder = Shot5DDecoder()
@@ -100,7 +102,7 @@ class NineBallMicroSACAgent(GeometryNineBallAgent):
             self.macro_policy.eval()
 
     def _choose_goal(self, state, context=None):
-        if self.outcome_position:
+        if self.outcome_position and not state.break_shot:
             if self.position_simulator is None:
                 self.position_simulator = MultiBallFastFizSimulator(state.config)
             goals = generate_outcome_position_goals(
@@ -108,7 +110,9 @@ class NineBallMicroSACAgent(GeometryNineBallAgent):
                 learned_safety=self.learned_safety,
             )
         else:
-            goals = generate_nine_ball_goals(state, learned_safety=self.learned_safety)
+            goals = generate_nine_ball_goals(
+                state, learned_safety=self.learned_safety, learned_break=self.learned_break,
+            )
         if len(goals) == 1:
             return goals[0]
         if self.macro_policy is not None:
@@ -158,7 +162,8 @@ class NineBallMicroSACAgent(GeometryNineBallAgent):
             else:
                 action, _ = self.actor.sample(state_tensor)
         normalized = action.squeeze(0).cpu().numpy()
-        shot = self.decoder.decode(normalized, reference_angle_deg(state, goal))
+        decoder = NINE_BALL_BREAK_DECODER if goal.kind == "BREAK" else self.decoder
+        shot = decoder.decode(normalized, reference_angle_deg(state, goal))
         return ShotPlan(
             target_ball=goal.target_ball,
             shot=shot,

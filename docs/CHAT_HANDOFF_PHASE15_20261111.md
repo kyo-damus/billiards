@@ -113,3 +113,4 @@ python -m scripts.iterate_nine_ball_hierarchical_v3 \
 - Phase15の先攻交代対戦は64試合を処理し、60試合完了、4試合は物理エラーで未完了。小規模試験の目的はコードと提案手法の接続確認。未完の機構の実装を優先し、全体がつながった段階で大規模学習・評価へ進む。
 - 9-ballの `--learned-safety` を追加。Macro/MCTSの守備選択から5D Microのショット実行とSAC学習まで接続した。FastFizを使った短い2反復で動作を確認。DGXでの確認コマンドと残る機構は [RESEARCH_CONTEXT.md](RESEARCH_CONTEXT.md) §43。
 - DGXでSAFETYを含む2反復が完走。続いて `--outcome-position` を追加し、FastFizで実現できた手球停止点をMCTS候補、自己対戦ログ、Micro学習に接続した。仮の重みで各8試合の2反復を完走。DGXでの新規確認コマンドは [RESEARCH_CONTEXT.md](RESEARCH_CONTEXT.md) §44。次の機構はBREAK学習と9-ballルールの未対応項目。
+- DGXでPOSITION_ATTACKを含むPhase17の2反復が完走。続いて `--learned-break` で5D Microのブレイク制御を自己対戦とSAC学習に接続し、仮の重みで2反復の12ステージが完了した。DGXでの確認コマンドと残課題は [RESEARCH_CONTEXT.md](RESEARCH_CONTEXT.md) §45。
