@@ -240,3 +240,39 @@ def test_native_bad_shot_is_excluded_unrelated_runtime_error_is_not(monkeypatch)
     )
     with pytest.raises(InvalidPhysicalTransition, match="No executable"):
         search.search(root)
+
+
+@pytest.mark.parametrize("depth", (2, 3))
+def test_invalidated_descendant_rolls_back_preliminary_root_visits(monkeypatch, depth):
+    first, alternative, reply, last = (
+        NineBallGoal("DIRECT_ATTACK", 1, pocket) for pocket in range(4)
+    )
+    states = [SimpleNamespace(index=i, current_player=0, ball_in_hand=False) for i in range(3)]
+    goals = [(first, alternative), (reply,), (last,)]
+    monkeypatch.setattr(module, "generate_nine_ball_goals", lambda state, **kw: goals[state.index])
+
+    class Physics(FakePhysics):
+        def step(self, *, target_ball, shot):
+            if shot == (2 if depth == 2 else 3):
+                raise RuntimeError("Bad Shot Exception")
+            return super().step(target_ball=target_ball, shot=shot)
+
+    class Rules:
+        def apply(self, before, physical, context):
+            return SimpleNamespace(
+                next_state=states[min(before.index + 1, 2)],
+                next_context=context, rack_winner=1 if physical.shot == 1 else None,
+            )
+
+    search = NineBallMCTS(
+        FakeMicro(), simulator=Physics(), rules=Rules(),
+        simulations=4, max_depth=depth, root_min_visits=0,
+    )
+    assert search.search(states[0]) == alternative
+    report = search.last_report
+    assert report["root_visits"] == [0, 4]
+    assert report["root_empirical_q"] == [0.0, -1.0]
+    assert report["root_invalid_reasons"] == ["no executable descendant", None]
+    assert report["discarded_invalidated_simulations"] == depth - 1
+    assert search.last_root.visits == 4
+    assert search.last_root.edges[0].child.visits == 0

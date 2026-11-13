@@ -209,7 +209,23 @@ class NineBallMCTS:
             )
         return True
 
-    def _simulate(self, root):
+    @staticmethod
+    def _discard_backups(accepted_paths, invalid_edge):
+        """Remove previous leaf evaluations whose path used an invalidated edge."""
+        if not invalid_edge.visits:
+            return
+        retained = []
+        for backup in accepted_paths:
+            if not any(edge is invalid_edge for _, edge, _ in backup):
+                retained.append(backup)
+                continue
+            for parent, edge, value in backup:
+                edge.visits -= 1
+                edge.value_sum = edge.value_sum - value if edge.visits else 0.0
+                parent.visits -= 1
+        accepted_paths[:] = retained
+
+    def _simulate(self, root, accepted_paths):
         node = root
         path = []
         leaf = 0.0
@@ -227,7 +243,9 @@ class NineBallMCTS:
                     )
                 # Discard a simulated path whose continuation has no
                 # executable native action; never invent a leaf reward.
-                path[-1][1].invalid_reason = "no executable descendant"
+                invalid_edge = path[-1][1]
+                invalid_edge.invalid_reason = "no executable descendant"
+                self._discard_backups(accepted_paths, invalid_edge)
                 return False
             fresh = edge.child is None
             if fresh and not self._step(node, edge):
@@ -247,6 +265,7 @@ class NineBallMCTS:
         # Terminal +/-1 reward is immediate; child value is discounted
         # and sign-flipped when the next player differs.
         value = leaf
+        backup = []
         for parent, edge in reversed(path):
             child = edge.child
             if child.winner is not None:
@@ -261,6 +280,8 @@ class NineBallMCTS:
             edge.visits += 1
             edge.value_sum += value
             parent.visits += 1
+            backup.append((parent, edge, value))
+        accepted_paths.append(backup)
         return True
 
     def search(self, state, context=None):
@@ -269,21 +290,21 @@ class NineBallMCTS:
         context = NineBallContext() if context is None else context
         root = SearchNode(state=state, context=context)
         self._expand(root)
-        successful, rejected = 0, 0
+        accepted_paths = []
+        attempts, rejected = 0, 0
         # Each rejected attempt invalidates an edge; future attempts
         # then explore other paths. Also cap unexpected loops explicitly.
         max_attempts = self.simulations + max(
             128, 8 * self.simulations * self.max_depth,
         )
-        while successful < self.simulations:
-            if successful + rejected >= max_attempts:
+        while len(accepted_paths) < self.simulations:
+            if attempts >= max_attempts:
                 raise InvalidPhysicalTransition(
                     f"MCTS invalid-transition limit reached: "
-                    f"valid={successful}, rejected={rejected}"
+                    f"valid={len(accepted_paths)}, rejected={rejected}"
                 )
-            if self._simulate(root):
-                successful += 1
-            else:
+            attempts += 1
+            if not self._simulate(root, accepted_paths):
                 rejected += 1
         self.last_root = root
         valid_edges = [e for e in root.edges if e.invalid_reason is None]
@@ -292,9 +313,10 @@ class NineBallMCTS:
         # Resolve visit ties by observed parent-perspective Q, then prior.
         chosen = max(valid_edges, key=lambda e: (e.visits, e.q, e.prior))
         self.last_report = {
-            "simulations": successful,
+            "simulations": len(accepted_paths),
             "requested_simulations": self.simulations,
             "rejected_invalid_simulations": rejected,
+            "discarded_invalidated_simulations": attempts - rejected - len(accepted_paths),
             "root_invalid_reasons": [
                 e.invalid_reason for e in root.edges
             ],

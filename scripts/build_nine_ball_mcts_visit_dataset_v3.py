@@ -52,11 +52,24 @@ def read_root(row):
         or np.any(goal_array[:, 4:20] < -1e-5)
     ):
         raise ValueError("Inconsistent v3 root candidate/visit/prior metadata")
-    if visits[chosen] != visits.max():
-        raise ValueError("Chosen root candidate is not a maximum-visit action")
     state, executed = read_state_and_goal(row)
     if not np.allclose(executed, goal_array[chosen], rtol=0, atol=1e-5):
         raise ValueError("Selected shot's exact Goal differs from MCTS root choice")
+    reasons = root.get("root_invalid_reasons", [None] * count)
+    if not isinstance(reasons, list) or len(reasons) != count or any(
+        reason is not None and (not isinstance(reason, str) or not reason)
+        for reason in reasons
+    ):
+        raise ValueError("Invalid MCTS root invalidation metadata")
+    if reasons[chosen] is not None:
+        raise ValueError("Chosen MCTS root candidate was invalidated")
+    valid = np.asarray([reason is None for reason in reasons], dtype=bool)
+    # Older logs can retain visits on an edge invalidated later in the search.
+    # Train only on surviving candidates and remap the executed candidate index.
+    chosen = int(valid[:chosen].sum())
+    goal_array, visits = goal_array[valid], visits[valid]
+    if visits.sum() == 0 or visits[chosen] != visits.max():
+        raise ValueError("Chosen root candidate is not a positive maximum-visit action")
     return state, goal_array, visits, chosen
 
 

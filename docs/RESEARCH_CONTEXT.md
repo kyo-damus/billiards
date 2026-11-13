@@ -571,3 +571,24 @@ python -m scripts.iterate_nine_ball_hierarchical_v3 \
   --learned-safety --outcome-position --learned-break --device cuda \
   --output-root artifacts/runs/phase18_learned_break_smoke_v1
 ```
+
+## 46. 2026-11-13 Phase18のDGX確認とMCTS教師の修正
+
+- DGXのPhase18は両反復で8/8試合、全12ステージが完了した。各160有効MicroステップのうちBREAKは10、10件、POSITION_ATTACKは22、5件、SAFETYは16、9件だった。
+- MCTSで後から探索不能と判明した枝を通る過去の訪問数・価値を、祖先への伝播分も含めて取り消す。有効な探索を補い、残った訪問数を教師に使う。過去のログを読み込む場合も、無効理由の記録がある候補をPolicyの学習対象から外す。
+- 仮の重みとネイティブFastFizによる2反復で16/16試合、全12ステージが完了した。各反復で30、36件の探索の取り消しが発生し、全rootで無効候補の訪問数がゼロになったことを確認した。
+
+## 47. 2026-11-13 本実験のルールと比較手法
+
+- 本実験はプロ競技を想定した複数ラック先取。1ラックは取り切りなどの補助評価に使う。WPAルールを参照し、先取数、ブレイク順、ブレイク位置、スリーボール・ブレイク、プッシュアウトなど大会ごとの条件を記録する。Macroの状態には手番側と相手の残り必要ラック数を入れ、探索・教師生成・終端を試合勝敗と整合させる。既存のrace-to-1のモデル・ログは保持する。
+- ラック間で持ち越す状態がスコアだけで、現在ラックの勝敗に応じた継続勝率がそれぞれ定数なら、現在ラックの勝率を最大化する選択はスコアを変えても同じになる。スコア入力の有無を比較し、同じ盤面でスコアだけを変えた評価も行う。戦術分類と戦術専用の学習処理は、大規模学習で候補・選択・学習件数を観察してから判断する。
+- 比較候補は、毎回の合法入球を優先するGreedy、非学習の探索型PickPocketまたはCueCard、9-ballのChen & Li型Macro–Microを優先する。CueTipのPoolMaster代理モデルは近年の対戦型候補。実装を9-ballに移植したものには、変更した候補生成・ルール・探索予算を明示する。単発入球率、取り切り率、対戦勝率を別々に比較する。
+- 戦術に近い先行研究には、相手の入球能力をモデル化して攻守を切り替えるNierhoffらのロボット8-ball、守備時に相手の次手を難しくするMiniPool、手球の停止位置を先に選ぶPoolMasterがある。新規性の候補は、複数ラック9-ballの試合状態を入力として、戦術を明示的なMacro目標にし、Goal-conditioned 5D Microと自己対戦で交互更新する構成に置く。
+
+- [WPA Rules of Play and Rule Regulations](https://wpapool.com/rules/)
+- [Smith, PickPocket (2007)](https://doi.org/10.1016/j.artint.2007.04.011)
+- [Archibald et al., CueCard (2009)](https://ijcai.org/proceedings/2009/231)
+- [Chen & Li, Macro and Micro Reinforcement Learning (2019)](https://doi.org/10.1109/CIG.2019.8848113)
+- [Memery et al., CueTip (2025)](https://doi.org/10.1145/3721238.3730742)
+- [Nierhoff et al., Robotic Billiards (2016)](https://doi.org/10.1109/TCYB.2015.2457404)
+- [Da Silva & Rui, MiniPool (2017)](https://rcc.dcet.uab.pt/index.php/rcc/article/download/13/13)

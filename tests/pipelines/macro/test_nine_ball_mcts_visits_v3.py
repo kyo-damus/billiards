@@ -114,6 +114,20 @@ def test_reject_mismatched_selected_goal_or_visits():
         read_root(row)
 
 
+def test_legacy_invalidated_candidate_is_removed_and_chosen_index_is_remapped():
+    row = make_row(1, visits=(6, 2), chosen=1)
+    root = row["chosen_action"]["macro_search"]
+    root["root_invalid_reasons"] = ["no executable descendant", None]
+    _, candidates, visits, chosen = read_root(row)
+    np.testing.assert_array_equal(candidates, np.asarray([root["goal_v3"][1]], dtype=np.float32))
+    np.testing.assert_array_equal(visits, [2])
+    assert chosen == 0
+
+    root["root_invalid_reasons"] = [None, "no executable descendant"]
+    with pytest.raises(ValueError, match="was invalidated"):
+        read_root(row)
+
+
 def test_policy_visit_training_splits_matches_and_loads_checkpoint(tmp_path):
     directory = tmp_path / "matches"
     directory.mkdir()
