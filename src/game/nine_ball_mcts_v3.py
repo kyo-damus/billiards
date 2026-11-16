@@ -17,7 +17,7 @@ import torch
 
 from src.env.multi_ball_fastfiz import MultiBallFastFizSimulator
 from src.game.nine_ball_encoding_v3 import (
-    encode_goal_v3, encode_macro_state, generate_nine_ball_goals,
+    TABLE_CHOICES, encode_goal_v3, encode_macro_state, generate_nine_ball_goals, rule_goals,
 )
 from src.game.nine_ball_rules import NineBallContext, NineBallRules
 from src.game.nine_ball_session import NineBallRackSession, create_nine_ball_rack
@@ -93,6 +93,10 @@ class NineBallMCTS:
             TableGameConfig.nine_ball_inventory()
         )
         self.rules = rules or NineBallRules()
+        if getattr(self.rules, "wpa_break_rules", False):
+            check = getattr(self.simulator, "require_head_string_crossings", None)
+            if check is not None:
+                check()
         self.simulations = simulations
         self.max_depth = max_depth
         self.c_puct = c_puct
@@ -129,7 +133,14 @@ class NineBallMCTS:
         validate_rack_layout(node.state)
         self._prepare(node)
         validate_rack_layout(node.state)
-        if self.outcome_position and not node.state.break_shot:
+        rule_actions = (
+            rule_goals(node.state, node.context)
+            if getattr(self.rules, "wpa_break_rules", False)
+            and (node.context.pending_choice or node.context.push_out_available) else ()
+        )
+        if node.context.pending_choice is not None:
+            candidates = rule_actions
+        elif self.outcome_position and not node.state.break_shot:
             candidates = generate_outcome_position_goals(
                 node.state, node.context, self.simulator, self.rules,
                 learned_safety=self.learned_safety,
@@ -138,6 +149,8 @@ class NineBallMCTS:
             candidates = generate_nine_ball_goals(
                 node.state, learned_safety=self.learned_safety, learned_break=self.learned_break,
             )
+        if node.context.pending_choice is None:
+            candidates += rule_actions
         if not candidates:
             raise RuntimeError("Nonterminal rack has no nine-ball candidate")
         if self.policy is None:
@@ -206,10 +219,11 @@ class NineBallMCTS:
             ),
         )
 
-    def _simulate_plan(self, node, plan):
+    def _simulate_plan(self, node, edge, plan):
         _, outcome = simulate_nine_ball_shot(
             self.simulator, self.rules, node.state, node.context,
             target_ball=plan.target_ball, shot=plan.shot,
+            declared_push_out=edge.goal.kind == "PUSH_OUT",
         )
         return outcome
 
@@ -232,7 +246,7 @@ class NineBallMCTS:
             edge.cue_clearance_trials += 1
             retry = replace(plan, shot=variant)
             try:
-                outcome = self._simulate_plan(node, retry)
+                outcome = self._simulate_plan(node, edge, retry)
             except InvalidPhysicalTransition:
                 continue
             if not outcome.foul:
@@ -249,8 +263,15 @@ class NineBallMCTS:
         """Return False only for a diagnosed physically invalid shot."""
         try:
             plan = self.micro_agent.plan_goal(node.state, edge.goal, node.context)
+            if edge.goal.kind in TABLE_CHOICES:
+                state, context = self.rules.resolve_choice(
+                    node.state, node.context, play=edge.goal.kind == "ACCEPT_TABLE",
+                )
+                edge.plan = plan
+                edge.child = SearchNode(state, context, match_position=node.match_position)
+                return True
             try:
-                outcome = self._simulate_plan(node, plan)
+                outcome = self._simulate_plan(node, edge, plan)
             except NativeShotRejected as exc:
                 if exc.precondition != CUE_STICK_COLLISION or exc.placement != 0:
                     raise
@@ -306,7 +327,8 @@ class NineBallMCTS:
         node = root
         path = []
         leaf = 0.0
-        for depth in range(self.max_depth):
+        shots = 0
+        while shots < self.max_depth or node.context.pending_choice is not None:
             self._expand(node)
             edge = self._select_edge(node, root=(node is root))
             if edge is None:
@@ -329,10 +351,11 @@ class NineBallMCTS:
                 return False
             path.append((node, edge))
             node = edge.child
+            shots += edge.goal.kind not in TABLE_CHOICES
             if node.winner is not None:
                 leaf = 0.0
                 break
-            if fresh or depth + 1 >= self.max_depth:
+            if node.context.pending_choice is None and (fresh or shots >= self.max_depth):
                 leaf = self._leaf_value(node)
                 break
         else:
@@ -354,7 +377,8 @@ class NineBallMCTS:
                     if parent.state.current_player == child.state.current_player
                     else -1.0
                 )
-                value = self.gamma * sign * value
+                discount = 1.0 if edge.goal.kind in TABLE_CHOICES else self.gamma
+                value = discount * sign * value
             edge.visits += 1
             edge.value_sum += value
             parent.visits += 1

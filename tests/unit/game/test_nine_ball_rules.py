@@ -182,6 +182,45 @@ def test_push_out_cannot_be_misclassified_as_normal_shot():
         )
 
 
+def test_wpa_break_counts_distinct_balls_and_respots_nine_on_illegal_break():
+    state = create_nine_ball_rack(breaker=0, seed=2)
+    rules = NineBallRules(wpa_break_rules=True)
+    shot = physical(state, pocketed=(9,))
+    shot.head_string_crossings = (9, 2, 2)
+    result = rules.apply(state, shot, NineBallContext())
+    assert result.illegal_break and not result.foul and result.rack_winner is None
+    assert result.nine_respotted and not result.next_state.is_pocketed(9)
+    assert result.next_state.current_player == 1
+    assert not result.next_state.ball_in_hand
+    assert result.next_context.pending_choice == "illegal_break"
+    accept, accept_ctx = rules.resolve_choice(result.next_state, result.next_context, play=True)
+    back, back_ctx = rules.resolve_choice(result.next_state, result.next_context, play=False)
+    assert accept.current_player == 1 and not accept_ctx.push_out_available
+    assert back.current_player == 0 and back_ctx.push_out_available
+    assert accept.turn_index == back.turn_index == 1
+    assert accept_ctx.pending_choice is back_ctx.pending_choice is None
+    shot.head_string_crossings = (2, 3)
+    assert rules.apply(state, shot, NineBallContext()).rack_winner == 0
+
+
+@pytest.mark.parametrize("scratch", (False, True))
+def test_declared_push_out_respots_nine_and_retains_scratch_penalty(scratch):
+    state = replace(create_nine_ball_rack(breaker=0, seed=2), break_shot=False)
+    rules = NineBallRules(wpa_break_rules=True)
+    context = NineBallContext(push_out_available=True)
+    shot = physical(state, contact=4, pocketed=(9,), scratch=scratch, rail=False)
+    result = rules.apply(state, shot, context, declared_push_out=True)
+    assert result.foul is scratch and result.next_state.ball_in_hand is scratch
+    assert result.rack_winner is None and result.nine_respotted
+    assert result.next_state.current_player == 1
+    assert result.next_context.pending_choice == (None if scratch else "push_out")
+    if not scratch:
+        with pytest.raises(ValueError, match="pending"):
+            rules.apply(result.next_state, shot, result.next_context)
+        state, context = rules.resolve_choice(result.next_state, result.next_context, play=False)
+        assert state.current_player == 0 and not context.push_out_available
+
+
 class FakeSimulator:
     def __init__(self):
         self.state = None

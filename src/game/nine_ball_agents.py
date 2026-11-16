@@ -19,7 +19,7 @@ from src.micro.shot_control import PhysicalShot5D
 @dataclass(frozen=True)
 class ShotPlan:
     target_ball: int
-    shot: PhysicalShot5D
+    shot: PhysicalShot5D | None
     goal_label: str
     target_pocket: int | None = None
     # Exact v3 TacticalGoal for selected-action Q learning; absent for

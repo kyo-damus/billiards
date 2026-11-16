@@ -23,7 +23,7 @@ TARGET_KIND = "selected_action_terminal_match_return"
 REWARD_KIND = "terminal_match_win_loss"
 
 
-def turn_aware_returns(players, winner, gamma):
+def turn_aware_returns(players, winner, gamma, *, physical_steps=None):
     """Discount a terminal +/-1 match result from every acting player's view.
 
     Equivalent to propagating r + gamma * turn_sign * V(next) backwards
@@ -35,11 +35,15 @@ def turn_aware_returns(players, winner, gamma):
         raise ValueError("winner must be player 0 or 1")
     if not players or any(p not in (0, 1) for p in players):
         raise ValueError("Need nonempty valid acting-player sequence")
+    if physical_steps is None:
+        physical_steps = (True,) * len(players)
+    if len(physical_steps) != len(players) or not physical_steps[-1]:
+        raise ValueError("Expected one action type per player and a terminal physical shot")
     target = np.empty(len(players), dtype=np.float32)
     target[-1] = 1.0 if players[-1] == winner else -1.0
     for i in range(len(players) - 2, -1, -1):
         sign = 1.0 if players[i] == players[i + 1] else -1.0
-        target[i] = gamma * sign * target[i + 1]
+        target[i] = (gamma if physical_steps[i] else 1.0) * sign * target[i + 1]
     return target
 
 
@@ -69,6 +73,7 @@ def read_state_and_goal(row, match_position=None):
     context = NineBallContext(
         consecutive_fouls=tuple(int(n) for n in raw_ctx["consecutive_fouls"]),
         push_out_available=bool(raw_ctx["push_out_available"]),
+        pending_choice=raw_ctx.get("pending_choice"),
     )
     encoded = row["chosen_action"].get("goal_v3")
     if encoded is None:
@@ -148,7 +153,13 @@ def build(args):
         if not rows or rows[-1]["rule_result"]["rack_winner"] != winner:
             raise ValueError(f"Missing terminal winner evidence in {file}")
         players = [int(row["player"]) for row in rows]
-        targets = turn_aware_returns(players, winner, args.gamma)
+        targets = turn_aware_returns(
+            players, winner, args.gamma,
+            physical_steps=[
+                row["chosen_action"].get("rule_action") not in ("ACCEPT_TABLE", "PASS_BACK")
+                for row in rows
+            ],
+        )
         seed = int(match["seed"])
         if seed != int(file.stem.removeprefix("match_seed_")):
             raise ValueError(f"Match seed mismatch in {file}")

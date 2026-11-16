@@ -58,6 +58,21 @@ def test_real_nine_ball_diamond_can_execute_one_physical_rule_turn():
         )
 
 
+def test_native_head_string_records_ball_crossing_that_returns_after_rail():
+    rack = create_nine_ball_rack(breaker=0, seed=5)
+    simulator = MultiBallFastFizSimulator(rack.config)
+    simulator.restore(rack)
+    physical = simulator.step(
+        target_ball=1, shot=PhysicalShot5D(
+            4.28527465686457, 90.04046296577334, 3.1534368608790775,
+            -0.8496396286039261, -1.832220054873658,
+        ),
+    )
+    assert physical.precondition_code == 0
+    assert 5 in physical.head_string_crossings
+    assert physical.pocket_indices[5] == -1 and physical.positions[5, 1] > 2.236 / 4
+
+
 def test_position_goal_has_a_native_witness_and_leaves_the_next_ball():
     rack = create_nine_ball_rack(breaker=0, seed=12345)
     positions = np.zeros_like(rack.ball_positions)

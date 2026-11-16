@@ -12,7 +12,7 @@ from functools import partial
 from src.env.multi_ball_fastfiz import MultiBallFastFizSimulator
 from src.game.match import MatchConfig
 from src.game.nine_ball_agents import GeometryNineBallAgent
-from src.game.nine_ball_encoding_v3 import encode_goal_v3
+from src.game.nine_ball_encoding_v3 import TABLE_CHOICES, encode_goal_v3
 from src.game.nine_ball_session import NineBallMatchSession
 from src.game.nine_ball_physics_guard import InvalidPhysicalTransition
 
@@ -27,6 +27,16 @@ def rack_state_json(state):
         "ball_in_hand": bool(state.ball_in_hand),
         "break_shot": bool(state.break_shot),
         "turn_index": int(state.turn_index),
+    }
+
+
+def rule_context_json(context):
+    if context is None:
+        return None
+    return {
+        "consecutive_fouls": list(context.consecutive_fouls),
+        "push_out_available": bool(context.push_out_available),
+        "pending_choice": context.pending_choice,
     }
 
 
@@ -74,16 +84,36 @@ def play_match(
             "break_policy": match_position.break_policy,
         }
         context = getattr(match.rack, "context", None)
-        context_before = {
-            "consecutive_fouls": list(context.consecutive_fouls),
-            "push_out_available": bool(context.push_out_available),
-        } if context is not None else None
+        context_before = rule_context_json(context)
         try:
             if match_position.race_to > 1 and hasattr(agent, "choose_match_shot"):
                 plan = agent.choose_match_shot(state, context, match_position)
             else:
                 plan = agent.choose_shot(state, context=context)
-            result = match.step(target_ball=plan.target_ball, shot=plan.shot)
+            kind = getattr(plan.macro_goal, "kind", None)
+            if context is not None and context.pending_choice is not None:
+                if kind not in TABLE_CHOICES:
+                    raise ValueError("Agent must select ACCEPT_TABLE or PASS_BACK")
+                match.resolve_choice(play=kind == "ACCEPT_TABLE")
+                records.append({
+                    "rack_index": sum(match_position.rack_wins),
+                    "player": player,
+                    "state": rack_state_json(state),
+                    "match_context": match_context,
+                    "rule_context": context_before,
+                    "chosen_action": {
+                        "goal_label": plan.goal_label,
+                        "goal_v3": encode_goal_v3(plan.macro_goal).tolist(),
+                        "macro_search": plan.macro_search,
+                        "rule_action": kind,
+                    },
+                    "rule_result": {"foul": False, "rack_winner": None},
+                    "next_state": rack_state_json(match.state),
+                    "next_rule_context": rule_context_json(match.rack.context),
+                })
+                continue
+            kwargs = {"declared_push_out": True} if kind == "PUSH_OUT" else {}
+            result = match.step(target_ball=plan.target_ball, shot=plan.shot, **kwargs)
         except InvalidPhysicalTransition as exc:
             # This is a simulator failure, NOT a billiards foul or winner.
             # Keep earlier valid turns, flag the match as unfinished, and
@@ -94,7 +124,7 @@ def play_match(
                 "state": rack_state_json(state),
                 "match_context": match_context,
                 "rule_context": context_before,
-                "shot_index": len(records),
+                "shot_index": sum("physical" in row for row in records),
             }
             break
         physical = getattr(
@@ -118,6 +148,7 @@ def play_match(
                 ),
                 "target_ball": int(plan.target_ball),
                 "target_pocket": plan.target_pocket,
+                "rule_action": "PUSH_OUT" if kind == "PUSH_OUT" else None,
                 **plan.shot.to_fastfiz_kwargs(),
             },
             "physical": {
@@ -136,6 +167,7 @@ def play_match(
                     }
                     for e in physical.events
                 ] if physical is not None else [],
+                "head_string_crossings": getattr(physical, "head_string_crossings", None),
             },
             "rule_result": {
                 "foul": bool(result.foul),
@@ -143,13 +175,11 @@ def play_match(
                 "newly_pocketed": list(result.newly_pocketed),
                 "rack_winner": result.rack_winner,
                 "turn_changed": bool(result.turn_changed),
+                "illegal_break": getattr(result, "illegal_break", False),
             },
             "next_state": rack_state_json(result.next_state),
             "next_rule_context": (
-                {
-                    "consecutive_fouls": list(result.next_context.consecutive_fouls),
-                    "push_out_available": bool(result.next_context.push_out_available),
-                }
+                rule_context_json(result.next_context)
                 if hasattr(result, "next_context") else None
             ),
         })
@@ -169,8 +199,11 @@ def play_match(
             else "rack_shot_limit"
         ),
         "physics_failure": physics_failure,
-        "shots": len(records),
+        "shots": sum("physical" in row for row in records),
         "fouls": sum(int(row["rule_result"]["foul"]) for row in records),
+        "illegal_breaks": sum(row["rule_result"].get("illegal_break", False) for row in records),
+        "push_outs": sum(row["chosen_action"].get("rule_action") == "PUSH_OUT" for row in records),
+        "table_choices": sum("physical" not in row for row in records),
         "rack_history": list(match.rack_history),
         "trajectory": records,
     }
@@ -191,6 +224,7 @@ def collect_matches(
     learned_break: bool = False,
     outcome_position: bool = False,
     break_policy: str = "alternate",
+    wpa_break_rules: bool = False,
 ):
     """Write each match once; optional validated completion of interrupted batch.
 
@@ -234,6 +268,7 @@ def collect_matches(
                 payload.get("seed") != seed_from_name
                 or payload.get("race_to") != race_to
                 or payload.get("break_policy", "alternate") != break_policy
+                or payload.get("wpa_break_rules", False) != wpa_break_rules
                 or payload.get("max_shots_per_rack") != max_shots_per_rack
                 or payload.get("run_type") != run_type
                 or payload.get("players") != players
@@ -243,7 +278,10 @@ def collect_matches(
                 or payload.get("format_version") != 1
                 or not isinstance(payload.get("trajectory"), list)
                 or not isinstance(payload.get("match_finished"), bool)
-                or payload.get("shots") != len(payload["trajectory"])
+                or payload.get("shots") != sum(
+                    (row.get("chosen_action") or {}).get("rule_action") not in TABLE_CHOICES
+                    for row in payload["trajectory"]
+                )
             ):
                 raise ValueError(f"Resume file identity/content mismatch: {file}")
             existing[seed_from_name] = payload
@@ -268,6 +306,7 @@ def collect_matches(
                     break_policy=break_policy,
                 ),
                 seed=seed,
+                wpa_break_rules=wpa_break_rules,
             )
         else:
             match = match_factory(seed)
@@ -280,6 +319,7 @@ def collect_matches(
             "seed": seed,
             "race_to": race_to,
             "break_policy": break_policy,
+            "wpa_break_rules": wpa_break_rules,
             "max_shots_per_rack": max_shots_per_rack,
             "players": players,
             "learned_safety": learned_safety,
@@ -306,6 +346,7 @@ def collect_matches(
         "matches": matches,
         "race_to": race_to,
         "break_policy": break_policy,
+        "wpa_break_rules": wpa_break_rules,
         "learned_safety": learned_safety,
         "learned_break": learned_break,
         "outcome_position": outcome_position,
@@ -314,6 +355,9 @@ def collect_matches(
         "racks_completed": sum(s["racks_completed"] for s in summaries),
         "shots": sum(s["shots"] for s in summaries),
         "fouls": sum(s["fouls"] for s in summaries),
+        "illegal_breaks": sum(s.get("illegal_breaks", 0) for s in summaries),
+        "push_outs": sum(s.get("push_outs", 0) for s in summaries),
+        "table_choices": sum(s.get("table_choices", 0) for s in summaries),
         "invalid_physics_matches": sum(
             s.get("stop_reason") == "invalid_physics" for s in summaries
         ),
@@ -334,6 +378,7 @@ def parse_args(argv=None):
     p.add_argument("--matches", type=int, default=2)
     p.add_argument("--race-to", type=int, default=2)
     p.add_argument("--break-policy", choices=("alternate", "winner", "loser"), default="alternate")
+    p.add_argument("--wpa-break-rules", action="store_true")
     p.add_argument("--start-seed", type=int, default=310000)
     p.add_argument("--max-shots-per-rack", type=int, default=60)
     p.add_argument("--output-dir", type=Path, required=True)
@@ -357,6 +402,8 @@ def parse_args(argv=None):
 
 if __name__ == "__main__":
     args = parse_args()
+    if args.wpa_break_rules and args.agent_kind != "micro_mcts":
+        raise ValueError("--wpa-break-rules requires --agent-kind micro_mcts")
     agent_factory = GeometryNineBallAgent
     if args.agent_kind in ("micro_sac", "micro_mcts"):
         if args.micro_checkpoint is None:
@@ -387,6 +434,7 @@ if __name__ == "__main__":
                 micro_checkpoint=args.micro_checkpoint,
                 macro_policy_checkpoint=args.macro_policy_checkpoint,
                 state_value_checkpoint=args.state_value_checkpoint,
+                wpa_break_rules=args.wpa_break_rules,
                 simulations=args.mcts_simulations,
                 max_depth=args.mcts_max_depth,
                 c_puct=args.mcts_c_puct,
@@ -407,6 +455,7 @@ if __name__ == "__main__":
         matches=args.matches,
         race_to=args.race_to,
         break_policy=args.break_policy,
+        wpa_break_rules=args.wpa_break_rules,
         start_seed=args.start_seed,
         max_shots_per_rack=args.max_shots_per_rack,
         output_dir=args.output_dir,

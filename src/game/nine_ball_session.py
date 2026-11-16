@@ -61,6 +61,10 @@ class NineBallRackSession:
             raise ValueError("NineBallRackSession requires a nine_ball RackState")
         self.simulator = simulator
         self.rules = rules or NineBallRules()
+        if getattr(self.rules, "wpa_break_rules", False):
+            check = getattr(simulator, "require_head_string_crossings", None)
+            if check is not None:
+                check()
         self.state = initial_state
         self.context = NineBallContext()
         self.winner = None
@@ -108,8 +112,8 @@ class NineBallRackSession:
             raise RuntimeError("Rack already ended")
         if self.state.ball_in_hand:
             raise ValueError("Cue-ball placement required before shooting")
-        if declared_push_out:
-            raise NotImplementedError("Push-out requires option/choice support")
+        if declared_push_out or getattr(self.context, "pending_choice", None) is not None:
+            self.rules.validate_shot(self.state, self.context, declared_push_out)
         validate_rack_layout(self.state)
         try:
             physical = self.simulator.step(target_ball=target_ball, shot=shot)
@@ -120,7 +124,10 @@ class NineBallRackSession:
                 f"Live FastFiz shot rejected, not a game foul: {exc}"
             ) from exc
         validate_physical_step(physical)
-        result = self.rules.apply(self.state, physical, self.context)
+        result = (
+            self.rules.apply(self.state, physical, self.context, declared_push_out=True)
+            if declared_push_out else self.rules.apply(self.state, physical, self.context)
+        )
         validate_rack_layout(result.next_state)
         # Preserve event evidence before simulator.restore clears native diagnostics.
         self.last_physical = physical
@@ -132,15 +139,19 @@ class NineBallRackSession:
             self.simulator.restore(self.state)
         return result
 
+    def resolve_choice(self, *, play: bool):
+        self.state, self.context = self.rules.resolve_choice(self.state, self.context, play=play)
+
 
 class NineBallMatchSession:
     """Several independent racks played until race-to-N winner exists."""
 
-    def __init__(self, *, simulator_factory, match_config, seed: int):
+    def __init__(self, *, simulator_factory, match_config, seed: int, wpa_break_rules=False):
         from src.game.match import RaceToMatch
         if match_config.rule_id != "nine_ball":
             raise ValueError("Match must use nine_ball rule_id")
         self.simulator_factory = simulator_factory
+        self.rules = NineBallRules(wpa_break_rules=wpa_break_rules)
         self.match = RaceToMatch(match_config)
         self.seed = seed
         self.rack_history = []
@@ -159,6 +170,7 @@ class NineBallMatchSession:
         self.rack = NineBallRackSession(
             simulator=self.simulator_factory(new_rack.config),
             initial_state=new_rack,
+            rules=self.rules,
         )
 
     @property
@@ -167,6 +179,9 @@ class NineBallMatchSession:
 
     def place_cue_ball(self, x: float, y: float):
         return self.rack.place_cue_ball(x, y)
+
+    def resolve_choice(self, *, play: bool):
+        self.rack.resolve_choice(play=play)
 
     def step(self, *, target_ball: int, shot, declared_push_out: bool = False):
         if self.match.snapshot().finished:

@@ -304,3 +304,24 @@ def test_match_search_bootstraps_next_rack_with_updated_score(monkeypatch):
     search.search(board, match_position=position.after_rack(0))
     assert len(observed) == 1
     assert search.last_report["root_empirical_q"] == [1.0]
+
+
+def test_post_break_choice_changes_player_without_a_physical_shot():
+    from src.game.nine_ball_rules import NineBallRules
+
+    rack = replace(create_nine_ball_rack(breaker=0, seed=7), break_shot=False)
+    physics = FakePhysics()
+    search = NineBallMCTS(
+        FakeMicro(), simulator=physics, rules=NineBallRules(wpa_break_rules=True),
+        value_network=lambda obs: torch.tensor([-0.6]), simulations=2, gamma=0.5, max_depth=1,
+    )
+    context = NineBallContext(pending_choice="illegal_break")
+    goal = search.search(rack, context)
+    assert goal.kind == "PASS_BACK"
+    assert search.last_report["root_empirical_q"] == pytest.approx([-0.6, 0.6])
+    accept, back = search.last_root.edges
+    assert accept.child.state.current_player == 0
+    assert not accept.child.context.push_out_available
+    assert back.child.state.current_player == 1
+    assert back.child.context.push_out_available
+    assert not physics.restored

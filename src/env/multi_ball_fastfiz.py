@@ -32,6 +32,7 @@ class PhysicalStep:
     events: tuple[PhysicalEvent, ...]
     precondition_code: int
     placement_code: int
+    head_string_crossings: tuple[int, ...] | None = None
 
     @property
     def valid_shot(self):
@@ -52,6 +53,11 @@ class MultiBallFastFizSimulator:
             raise ValueError("FastFiz supports numbered object balls 1..15.")
         self.config = config
         self.native = billiard_env_cpp.BilliardSimulatorMulti(list(config.ball_numbers))
+        self._head_string = getattr(self.native, "get_last_head_string_crossings", None)
+
+    def require_head_string_crossings(self):
+        if self._head_string is None:
+            raise RuntimeError("Rebuild FastFiz with head-string crossing data for --wpa-break-rules")
 
     def restore(self, state: RackState):
         if state.config != self.config:
@@ -101,4 +107,5 @@ class MultiBallFastFizSimulator:
             events=events,
             precondition_code=int(self.native.get_last_precondition_code()),
             placement_code=placement,
+            head_string_crossings=tuple(self._head_string()) if self._head_string else None,
         )

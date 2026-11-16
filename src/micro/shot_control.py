@@ -118,3 +118,7 @@ class Shot5DDecoder:
 NINE_BALL_BREAK_DECODER = Shot5DDecoder(
     min_speed=2.0, max_angle_offset_deg=2.0, max_elevation_deg=15.0, tip_radius_mm=6.0,
 )
+WPA_NINE_BALL_BREAK_DECODER = Shot5DDecoder(
+    min_speed=2.0, max_speed=5.5, max_angle_offset_deg=2.0,
+    max_elevation_deg=15.0, tip_radius_mm=6.0,
+)

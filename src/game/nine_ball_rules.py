@@ -1,11 +1,9 @@
 """Event-based core nine-ball rules for the variable-ball physical simulator.
 
-This does NOT claim full WPA tournament compliance: the three-ball-break
-head-string crossing regulation, push-out option, jumped-ball recognition,
-and referee-only infractions need additional interfaces.
+Optional WPA break and push-out rules use native head-string crossing data.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Optional
 
 import numpy as np
@@ -24,12 +22,17 @@ class NineBallContext:
 
     consecutive_fouls: tuple[int, int] = (0, 0)
     push_out_available: bool = False
+    pending_choice: str | None = None
 
     def __post_init__(self):
         if len(self.consecutive_fouls) != 2 or any(
             n < 0 for n in self.consecutive_fouls
         ):
             raise ValueError("Expected two nonnegative foul counts.")
+        if self.pending_choice not in (None, "illegal_break", "push_out"):
+            raise ValueError("Unknown post-break choice")
+        if self.pending_choice and self.push_out_available:
+            raise ValueError("Resolve the post-break choice before declaring a push-out")
 
 
 @dataclass(frozen=True)
@@ -42,6 +45,7 @@ class NineBallTransition:
     rack_winner: Optional[int]
     newly_pocketed: tuple[int, ...]
     nine_respotted: bool
+    illegal_break: bool = False
 
     @property
     def rack_finished(self) -> bool:
@@ -75,12 +79,29 @@ def _spot_nine(positions, pockets, config):
 
 
 class NineBallRules:
-    """Physics-to-rules transition, independent of Macro/Micro models.
+    """Physics-to-rules transition, independent of Macro/Micro models."""
 
-    On a break with no pocket, four distinct object balls must reach a rail.
-    The WPA three-ball head-string crossing regulation is NOT inferred from
-    final positions, and push-out remains explicitly unsupported.
-    """
+    def __init__(self, *, wpa_break_rules=False):
+        self.wpa_break_rules = wpa_break_rules
+
+    def validate_shot(self, state, context, declared_push_out):
+        if context.pending_choice is not None:
+            raise ValueError("Resolve the pending shot choice before shooting")
+        if declared_push_out and not self.wpa_break_rules:
+            raise NotImplementedError("Push-out requires WPA break rules")
+        if declared_push_out and (not context.push_out_available or state.break_shot or state.ball_in_hand):
+            raise ValueError("Push-out is unavailable")
+
+    def resolve_choice(self, state, context, *, play: bool):
+        """The chooser is the current player before an accept/pass decision."""
+        if not self.wpa_break_rules or context.pending_choice is None:
+            raise ValueError("No pending shot choice")
+        next_state = state if play else replace(state, current_player=1 - state.current_player)
+        next_context = replace(
+            context, pending_choice=None,
+            push_out_available=context.pending_choice == "illegal_break" and not play,
+        )
+        return next_state, next_context
 
     def apply(
         self,
@@ -96,11 +117,8 @@ class NineBallRules:
             raise ValueError("NineBallRules requires a complete 1..9 inventory")
         if previous.ball_in_hand:
             raise ValueError("Place cue ball legally before executing this shot")
-        if declared_push_out:
-            raise NotImplementedError(
-                "Push-out and opponent choice are not implemented; "
-                "do not silently treat a push-out as an ordinary shot"
-            )
+        if declared_push_out or context.pending_choice is not None:
+            self.validate_shot(previous, context, declared_push_out)
 
         before = previous.ball_pocket_indices
         pockets = np.asarray(physical.pocket_indices, dtype=np.int32).copy()
@@ -128,12 +146,15 @@ class NineBallRules:
             reasons.append("invalid_ball_placement")
         if pockets[0] >= 0:
             reasons.append("cue_scratch")
+        if self.wpa_break_rules and previous.break_shot and previous.ball_positions[0, 1] >= TABLE_LENGTH_M / 4:
+            reasons.append("cue_not_behind_head_string")
 
         hit = physical.first_contact_ball
-        if hit is None:
-            reasons.append("no_object_contact")
-        elif int(hit) != expected_first:
-            reasons.append("wrong_ball_first")
+        if not declared_push_out:
+            if hit is None:
+                reasons.append("no_object_contact")
+            elif int(hit) != expected_first:
+                reasons.append("wrong_ball_first")
 
         # Time-ordered native events: rail contact only counts at or after
         # the first cue/object-ball collision, unless an object was pocketed.
@@ -149,7 +170,7 @@ class NineBallRules:
             e.kind == "RAIL_COLLISION" and e.time_s >= contact_time
             for e in events
         )
-        if hit is not None and not newly and not rail_after_hit:
+        if not declared_push_out and hit is not None and not newly and not rail_after_hit:
             reasons.append("no_rail_after_contact")
 
         if previous.break_shot and not newly:
@@ -162,6 +183,13 @@ class NineBallRules:
                 reasons.append("insufficient_break_rails")
 
         foul = bool(reasons)
+        illegal_break = False
+        if self.wpa_break_rules and previous.break_shot and not foul:
+            crossed = getattr(physical, "head_string_crossings", None)
+            if crossed is None:
+                raise RuntimeError("WPA break rules require a FastFiz build with head-string crossing data")
+            qualifying = set(newly).union(set(crossed).intersection(prev_on_table))
+            illegal_break = len(qualifying) < 3
         shooter = previous.current_player
         other = 1 - shooter
         fouls = list(context.consecutive_fouls)
@@ -173,13 +201,18 @@ class NineBallRules:
         winner = None
         if foul and fouls[shooter] >= 3:
             winner = other
-        elif not foul and 9 in newly:
+        elif not foul and not illegal_break and not declared_push_out and 9 in newly:
             winner = shooter
 
-        nine_respotted = 9 in newly and foul
+        nine_respotted = 9 in newly and (foul or declared_push_out or illegal_break)
         if nine_respotted:
             _spot_nine(positions, pockets, previous.config)
-        turn_changed = foul or (not newly and winner is None)
+        choice = None
+        if illegal_break:
+            choice = "illegal_break"
+        elif declared_push_out and not foul:
+            choice = "push_out"
+        turn_changed = foul or choice is not None or (not newly and winner is None)
         if winner is not None:
             turn_changed = False
         next_player = other if turn_changed else shooter
@@ -195,7 +228,8 @@ class NineBallRules:
         )
         next_context = NineBallContext(
             consecutive_fouls=tuple(fouls),
-            push_out_available=(previous.break_shot and not foul and winner is None),
+            push_out_available=previous.break_shot and not foul and choice is None and winner is None,
+            pending_choice=choice,
         )
         return NineBallTransition(
             next_state=next_state,
@@ -206,4 +240,5 @@ class NineBallRules:
             rack_winner=winner,
             newly_pocketed=newly,
             nine_respotted=nine_respotted,
+            illegal_break=illegal_break,
         )

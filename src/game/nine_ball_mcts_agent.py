@@ -5,7 +5,9 @@ from dataclasses import replace
 from src.game.nine_ball_encoding_v3 import MACRO_STATE_V3_DIM
 from src.game.nine_ball_learned_agent import NineBallMicroSACAgent
 from src.game.nine_ball_mcts_v3 import NineBallMCTS
+from src.game.nine_ball_rules import NineBallRules
 from src.game.nine_ball_value_v3 import load_state_v_v3
+from src.micro.shot_control import WPA_NINE_BALL_BREAK_DECODER
 
 
 class NineBallMCTSAgent(NineBallMicroSACAgent):
@@ -23,6 +25,7 @@ class NineBallMCTSAgent(NineBallMicroSACAgent):
         learned_break=False,
         outcome_position=False,
         match_aware=False,
+        wpa_break_rules=False,
     ):
         super().__init__(
             micro_checkpoint,
@@ -55,7 +58,10 @@ class NineBallMCTSAgent(NineBallMicroSACAgent):
             outcome_position=outcome_position,
             match_aware=match_aware,
             rack_value=rack_value,
+            rules=NineBallRules(wpa_break_rules=wpa_break_rules),
         )
+        if wpa_break_rules:
+            self.break_decoder = WPA_NINE_BALL_BREAK_DECODER
 
     def choose_shot(self, state, context=None):
         return self.choose_match_shot(state, context, None)

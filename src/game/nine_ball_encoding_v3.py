@@ -24,6 +24,8 @@ MATCH_MACRO_STATE_DIM = MACRO_STATE_V3_DIM + 6
 MACRO_GOAL_V3_DIM = 36
 MICRO_CONDITIONED_V3_DIM = MACRO_STATE_V3_DIM + MACRO_GOAL_V3_DIM
 GOAL_KINDS = ("BREAK", "DIRECT_ATTACK", "POSITION_ATTACK", "SAFETY")
+RULE_ACTION_CODES = {"PUSH_OUT": -1.0, "ACCEPT_TABLE": -2.0, "PASS_BACK": -3.0}
+TABLE_CHOICES = ("ACCEPT_TABLE", "PASS_BACK")
 
 
 @dataclass(frozen=True)
@@ -36,7 +38,7 @@ class NineBallGoal:
     explicit_shot: Optional[PhysicalShot5D] = None
 
     def __post_init__(self):
-        if self.kind not in GOAL_KINDS:
+        if self.kind not in GOAL_KINDS + tuple(RULE_ACTION_CODES):
             raise ValueError(f"Unknown goal kind: {self.kind}")
         if not (1 <= self.target_ball <= MAX_BALL_NUMBER):
             raise ValueError("target_ball must be a physical ball ID 1..15")
@@ -75,7 +77,9 @@ def encode_rack_v3(state, context=None) -> np.ndarray:
     if context is not None:
         out[69] = min(context.consecutive_fouls[0], 3) / 3.0
         out[70] = min(context.consecutive_fouls[1], 3) / 3.0
-        out[71] = float(context.push_out_available)
+        out[71] = {"illegal_break": 2.0, "push_out": 3.0}.get(
+            context.pending_choice, float(context.push_out_available),
+        )
     return out
 
 
@@ -100,7 +104,8 @@ def encode_macro_state(state, context=None, match_position=None) -> np.ndarray:
 def encode_goal_v3(goal: NineBallGoal) -> np.ndarray:
     """4 goal kind + 16 real-ball IDs + 6 pockets + 3 stop + 1 shot flag + 6 shot."""
     v = np.zeros(MACRO_GOAL_V3_DIM, dtype=np.float32)
-    v[GOAL_KINDS.index(goal.kind)] = 1.0
+    category = "SAFETY" if goal.kind in RULE_ACTION_CODES else goal.kind
+    v[GOAL_KINDS.index(category)] = 1.0
     v[4 + goal.target_ball] = 1.0
     if goal.target_pocket is not None:
         v[20 + goal.target_pocket] = 1.0
@@ -121,7 +126,25 @@ def encode_goal_v3(goal: NineBallGoal) -> np.ndarray:
             shot.tip_x_mm / 12.0,
             shot.tip_y_mm / 12.0,
         )
+    if goal.kind in RULE_ACTION_CODES:
+        v[28] = RULE_ACTION_CODES[goal.kind]
     return v
+
+
+def rule_goals(state, context):
+    """Post-break actions with a stable representation in the v3 vector."""
+    target = min(state.on_table_object_balls())
+    if context.pending_choice is not None:
+        return tuple(NineBallGoal(kind, target) for kind in TABLE_CHOICES)
+    if not context.push_out_available:
+        return ()
+    cue = state.ball_positions[0]
+    delta = np.asarray((TABLE_WIDTH / 2, TABLE_LENGTH / 2)) - cue
+    heading = degrees(atan2(float(delta[1]), float(delta[0])))
+    return tuple(
+        NineBallGoal("PUSH_OUT", target, explicit_shot=PhysicalShot5D(0.7, heading + angle, 10, 0, 0))
+        for angle in (0, -45, 45, -90, 90, 180)
+    )
 
 
 def conditioned_observation_v3(state, goal, context=None) -> np.ndarray:

@@ -29,6 +29,10 @@ def test_turn_aware_return_from_each_actors_perspective():
     )
     with pytest.raises(ValueError):
         turn_aware_returns([0, 1], 1, gamma=1.1)
+    np.testing.assert_allclose(
+        turn_aware_returns([0, 1, 0], winner=0, gamma=0.5, physical_steps=[True, False, True]),
+        [0.5, -1.0, 1.0],
+    )
 
 
 def make_row(actor, *, chosen_goal=True):

@@ -92,6 +92,7 @@ def evaluate(args, *, agent_factory=None, simulator_factory=None):
         "learned_break": settings.get("learned_break", False),
         "outcome_position": settings.get("outcome_position", False),
         "match_aware": race_to > 1,
+        "wpa_break_rules": settings.get("wpa_break_rules", False),
     }
     checkpoints = _model_inputs(training)
     if args.device == "cuda":
@@ -149,6 +150,7 @@ def evaluate(args, *, agent_factory=None, simulator_factory=None):
                     race_to=race_to, rule_id="nine_ball", first_breaker=breaker, break_policy=break_policy,
                 ),
                 seed=seed,
+                wpa_break_rules=search["wpa_break_rules"],
             )
             outcome = play_match(
                 match, tuple(agents[label] for label in players),

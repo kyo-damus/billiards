@@ -67,7 +67,7 @@ def validate_rack_layout(state, *, tolerance_m=1e-6):
                 )
 
 
-def simulate_nine_ball_shot(simulator, rules, state, context, *, target_ball, shot):
+def simulate_nine_ball_shot(simulator, rules, state, context, *, target_ball, shot, declared_push_out=False):
     """Simulate from an independent rack snapshot and validate the successor."""
     validate_rack_layout(state)
     simulator.restore(state)
@@ -78,6 +78,9 @@ def simulate_nine_ball_shot(simulator, rules, state, context, *, target_ball, sh
             raise
         raise InvalidPhysicalTransition(f"FastFiz rejected shot: {exc}") from exc
     validate_physical_step(physical)
-    outcome = rules.apply(state, physical, context)
+    outcome = (
+        rules.apply(state, physical, context, declared_push_out=True)
+        if declared_push_out else rules.apply(state, physical, context)
+    )
     validate_rack_layout(outcome.next_state)
     return physical, outcome

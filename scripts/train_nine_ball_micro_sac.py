@@ -34,7 +34,7 @@ from src.game.nine_ball_position import (
 from src.game.rack_state import RackState, TableGameConfig
 from src.micro.replay_buffer import ReplayBuffer
 from src.micro.sac import SACAgent
-from src.micro.shot_control import NINE_BALL_BREAK_DECODER, Shot5DDecoder
+from src.micro.shot_control import NINE_BALL_BREAK_DECODER, WPA_NINE_BALL_BREAK_DECODER, Shot5DDecoder
 
 
 @dataclass(frozen=True)
@@ -81,6 +81,8 @@ def _selected_micro_goal(state, row, *, learned_safety, learned_break, outcome_p
     if not np.allclose(selected[:len(GOAL_KINDS)], np.eye(len(GOAL_KINDS))[kind_index], atol=1e-5):
         raise ValueError("Invalid logged Macro Goal kind")
     kind = GOAL_KINDS[kind_index]
+    if kind == "SAFETY" and selected[28] < 0:
+        return None  # Macro-only table choices and fixed push-out shots.
     if state.break_shot != (kind == "BREAK"):
         raise ValueError("Logged Macro Goal kind does not match rack break phase")
     if kind == "BREAK" and not learned_break:
@@ -108,7 +110,7 @@ def _selected_micro_goal(state, row, *, learned_safety, learned_break, outcome_p
 
 def load_training_states(
     rollout_dir: Path, *, goal_source: str = "uniform", learned_safety=False,
-    learned_break=False, outcome_position=False,
+    learned_break=False, outcome_position=False, wpa_break_rules=False,
 ) -> tuple[TrainingSample, ...]:
     """Load observed pre-shot states; optionally use exact selected Macro goals."""
     if goal_source not in ("uniform", "logged"):
@@ -131,7 +133,12 @@ def load_training_states(
             raise ValueError(f"Outcome position mode differs from logged collection in {path}")
         if goal_source == "logged" and data.get("learned_break", False) != learned_break:
             raise ValueError(f"Learned break mode differs from logged collection in {path}")
+        if data.get("wpa_break_rules", False) != wpa_break_rules:
+            raise ValueError(f"WPA break mode differs from collection in {path}")
         for row in data.get("trajectory", []):
+            raw_ctx = row.get("rule_context")
+            if raw_ctx and raw_ctx.get("pending_choice") is not None:
+                continue
             raw = row["state"]
             if tuple(raw["ball_numbers"]) != cfg.ball_numbers:
                 raise ValueError(f"Expected cue + numbered 1..9 balls in {path}")
@@ -151,7 +158,6 @@ def load_training_states(
             )
             if state.ball_pocket_indices[0] >= 0:
                 continue
-            raw_ctx = row.get("rule_context")
             if raw_ctx is None:
                 context = NineBallContext()
             else:
@@ -185,6 +191,8 @@ def micro_reward(goal, before, physical, outcome, *, outcome_position=False) -> 
     if goal.kind == "BREAK":
         if outcome.foul:
             return -1.2, False
+        if getattr(outcome, "illegal_break", False):
+            return -0.5, False
         if outcome.rack_winner == before.current_player:
             return 2.1, True
         pocketed = len(outcome.newly_pocketed)
@@ -308,6 +316,7 @@ def train(args, *, simulator_factory=MultiBallFastFizSimulator):
     samples = load_training_states(
         args.rollout_dir, goal_source=args.goal_source, learned_safety=args.learned_safety,
         learned_break=args.learned_break, outcome_position=args.outcome_position,
+        wpa_break_rules=args.wpa_break_rules,
     )
     device = resolve_device(args.device)
     np.random.seed(args.seed)
@@ -330,8 +339,11 @@ def train(args, *, simulator_factory=MultiBallFastFizSimulator):
     )
     replay = ReplayBuffer(capacity=args.replay_capacity)
     simulator = simulator_factory(TableGameConfig.nine_ball_inventory())
-    rules = NineBallRules()
+    if args.wpa_break_rules and hasattr(simulator, "require_head_string_crossings"):
+        simulator.require_head_string_crossings()
+    rules = NineBallRules(wpa_break_rules=args.wpa_break_rules)
     decoder = Shot5DDecoder()
+    break_decoder = WPA_NINE_BALL_BREAK_DECODER if args.wpa_break_rules else NINE_BALL_BREAK_DECODER
     witnessed_goals = {}
     logs = []
     window_rewards, window_pots, window_safety = [], [], []
@@ -383,7 +395,7 @@ def train(args, *, simulator_factory=MultiBallFastFizSimulator):
                 action = rng.uniform(-1.0, 1.0, size=5).astype(np.float32)
             else:
                 action = agent.select_action(encoded, deterministic=False)
-            shot_decoder = NINE_BALL_BREAK_DECODER if goal.kind == "BREAK" else decoder
+            shot_decoder = break_decoder if goal.kind == "BREAK" else decoder
             shot = shot_decoder.decode(action, reference_angle_deg(state, goal))
             try:
                 physical, outcome = execute_valid_training_shot(
@@ -416,7 +428,7 @@ def train(args, *, simulator_factory=MultiBallFastFizSimulator):
         if goal.kind == "SAFETY":
             window_safety.append(success)
         elif goal.kind == "BREAK":
-            window_breaks.append((not outcome.foul, success))
+            window_breaks.append((not outcome.foul and not getattr(outcome, "illegal_break", False), success))
         else:
             window_pots.append(success)
         if args.outcome_position and goal.kind == "POSITION_ATTACK":
@@ -468,6 +480,7 @@ def train(args, *, simulator_factory=MultiBallFastFizSimulator):
         "learned_safety": args.learned_safety,
         "learned_break": args.learned_break,
         "outcome_position": args.outcome_position,
+        "wpa_break_rules": args.wpa_break_rules,
         "actor": agent.actor.state_dict(),
         "critic": agent.critic.state_dict(),
         "critic_target": agent.critic_target.state_dict(),
@@ -487,6 +500,7 @@ def train(args, *, simulator_factory=MultiBallFastFizSimulator):
         "learned_safety": args.learned_safety,
         "learned_break": args.learned_break,
         "outcome_position": args.outcome_position,
+        "wpa_break_rules": args.wpa_break_rules,
         "init_checkpoint": str(args.init_checkpoint) if args.init_checkpoint else None,
         "previous_trained_steps": initial_steps,
         "training_steps_this_run": args.steps,
@@ -517,6 +531,7 @@ def parse_args(argv=None):
     )
     parser.add_argument("--learned-safety", action="store_true")
     parser.add_argument("--learned-break", action="store_true")
+    parser.add_argument("--wpa-break-rules", action="store_true")
     parser.add_argument("--outcome-position", action="store_true")
     parser.add_argument("--output-dir", required=True, type=Path)
     parser.add_argument("--steps", type=int, default=5000)

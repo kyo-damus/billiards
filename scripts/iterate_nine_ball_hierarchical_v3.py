@@ -82,6 +82,7 @@ def build_plan(args):
         flag for flag, enabled in (
             ("--learned-safety", args.learned_safety),
             ("--learned-break", args.learned_break),
+            ("--wpa-break-rules", args.wpa_break_rules),
             ("--outcome-position", args.outcome_position),
         ) if enabled
     )
@@ -312,6 +313,7 @@ def run(args):
         previous_settings.setdefault("outcome_position", False)
         previous_settings.setdefault("race_to", 1)
         previous_settings.setdefault("break_policy", "alternate")
+        previous_settings.setdefault("wpa_break_rules", False)
         if previous_settings != current_settings:
             raise ValueError("Resume settings differ from previous run")
         original_commit = manifest.get("source_git_commit")
@@ -396,6 +398,7 @@ def parse_args(argv=None):
     p.add_argument("--micro-steps", type=int, default=5000)
     p.add_argument("--learned-safety", action="store_true")
     p.add_argument("--learned-break", action="store_true")
+    p.add_argument("--wpa-break-rules", action="store_true")
     p.add_argument("--outcome-position", action="store_true")
     p.add_argument("--train-seed", type=int, default=610000)
     p.add_argument("--device", choices=("cpu", "cuda"), default="cpu")

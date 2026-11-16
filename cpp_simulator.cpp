@@ -6,6 +6,8 @@
 #include <algorithm>
 #include <tuple>
 #include <utility>
+#include <array>
+#include <memory>
 #include "FastFiz.h" // FastFizをインクルード
 
 namespace py = pybind11;
@@ -254,6 +256,36 @@ class BilliardSimulatorMulti {
     bool ready = false;
     int first_contact = -1, precondition = 0;
     std::vector<std::tuple<double, int, int, int>> events;
+    std::vector<int> head_string_crossings;
+
+    static bool crosses_head_string(const Ball& ball, const Table& table, double elapsed) {
+        if (!ball.isInPlay()) return false;
+        const double line = table.getLength() / 4.0;
+        const double y = ball.getPos().y;
+        if (y < line) return true;
+        if (elapsed <= 0.0) return false;
+        const Vector& velocity = ball.getVelocity();
+        double acceleration = 0.0;
+        if (ball.getState() == Ball::SLIDING) {
+            const Vector slip = velocity + Vector(0, 0, 1).cross(ball.getSpin()) * ball.getRadius();
+            const double speed = slip.mag();
+            if (speed > 0.0) acceleration = -table.getMuSliding() * Table::g * slip.y / speed;
+        } else if (ball.getState() == Ball::ROLLING) {
+            const double speed = velocity.mag();
+            if (speed > 0.0) acceleration = -table.getMuRolling() * Table::g * velocity.y / speed;
+        } else {
+            return false;
+        }
+        // On each motion segment y(t) is quadratic. A ball can cross the
+        // line and return before its next collision or motion-state event.
+        const double end_y = y + elapsed * (velocity.y + 0.5 * acceleration * elapsed);
+        if (end_y < line) return true;
+        if (acceleration > 0.0) {
+            const double turn = -velocity.y / acceleration;
+            return turn > 0.0 && turn < elapsed && y + 0.5 * velocity.y * turn < line;
+        }
+        return false;
+    }
 
     static Ball::Type type_for(int n) {
         if (n < 0 || n > 15) throw std::invalid_argument("ball number must be 0..15");
@@ -307,6 +339,7 @@ public:
         first_contact = -1;
         precondition = 0;
         events.clear();
+        head_string_crossings.clear();
     }
     std::vector<float> get_state() const {
         check_ready();
@@ -341,6 +374,9 @@ public:
     std::vector<std::tuple<double, int, int, int>> get_last_events() const {
         return events;
     }
+    std::vector<int> get_last_head_string_crossings() const {
+        return head_string_crossings;
+    }
     std::vector<float> step(int target_ball, float power, float angle,
                             float tip_x_mm = 0.0f, float tip_y_mm = 0.0f,
                             float cue_elevation_deg = 10.0f) {
@@ -355,6 +391,7 @@ public:
         first_contact = -1;
         precondition = 0;
         events.clear();
+        head_string_crossings.clear();
         ShotParams sp(tip_x_mm, tip_y_mm, cue_elevation_deg, angle, power);
         precondition = ts.isPhysicallyPossible(sp);
         if (precondition != TableState::OK_PRECONDITION) {
@@ -363,13 +400,40 @@ public:
             out.push_back(1.0f);
             return out;
         }
-        Shot* shot = ts.executeShot(sp);
+        // The post-event snapshots mark changes of velocity or motion state.
+        // A stationary ball need not be examined before its first event.
+        std::array<bool, 16> starts_on_playing_side{};
+        for (int id : ids) {
+            if (id == 0) continue;
+            const Ball& ball = ts.getBall(type_for(id));
+            starts_on_playing_side[id] = ball.isInPlay()
+                && ball.getPos().y >= ts.getTable().getLength() / 4.0;
+        }
+        std::unique_ptr<Shot> shot(ts.executeShot(sp));
+        std::array<const Ball*, 16> previous{};
+        std::array<double, 16> previous_time{};
+        std::array<bool, 16> crossed{};
+        const auto inspect = [&](const Ball& ball, double time) {
+            const int id = static_cast<int>(ball.getID());
+            if (id <= 0 || id >= 16 || !starts_on_playing_side[id] || crossed[id]) return;
+            if (crosses_head_string(ball, ts.getTable(), 0)
+                || (previous[id] && crosses_head_string(
+                    *previous[id], ts.getTable(), time - previous_time[id]))) {
+                crossed[id] = true;
+                head_string_crossings.push_back(id);
+            }
+            previous[id] = &ball;
+            previous_time[id] = time;
+        };
         float diagnostic_reward = 0.0f;
-        for (const Event* e : shot->getEventList()) {
+        for (Event* e : shot->getEventList()) {
             const int a = static_cast<int>(e->getBall1());
             const int b = static_cast<int>(e->getBall2());
             const int kind = static_cast<int>(e->getType());
             events.emplace_back(e->getTime(), kind, a, b);
+            if (a > 0 && a < 16) inspect(e->getBall1Data(), e->getTime());
+            if (e->getType() == Event::BALL_COLLISION && b > 0 && b < 16)
+                inspect(e->getBall2Data(), e->getTime());
             if (first_contact < 0 && e->getType() == Event::BALL_COLLISION) {
                 if (a == 0 && b >= 1 && b <= 15) first_contact = b;
                 if (b == 0 && a >= 1 && a <= 15) first_contact = a;
@@ -377,7 +441,6 @@ public:
             if (e->getType() == Event::POCKETED && a == target_ball)
                 diagnostic_reward = 1.0f;
         }
-        delete shot;
         auto out = get_state();
         out.push_back(diagnostic_reward);
         out.push_back(1.0f);
@@ -410,6 +473,7 @@ PYBIND11_MODULE(billiard_env_cpp, m) {
         .def("get_last_precondition_code", &BilliardSimulatorMulti::get_last_precondition_code)
         .def("get_ball_placement_code", &BilliardSimulatorMulti::get_ball_placement_code)
         .def("get_last_events", &BilliardSimulatorMulti::get_last_events)
+        .def("get_last_head_string_crossings", &BilliardSimulatorMulti::get_last_head_string_crossings)
         .def("step", &BilliardSimulatorMulti::step,
              py::arg("target_ball"), py::arg("power"), py::arg("angle"),
              py::arg("tip_x_mm") = 0.0f, py::arg("tip_y_mm") = 0.0f,

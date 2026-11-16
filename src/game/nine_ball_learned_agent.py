@@ -15,7 +15,7 @@ from src.game.nine_ball_agents import GeometryNineBallAgent, ShotPlan
 from src.game.nine_ball_encoding_v3 import (
     ENCODING_VERSION, MACRO_STATE_V3_DIM,
     MICRO_CONDITIONED_V3_DIM, conditioned_observation_v3,
-    MATCH_MACRO_STATE_DIM, encode_goal_v3, encode_macro_state, generate_nine_ball_goals,
+    MATCH_MACRO_STATE_DIM, TABLE_CHOICES, encode_goal_v3, encode_macro_state, generate_nine_ball_goals,
     reference_angle_deg,
 )
 from src.game.nine_ball_position import generate_outcome_position_goals
@@ -83,6 +83,7 @@ class NineBallMicroSACAgent(GeometryNineBallAgent):
         self.match_aware = match_aware
         self.position_simulator = None
         self.decoder = Shot5DDecoder()
+        self.break_decoder = NINE_BALL_BREAK_DECODER
         self.macro_policy = None
         if macro_policy_checkpoint is not None:
             self.macro_policy, _ = load_macro_policy(
@@ -135,7 +136,7 @@ class NineBallMicroSACAgent(GeometryNineBallAgent):
         """
         if state.ball_in_hand:
             raise ValueError("Place cue ball before Micro shot generation")
-        if goal.explicit_shot is not None:
+        if goal.explicit_shot is not None or goal.kind in TABLE_CHOICES:
             return ShotPlan(
                 target_ball=goal.target_ball,
                 shot=goal.explicit_shot,
@@ -151,7 +152,7 @@ class NineBallMicroSACAgent(GeometryNineBallAgent):
             else:
                 action, _ = self.actor.sample(state_tensor)
         normalized = action.squeeze(0).cpu().numpy()
-        decoder = NINE_BALL_BREAK_DECODER if goal.kind == "BREAK" else self.decoder
+        decoder = self.break_decoder if goal.kind == "BREAK" else self.decoder
         shot = decoder.decode(normalized, reference_angle_deg(state, goal))
         return ShotPlan(
             target_ball=goal.target_ball,
