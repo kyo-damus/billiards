@@ -15,6 +15,30 @@ from src.game.nine_ball_session import create_nine_ball_rack
 from src.micro.shot_control import WPA_NINE_BALL_BREAK_DECODER
 
 
+def break_action_grid():
+    """Speed, aim and vertical tip grid at 3 degrees elevation."""
+    return tuple(
+        (speed, aim, -0.6, 0.0, tip_y)
+        for speed, aim, tip_y in product(
+            (-1.0, 0.0, 1.0), (-0.5, 0.0, 0.5), (-0.5, 0.0, 0.5),
+        )
+    )
+
+
+def break_trial(simulator, rules, state, context, shot):
+    try:
+        _, result = simulate_nine_ball_shot(
+            simulator, rules, state, context, target_ball=1, shot=shot,
+        )
+    except InvalidPhysicalTransition:
+        return "physics_rejected"
+    if result.foul:
+        return "foul"
+    if result.illegal_break:
+        return "three_ball_short"
+    return "legal_with_pot" if result.newly_pocketed else "legal_without_pot"
+
+
 def check_breaks(checkpoint, start_seed, racks):
     if racks < 1 or start_seed < 0:
         raise ValueError("Use positive --racks and nonnegative --start-seed")
@@ -27,35 +51,19 @@ def check_breaks(checkpoint, start_seed, racks):
     first = create_nine_ball_rack(breaker=0, seed=start_seed)
     simulator = MultiBallFastFizSimulator(first.config)
     simulator.require_head_string_crossings()
-    # Include the current decoder's minimum, midpoint and maximum speed,
-    # center/offset aim, and three vertical tip offsets at 3 degrees elevation.
-    grid = tuple(product((-1.0, 0.0, 1.0), (-0.5, 0.0, 0.5), (-0.5, 0.0, 0.5)))
+    grid = break_action_grid()
     actor_counts, grid_counts = Counter(), Counter()
     grid_stats = [Counter() for _ in grid]
     grid_legal_racks = 0
 
-    def trial(state, shot):
-        try:
-            _, result = simulate_nine_ball_shot(
-                simulator, rules, state, context, target_ball=1, shot=shot,
-            )
-        except InvalidPhysicalTransition:
-            return "physics_rejected"
-        if result.foul:
-            return "foul"
-        if result.illegal_break:
-            return "three_ball_short"
-        return "legal_with_pot" if result.newly_pocketed else "legal_without_pot"
-
     for index in range(racks):
         state = create_nine_ball_rack(breaker=index % 2, seed=start_seed + index)
-        actor_counts[trial(state, agent.plan_goal(state, goal, context).shot)] += 1
+        shot = agent.plan_goal(state, goal, context).shot
+        actor_counts[break_trial(simulator, rules, state, context, shot)] += 1
         angle = reference_angle_deg(state, goal)
         any_legal = False
-        for knobs, counts in zip(grid, grid_stats, strict=True):
-            speed, aim, tip_y = knobs
-            action = (speed, aim, -0.6, 0.0, tip_y)
-            outcome = trial(state, decoder.decode(action, angle))
+        for action, counts in zip(grid, grid_stats, strict=True):
+            outcome = break_trial(simulator, rules, state, context, decoder.decode(action, angle))
             counts[outcome] += 1
             grid_counts[outcome] += 1
             any_legal |= outcome in ("legal_with_pot", "legal_without_pot")
@@ -65,7 +73,6 @@ def check_breaks(checkpoint, start_seed, racks):
         grid_stats[i]["legal_with_pot"] + grid_stats[i]["legal_without_pot"],
         grid_stats[i]["legal_with_pot"],
     ))
-    speed, aim, tip_y = grid[best]
     return {
         "start_seed": start_seed,
         "racks": racks,
@@ -73,7 +80,7 @@ def check_breaks(checkpoint, start_seed, racks):
         "grid_outcomes": dict(grid_counts),
         "grid_shots_per_rack": len(grid),
         "racks_with_any_legal_grid_shot": grid_legal_racks,
-        "best_fixed_grid_action": [speed, aim, -0.6, 0.0, tip_y],
+        "best_fixed_grid_action": grid[best],
         "best_fixed_grid_outcomes": dict(grid_stats[best]),
     }
 

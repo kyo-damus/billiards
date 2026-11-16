@@ -79,6 +79,29 @@ def test_logged_break_only_ignores_non_break_boards(tmp_path):
     assert sample.selected_goal.kind == "BREAK"
 
 
+def test_break_teacher_omits_racks_without_a_witness(monkeypatch):
+    from types import SimpleNamespace
+
+    from scripts import bootstrap_nine_ball_break_v3 as teacher
+
+    simulator = SimpleNamespace(require_head_string_crossings=lambda: None)
+    weaker = (0.85, 0.0, -0.6, 0.0, 0.0)
+    stronger = (0.95, 0.0, -0.6, 0.0, 0.0)
+    monkeypatch.setattr(teacher, "teacher_actions", lambda: (weaker, stronger))
+
+    def fake_trial(simulator, rules, state, context, shot):
+        if state.current_player == 1:
+            return "physics_rejected"
+        return "legal_with_pot" if shot.speed_m_s > 5.3 else "legal_without_pot"
+
+    monkeypatch.setattr(teacher, "break_trial", fake_trial)
+    observations, pairs, outcomes = teacher.create_teacher(920000, 2, lambda cfg: simulator)
+
+    assert observations.shape == (2, 108)
+    assert pairs == [(0, stronger)]
+    assert outcomes == {"legal_without_pot": 1, "legal_with_pot": 1, "physics_rejected": 2}
+
+
 def test_foul_and_exact_target_pot_have_different_one_shot_rewards():
     rack = replace(create_nine_ball_rack(breaker=0, seed=1), break_shot=False)
     goal = NineBallGoal("DIRECT_ATTACK", 1, 2)
