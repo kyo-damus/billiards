@@ -26,6 +26,7 @@ class NineBallMCTSAgent(NineBallMicroSACAgent):
         outcome_position=False,
         match_aware=False,
         wpa_break_rules=False,
+        layout_split=None,
     ):
         super().__init__(
             micro_checkpoint,
@@ -58,6 +59,7 @@ class NineBallMCTSAgent(NineBallMicroSACAgent):
             outcome_position=outcome_position,
             match_aware=match_aware,
             rack_value=rack_value,
+            layout_split=layout_split,
             rules=NineBallRules(wpa_break_rules=wpa_break_rules),
         )
         if wpa_break_rules:

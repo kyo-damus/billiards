@@ -1,5 +1,6 @@
 import hashlib
 import json
+from types import SimpleNamespace
 
 import pytest
 
@@ -114,5 +115,67 @@ def test_multirack_evaluation_rejects_overlap_with_later_training_rack(evaluatio
     args.training_manifest.write_text(json.dumps(training))
     args.start_seed = 104
     with pytest.raises(ValueError, match="overlap with training rack seeds"):
+        evaluate(args)
+    assert not args.output_dir.exists()
+
+
+def test_layout_split_reserves_racks_and_checks_legacy_overlap(evaluation_args, monkeypatch):
+    import numpy as np
+
+    import scripts.collect_nine_ball_self_play as collector
+    from scripts.prepare_nine_ball_rack_split_v3 import prepare
+    from src.game.nine_ball_rack_split import legacy_rack_order, load_rack_layout_split
+    from src.game.nine_ball_session import create_nine_ball_rack
+
+    args = evaluation_args
+    file = args.output_dir.parent / "rack_split.json"
+    args.rack_layout_split = file
+    file.write_text(json.dumps({
+        "kind": "nine_ball_rack_order_split_v1", "evaluation_orders": [legacy_rack_order(100)],
+    }))
+    with pytest.raises(ValueError, match="overlap with legacy training rack orders"):
+        evaluate(args)
+    file.unlink()
+    prepare(SimpleNamespace(
+        output=file, heldout=32, split_seed=89, exclude_seed_range=[(300, 8)],
+        exclude_training_manifest=[args.training_manifest],
+    ))
+    split = load_rack_layout_split(file)
+    assert len(split.training) == 5040 - 32
+    assert not (set(split.training) & set(split.evaluation))
+    assert all(legacy_rack_order(seed) not in split.evaluation for seed in (100, 102, *range(300, 308)))
+
+    initial = []
+
+    class Physics:
+        def restore(self, state):
+            pass
+
+    def fake_play(match, agents, *, max_shots_per_rack):
+        initial.append(match.state.ball_positions)
+        expected = create_nine_ball_rack(
+            breaker=match.state.current_player, seed=match.seed, layout_split=split, evaluation=True,
+        )
+        np.testing.assert_array_equal(match.state.ball_positions, expected.ball_positions)
+        train_rack = create_nine_ball_rack(breaker=0, seed=match.seed, layout_split=split)
+        assert not np.array_equal(match.state.ball_positions, train_rack.ball_positions)
+        return {"match_finished": True, "match_winner": 0, "stop_reason": "race_to_reached",
+                "shots": 1, "fouls": 0}
+
+    monkeypatch.setattr(collector, "play_match", fake_play)
+    evaluate(args, agent_factory=lambda *a, **kw: "agent", simulator_factory=lambda _: Physics())
+    np.testing.assert_array_equal(initial[0], initial[1])
+    saved = json.loads((args.output_dir / "evaluation_config.json").read_text())
+    assert saved["rack_layout_split"]["sha256"] == split.sha256
+
+    training = json.loads(args.training_manifest.read_text())
+    training["rack_layout_split"] = {"path": str(file), "sha256": split.sha256}
+    args.training_manifest.write_text(json.dumps(training))
+    args.rack_layout_split = None
+    args.output_dir = args.output_dir.with_name("automatic_split")
+    evaluate(args, agent_factory=lambda *a, **kw: "agent", simulator_factory=lambda _: Physics())
+    file.write_text(file.read_text() + "\n")
+    args.output_dir = args.output_dir.with_name("changed_split")
+    with pytest.raises(ValueError, match="differs from the training manifest"):
         evaluate(args)
     assert not args.output_dir.exists()

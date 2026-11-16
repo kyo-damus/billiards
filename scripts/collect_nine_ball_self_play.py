@@ -15,6 +15,7 @@ from src.game.nine_ball_agents import GeometryNineBallAgent
 from src.game.nine_ball_encoding_v3 import TABLE_CHOICES, encode_goal_v3
 from src.game.nine_ball_session import NineBallMatchSession
 from src.game.nine_ball_physics_guard import InvalidPhysicalTransition
+from src.game.nine_ball_rack_split import load_rack_layout_split
 from src.pipelines.experiment_io import write_experiment_json
 
 
@@ -226,6 +227,7 @@ def collect_matches(
     outcome_position: bool = False,
     break_policy: str = "alternate",
     wpa_break_rules: bool = False,
+    layout_split=None,
 ):
     """Write each match once; optional validated completion of interrupted batch.
 
@@ -236,6 +238,7 @@ def collect_matches(
         raise ValueError("matches, race_to and max_shots_per_rack must be >=1")
     MatchConfig(race_to=race_to, rule_id="nine_ball", break_policy=break_policy)
     output_dir = Path(output_dir)
+    split_hash = layout_split.sha256 if layout_split is not None else None
     if resume:
         if not output_dir.is_dir():
             raise FileNotFoundError(f"Resume directory absent: {output_dir}")
@@ -270,6 +273,7 @@ def collect_matches(
                 or payload.get("race_to") != race_to
                 or payload.get("break_policy", "alternate") != break_policy
                 or payload.get("wpa_break_rules", False) != wpa_break_rules
+                or payload.get("rack_layout_split_sha256") != split_hash
                 or payload.get("max_shots_per_rack") != max_shots_per_rack
                 or payload.get("run_type") != run_type
                 or payload.get("players") != players
@@ -306,6 +310,7 @@ def collect_matches(
                 ),
                 seed=seed,
                 wpa_break_rules=wpa_break_rules,
+                layout_split=layout_split,
             )
         else:
             match = match_factory(seed)
@@ -319,6 +324,7 @@ def collect_matches(
             "race_to": race_to,
             "break_policy": break_policy,
             "wpa_break_rules": wpa_break_rules,
+            "rack_layout_split_sha256": split_hash,
             "max_shots_per_rack": max_shots_per_rack,
             "players": players,
             "learned_safety": learned_safety,
@@ -344,6 +350,7 @@ def collect_matches(
         "race_to": race_to,
         "break_policy": break_policy,
         "wpa_break_rules": wpa_break_rules,
+        "rack_layout_split_sha256": split_hash,
         "learned_safety": learned_safety,
         "learned_break": learned_break,
         "outcome_position": outcome_position,
@@ -374,6 +381,7 @@ def parse_args(argv=None):
     p.add_argument("--race-to", type=int, default=2)
     p.add_argument("--break-policy", choices=("alternate", "winner", "loser"), default="alternate")
     p.add_argument("--wpa-break-rules", action="store_true")
+    p.add_argument("--rack-layout-split", type=Path)
     p.add_argument("--start-seed", type=int, default=310000)
     p.add_argument("--max-shots-per-rack", type=int, default=60)
     p.add_argument("--output-dir", type=Path, required=True)
@@ -397,6 +405,7 @@ def parse_args(argv=None):
 
 if __name__ == "__main__":
     args = parse_args()
+    layout_split = load_rack_layout_split(args.rack_layout_split) if args.rack_layout_split else None
     if args.wpa_break_rules and args.agent_kind != "micro_mcts":
         raise ValueError("--wpa-break-rules requires --agent-kind micro_mcts")
     agent_factory = GeometryNineBallAgent
@@ -430,6 +439,7 @@ if __name__ == "__main__":
                 macro_policy_checkpoint=args.macro_policy_checkpoint,
                 state_value_checkpoint=args.state_value_checkpoint,
                 wpa_break_rules=args.wpa_break_rules,
+                layout_split=layout_split,
                 simulations=args.mcts_simulations,
                 max_depth=args.mcts_max_depth,
                 c_puct=args.mcts_c_puct,
@@ -451,6 +461,7 @@ if __name__ == "__main__":
         race_to=args.race_to,
         break_policy=args.break_policy,
         wpa_break_rules=args.wpa_break_rules,
+        layout_split=layout_split,
         start_seed=args.start_seed,
         max_shots_per_rack=args.max_shots_per_rack,
         output_dir=args.output_dir,

@@ -80,6 +80,7 @@ class NineBallMCTS:
         outcome_position=False,
         match_aware=False,
         rack_value=False,
+        layout_split=None,
     ):
         if simulations < 1 or max_depth < 1 or root_min_visits < 0:
             raise ValueError("simulations and max_depth must be positive")
@@ -107,6 +108,7 @@ class NineBallMCTS:
         self.outcome_position = outcome_position
         self.match_aware = match_aware
         self.rack_value = rack_value
+        self.layout_split = layout_split
         self.last_root = None
         self.last_report = None
         self.last_plan = None
@@ -299,7 +301,10 @@ class NineBallMCTS:
                 else:
                     # The future rack order is unknown to both players. Use an
                     # independent layout shared across branches of this search.
-                    next_rack = create_nine_ball_rack(breaker=after.breaker, seed=self._bootstrap_seed)
+                    next_rack = create_nine_ball_rack(
+                        breaker=after.breaker, seed=self._bootstrap_seed,
+                        **({"layout_split": self.layout_split} if self.layout_split else {}),
+                    )
                     continuation = self._leaf_value(SearchNode(
                         next_rack, NineBallContext(), match_position=after,
                     ))

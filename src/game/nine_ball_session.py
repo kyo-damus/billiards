@@ -13,19 +13,22 @@ from src.game.nine_ball_rules import (
     BALL_RADIUS_M, FOOT_SPOT, TABLE_LENGTH_M, TABLE_WIDTH_M,
     NineBallContext, NineBallRules,
 )
+from src.game.nine_ball_rack_split import legacy_rack_order
 from src.game.rack_state import RackState, TableGameConfig
 from src.game.nine_ball_physics_guard import (
     InvalidPhysicalTransition, validate_physical_step, validate_rack_layout,
 )
 
 
-def create_nine_ball_rack(*, breaker: int, seed: int) -> RackState:
+def create_nine_ball_rack(*, breaker: int, seed: int, layout_split=None, evaluation=False) -> RackState:
     """Diamond rack with 1 at apex and 9 at foot spot, 2..8 shuffled."""
     config = TableGameConfig.nine_ball_inventory()
     if breaker not in (0, 1):
         raise ValueError("breaker must be 0 or 1")
-    rng = np.random.default_rng(seed)
-    other_numbers = list(rng.permutation(np.arange(2, 9)))
+    other_numbers = list(
+        legacy_rack_order(seed) if layout_split is None
+        else layout_split.order(seed, evaluation=evaluation)
+    )
     diameter = 2 * BALL_RADIUS_M + 0.00015
     row_distance = diameter * sqrt(3) / 2
     x0, y0 = FOOT_SPOT
@@ -146,7 +149,10 @@ class NineBallRackSession:
 class NineBallMatchSession:
     """Several independent racks played until race-to-N winner exists."""
 
-    def __init__(self, *, simulator_factory, match_config, seed: int, wpa_break_rules=False):
+    def __init__(
+        self, *, simulator_factory, match_config, seed: int, wpa_break_rules=False,
+        layout_split=None, evaluation=False,
+    ):
         from src.game.match import RaceToMatch
         if match_config.rule_id != "nine_ball":
             raise ValueError("Match must use nine_ball rule_id")
@@ -154,6 +160,8 @@ class NineBallMatchSession:
         self.rules = NineBallRules(wpa_break_rules=wpa_break_rules)
         self.match = RaceToMatch(match_config)
         self.seed = seed
+        self.layout_split = layout_split
+        self.evaluation = evaluation
         self.rack_history = []
         self.last_physical = None  # retain terminal-rack physical event evidence
         self.rack = None
@@ -166,6 +174,8 @@ class NineBallMatchSession:
         new_rack = create_nine_ball_rack(
             breaker=snapshot.next_breaker,
             seed=self.seed + snapshot.racks_completed,
+            layout_split=self.layout_split,
+            evaluation=self.evaluation,
         )
         self.rack = NineBallRackSession(
             simulator=self.simulator_factory(new_rack.config),

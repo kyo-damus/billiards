@@ -17,6 +17,7 @@ from src.game.nine_ball_encoding_v3 import (
     MICRO_CONDITIONED_V3_DIM, NineBallGoal, conditioned_observation_v3, reference_angle_deg,
 )
 from src.game.nine_ball_learned_agent import MICRO_KIND, _load_versioned
+from src.game.nine_ball_rack_split import load_rack_layout_split
 from src.game.nine_ball_rules import NineBallContext, NineBallRules
 from src.game.nine_ball_session import create_nine_ball_rack
 from src.micro.actor import GaussianActor
@@ -32,7 +33,7 @@ def teacher_actions():
     ))
 
 
-def create_teacher(start_seed, racks, simulator_factory):
+def create_teacher(start_seed, racks, simulator_factory, *, layout_split=None):
     context = NineBallContext()
     rules = NineBallRules(wpa_break_rules=True)
     goal = NineBallGoal("BREAK", 1)
@@ -45,7 +46,9 @@ def create_teacher(start_seed, racks, simulator_factory):
     decoder = WPA_NINE_BALL_BREAK_DECODER
 
     for index in range(racks):
-        state = create_nine_ball_rack(breaker=index % 2, seed=start_seed + index)
+        state = create_nine_ball_rack(
+            breaker=index % 2, seed=start_seed + index, layout_split=layout_split,
+        )
         heading = reference_angle_deg(state, goal)
         observations.append(conditioned_observation_v3(state, goal, context))
         legal = {}
@@ -82,7 +85,10 @@ def bootstrap(args, *, simulator_factory=MultiBallFastFizSimulator):
     )
     actor = GaussianActor(MICRO_CONDITIONED_V3_DIM, 5, int(ckpt["hidden_dim"]))
     actor.load_state_dict(ckpt["actor"], strict=True)
-    observations, pairs, outcomes = create_teacher(args.start_seed, args.racks, simulator_factory)
+    layout_split = load_rack_layout_split(args.rack_layout_split) if args.rack_layout_split else None
+    observations, pairs, outcomes = create_teacher(
+        args.start_seed, args.racks, simulator_factory, layout_split=layout_split,
+    )
     if not pairs:
         raise ValueError("No legal break in the teacher search")
     samples = load_training_states(
@@ -136,6 +142,7 @@ def bootstrap(args, *, simulator_factory=MultiBallFastFizSimulator):
         "anchor_action_rmse": anchor_action_rmse,
         "behavior_cloning_steps": args.steps,
         "seed": args.seed,
+        "rack_layout_split_sha256": layout_split.sha256 if layout_split else None,
     }
     ckpt["actor"] = actor.state_dict()
     ckpt["learned_break"] = True
@@ -153,6 +160,7 @@ def main():
     parser.add_argument("--anchor-rollouts", type=Path, required=True)
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--start-seed", type=int, required=True)
+    parser.add_argument("--rack-layout-split", type=Path)
     parser.add_argument("--racks", type=int, default=48)
     parser.add_argument("--steps", type=int, default=1200)
     parser.add_argument("--seed", type=int, default=649000)

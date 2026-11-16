@@ -64,6 +64,10 @@ def _ensure_options(args):
         value = getattr(args, name, None)
         if value is not None and not Path(value).is_file():
             raise FileNotFoundError(f"Missing {name}: {value}")
+    if args.rack_layout_split is not None:
+        from src.game.nine_ball_rack_split import load_rack_layout_split
+
+        load_rack_layout_split(args.rack_layout_split)
 
 
 def build_plan(args):
@@ -81,6 +85,7 @@ def build_plan(args):
     python = sys.executable
     match_flags = ("--match-aware",) if args.race_to > 1 else ()
     break_flags = ("--break-policy", args.break_policy) if args.break_policy != "alternate" else ()
+    layout_flags = ("--rack-layout-split", str(args.rack_layout_split)) if args.rack_layout_split else ()
     goal_flags = tuple(
         flag for flag, enabled in (
             ("--learned-safety", args.learned_safety),
@@ -117,6 +122,7 @@ def build_plan(args):
             "--device", args.device,
             "--output-dir", str(rollouts),
             *break_flags,
+            *layout_flags,
         ]
         if state_v is not None:
             collect.extend(["--state-value-checkpoint", str(state_v)])
@@ -285,6 +291,10 @@ def _run_pipeline(args, root, stages, rounds, inputs, lock_fd):
             "Not independent evaluation; partial nine-ball rules."
         ),
         "source_checkpoints": inputs,
+        "rack_layout_split": (
+            {"path": str(args.rack_layout_split), "sha256": _sha256(args.rack_layout_split)}
+            if args.rack_layout_split else None
+        ),
         "settings": {
             key: str(value) if isinstance(value, Path) else value
             for key, value in vars(args).items()
@@ -305,6 +315,7 @@ def _run_pipeline(args, root, stages, rounds, inputs, lock_fd):
         if (
             manifest.get("kind") != new_manifest["kind"]
             or manifest.get("source_checkpoints") != inputs
+            or manifest.get("rack_layout_split") != new_manifest["rack_layout_split"]
             or len(manifest.get("stages", [])) != len(stages)
             or any(
                 saved.get("name") != expected.name
@@ -327,6 +338,7 @@ def _run_pipeline(args, root, stages, rounds, inputs, lock_fd):
         previous_settings.setdefault("race_to", 1)
         previous_settings.setdefault("break_policy", "alternate")
         previous_settings.setdefault("wpa_break_rules", False)
+        previous_settings.setdefault("rack_layout_split", None)
         if previous_settings != current_settings:
             raise ValueError("Resume settings differ from previous run")
         original_commit = manifest.get("source_git_commit")
@@ -362,6 +374,9 @@ def _run_pipeline(args, root, stages, rounds, inputs, lock_fd):
                         2 * planned["race_to"],
                     )
                     logged_seeds = [match["seed"] for match in summary["per_match"]]
+                    split = new_manifest["rack_layout_split"]
+                    if summary.get("rack_layout_split_sha256") != (split["sha256"] if split else None):
+                        raise ValueError(f"Rack layout split differs in {outputs[0]}")
                     files_exist = all(
                         (outputs[0].parent / f"match_seed_{seed}.json").is_file()
                         for seed in match_seeds
@@ -390,6 +405,9 @@ def _run_pipeline(args, root, stages, rounds, inputs, lock_fd):
             record = manifest["stages"][i]
             if record["status"] == "completed":
                 continue
+            split = manifest.get("rack_layout_split")
+            if stage.name.endswith("_self_play") and split and _sha256(split["path"]) != split["sha256"]:
+                raise ValueError("Rack layout split changed since this run started")
             record["status"] = "running"
             save()
             started = monotonic()
@@ -428,6 +446,7 @@ def parse_args(argv=None):
     p.add_argument("--learned-safety", action="store_true")
     p.add_argument("--learned-break", action="store_true")
     p.add_argument("--wpa-break-rules", action="store_true")
+    p.add_argument("--rack-layout-split", type=Path)
     p.add_argument("--outcome-position", action="store_true")
     p.add_argument("--train-seed", type=int, default=610000)
     p.add_argument("--device", choices=("cpu", "cuda"), default="cpu")

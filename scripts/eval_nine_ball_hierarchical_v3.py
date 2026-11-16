@@ -82,6 +82,23 @@ def evaluate(args, *, agent_factory=None, simulator_factory=None):
                 if start <= rack_seed < stop and (rack_seed - start) % training_stride < training_stride - 1:
                     raise ValueError("Evaluation seeds overlap with training rack seeds")
 
+    from src.game.nine_ball_rack_split import legacy_rack_order, load_rack_layout_split
+
+    recorded_split = training.get("rack_layout_split")
+    split_path = args.rack_layout_split or (Path(recorded_split["path"]) if recorded_split else None)
+    layout_split = load_rack_layout_split(split_path) if split_path else None
+    if recorded_split is not None and layout_split.sha256 != recorded_split["sha256"]:
+        raise ValueError("Rack layout split differs from the training manifest")
+    if layout_split is not None and recorded_split is None:
+        heldout = set(layout_split.evaluation)
+        for rnd in training["rounds"]:
+            training_stride = 2 * rnd.get("race_to", race_to)
+            for i in range(rnd["matches"]):
+                start = rnd["start_seed"] + i * training_stride
+                if any(legacy_rack_order(seed) in heldout
+                       for seed in range(start, start + training_stride - 1)):
+                    raise ValueError("Evaluation layouts overlap with legacy training rack orders")
+
     search = {
         "simulations": settings["mcts_simulations"],
         "max_depth": settings["mcts_max_depth"],
@@ -94,6 +111,8 @@ def evaluate(args, *, agent_factory=None, simulator_factory=None):
         "match_aware": race_to > 1,
         "wpa_break_rules": settings.get("wpa_break_rules", False),
     }
+    if layout_split is not None:
+        search["layout_split"] = layout_split
     checkpoints = _model_inputs(training)
     if args.device == "cuda":
         visible = os.environ.get("CUDA_VISIBLE_DEVICES", "").strip()
@@ -132,7 +151,8 @@ def evaluate(args, *, agent_factory=None, simulator_factory=None):
         "pairs": args.pairs,
         "start_seed": args.start_seed,
         "max_shots_per_rack": settings["max_shots_per_rack"],
-        "search": search,
+        "search": {key: value for key, value in search.items() if key != "layout_split"},
+        "rack_layout_split": {"path": str(split_path), "sha256": layout_split.sha256} if layout_split else None,
         "device": args.device,
     })
 
@@ -151,6 +171,8 @@ def evaluate(args, *, agent_factory=None, simulator_factory=None):
                 ),
                 seed=seed,
                 wpa_break_rules=search["wpa_break_rules"],
+                layout_split=layout_split,
+                evaluation=True,
             )
             outcome = play_match(
                 match, tuple(agents[label] for label in players),
@@ -210,6 +232,7 @@ def parse_args(argv=None):
     parser.add_argument("--output-dir", required=True, type=Path)
     parser.add_argument("--pairs", type=int, default=32)
     parser.add_argument("--start-seed", type=int, default=710000)
+    parser.add_argument("--rack-layout-split", type=Path)
     parser.add_argument("--device", choices=("cpu", "cuda"), default="cpu")
     return parser.parse_args(argv)
 
