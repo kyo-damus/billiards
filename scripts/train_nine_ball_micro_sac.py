@@ -110,7 +110,7 @@ def _selected_micro_goal(state, row, *, learned_safety, learned_break, outcome_p
 
 def load_training_states(
     rollout_dir: Path, *, goal_source: str = "uniform", learned_safety=False,
-    learned_break=False, outcome_position=False, wpa_break_rules=False,
+    learned_break=False, outcome_position=False, wpa_break_rules=False, break_only=False,
 ) -> tuple[TrainingSample, ...]:
     """Load observed pre-shot states; optionally use exact selected Macro goals."""
     if goal_source not in ("uniform", "logged"):
@@ -140,6 +140,8 @@ def load_training_states(
             if raw_ctx and raw_ctx.get("pending_choice") is not None:
                 continue
             raw = row["state"]
+            if break_only and not raw["break_shot"]:
+                continue
             if tuple(raw["ball_numbers"]) != cfg.ball_numbers:
                 raise ValueError(f"Expected cue + numbered 1..9 balls in {path}")
             if raw["ball_in_hand"]:
@@ -311,12 +313,14 @@ def train(args, *, simulator_factory=MultiBallFastFizSimulator):
         raise ValueError("Invalid steps, batch size or warmup")
     if args.updates_per_step < 1 or args.replay_capacity < args.batch_size:
         raise ValueError("Invalid replay capacity or update count")
+    if args.break_only and not args.learned_break:
+        raise ValueError("--break-only requires --learned-break")
     if args.output_dir.exists():
         raise FileExistsError(f"Refusing to overwrite {args.output_dir}")
     samples = load_training_states(
         args.rollout_dir, goal_source=args.goal_source, learned_safety=args.learned_safety,
         learned_break=args.learned_break, outcome_position=args.outcome_position,
-        wpa_break_rules=args.wpa_break_rules,
+        wpa_break_rules=args.wpa_break_rules, break_only=args.break_only,
     )
     device = resolve_device(args.device)
     np.random.seed(args.seed)
@@ -479,6 +483,7 @@ def train(args, *, simulator_factory=MultiBallFastFizSimulator):
         "goal_source": args.goal_source,
         "learned_safety": args.learned_safety,
         "learned_break": args.learned_break,
+        "break_only": args.break_only,
         "outcome_position": args.outcome_position,
         "wpa_break_rules": args.wpa_break_rules,
         "actor": agent.actor.state_dict(),
@@ -499,6 +504,7 @@ def train(args, *, simulator_factory=MultiBallFastFizSimulator):
         "goal_source": args.goal_source,
         "learned_safety": args.learned_safety,
         "learned_break": args.learned_break,
+        "break_only": args.break_only,
         "outcome_position": args.outcome_position,
         "wpa_break_rules": args.wpa_break_rules,
         "init_checkpoint": str(args.init_checkpoint) if args.init_checkpoint else None,
@@ -531,6 +537,7 @@ def parse_args(argv=None):
     )
     parser.add_argument("--learned-safety", action="store_true")
     parser.add_argument("--learned-break", action="store_true")
+    parser.add_argument("--break-only", action="store_true", help="Sample only recorded pre-break boards")
     parser.add_argument("--wpa-break-rules", action="store_true")
     parser.add_argument("--outcome-position", action="store_true")
     parser.add_argument("--output-dir", required=True, type=Path)

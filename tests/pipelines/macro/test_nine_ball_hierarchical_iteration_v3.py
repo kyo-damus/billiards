@@ -1,6 +1,7 @@
 """Phase15 executable Macro/Micro alternation plan (no GPU or FastFiz)."""
 
 from pathlib import Path
+import json
 
 import pytest
 import torch
@@ -116,6 +117,48 @@ def test_resume_requires_explicit_acknowledgement_when_source_revision_unknown(
     assert resumed["status"] == "interrupted"
     assert resumed["cross_revision_resume"] is True
     assert "debug-only" in resumed["warning"]
+
+
+@pytest.mark.parametrize("collector_finished", (False, True))
+def test_resume_recovers_stale_running_manifest(tmp_path, monkeypatch, collector_finished):
+    import scripts.iterate_nine_ball_hierarchical_v3 as runner
+
+    args = _args(tmp_path, ("--iterations", "1"))
+    path = args.output_root / "run_manifest.json"
+    attempted = []
+
+    def stop(stage, *unused, **kwargs):
+        attempted.append(stage.name)
+        raise RuntimeError("stop during stage")
+
+    monkeypatch.setattr(runner, "_run_logged", stop)
+    with pytest.raises(RuntimeError, match="stop during stage"):
+        run(args)
+    manifest = json.loads(path.read_text())
+    manifest["status"] = "running"
+    path.write_text(json.dumps(manifest))
+
+    if collector_finished:
+        rollouts = Path(manifest["rounds"][0]["rollouts"])
+        rollouts.mkdir(parents=True)
+        seeds = range(args.start_seed, args.start_seed + 2 * args.matches_per_iteration, 2)
+        for seed in seeds:
+            (rollouts / f"match_seed_{seed}.json").write_bytes(b"saved trajectory")
+        (rollouts / "summary.json").write_text(json.dumps({
+            "per_match": [{"seed": seed} for seed in seeds],
+        }))
+
+    args.resume = True
+    with runner.lock_run(args.output_root):
+        with pytest.raises(RuntimeError, match="already active"):
+            run(args)
+    with pytest.raises(RuntimeError, match="stop during stage"):
+        run(args)
+    assert attempted == [
+        "000_self_play", "000_visit_dataset" if collector_finished else "000_self_play",
+    ]
+    resumed = json.loads(path.read_text())
+    assert resumed["stages"][0].get("recovered_from_summary", False) is collector_finished
 
 
 def test_stage_expected_outputs_never_treat_partial_collector_as_done(tmp_path):

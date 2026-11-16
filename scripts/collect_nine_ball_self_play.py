@@ -15,6 +15,7 @@ from src.game.nine_ball_agents import GeometryNineBallAgent
 from src.game.nine_ball_encoding_v3 import TABLE_CHOICES, encode_goal_v3
 from src.game.nine_ball_session import NineBallMatchSession
 from src.game.nine_ball_physics_guard import InvalidPhysicalTransition
+from src.pipelines.experiment_io import write_experiment_json
 
 
 def rack_state_json(state):
@@ -284,16 +285,14 @@ def collect_matches(
                 )
             ):
                 raise ValueError(f"Resume file identity/content mismatch: {file}")
-            existing[seed_from_name] = payload
+            existing[seed_from_name] = {
+                k: v for k, v in payload.items() if k not in ("trajectory", "rack_history")
+            }
     for index in range(matches):
         # Reserve 2*race_to seeds per match; no independent match shares a rack seed.
         seed = start_seed + index * (2 * race_to)
         if seed in existing:
-            payload = existing[seed]
-            summaries.append({
-                k: v for k, v in payload.items()
-                if k not in ("trajectory", "rack_history")
-            })
+            summaries.append(existing[seed])
             print(f"seed={seed} reused=existing (read-only)", flush=True)
             continue
         if match_factory is None:
@@ -328,9 +327,7 @@ def collect_matches(
             **outcome,
         }
         file = output_dir / f"match_seed_{seed}.json"
-        with file.open("x", encoding="utf-8") as stream:
-            json.dump(payload, stream, indent=2, ensure_ascii=False)
-            stream.write("\n")
+        write_experiment_json(file, payload)
         summaries.append({
             k: v for k, v in payload.items()
             if k not in ("trajectory", "rack_history")
@@ -367,9 +364,7 @@ def collect_matches(
             "Do not infer final hierarchical-RL performance or official win rate."
         ),
     }
-    with (output_dir / "summary.json").open("x", encoding="utf-8") as stream:
-        json.dump(result, stream, indent=2, ensure_ascii=False)
-        stream.write("\n")
+    write_experiment_json(output_dir / "summary.json", result)
     return result
 
 

@@ -11,7 +11,7 @@ from scripts.train_nine_ball_micro_sac import (
     load_training_states, micro_reward, parse_args, resolve_device,
     restore_micro_checkpoint,
 )
-from src.game.nine_ball_encoding_v3 import NineBallGoal
+from src.game.nine_ball_encoding_v3 import NineBallGoal, encode_goal_v3
 from src.game.nine_ball_session import create_nine_ball_rack
 from src.game.nine_ball_rules import NineBallContext
 
@@ -55,6 +55,28 @@ def test_training_loader_reads_versioned_state_and_rule_context(tmp_path):
 def test_training_loader_rejects_empty_rollouts(tmp_path):
     with pytest.raises(ValueError, match="No match_seed"):
         load_training_states(tmp_path)
+
+
+def test_logged_break_only_ignores_non_break_boards(tmp_path):
+    folder = tmp_path / "matches"
+    _rollout(folder)
+    path = folder / "match_seed_0.json"
+    payload = json.loads(path.read_text())
+    attack_row = payload["trajectory"][0]
+    break_row = {
+        **attack_row,
+        "state": {**attack_row["state"], "break_shot": True, "turn_index": 0},
+        "chosen_action": {"goal_v3": encode_goal_v3(NineBallGoal("BREAK", 1)).tolist()},
+    }
+    payload.update(learned_break=True, wpa_break_rules=True)
+    payload["trajectory"].append(break_row)
+    path.write_text(json.dumps(payload))
+
+    sample, = load_training_states(
+        folder, goal_source="logged", learned_break=True, wpa_break_rules=True, break_only=True,
+    )
+    assert sample.state.break_shot
+    assert sample.selected_goal.kind == "BREAK"
 
 
 def test_foul_and_exact_target_pot_have_different_one_shot_rewards():

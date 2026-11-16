@@ -17,6 +17,9 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+from time import monotonic
+
+from src.pipelines.experiment_io import lock_run, write_experiment_json
 
 
 @dataclass(frozen=True)
@@ -208,7 +211,7 @@ def _stage_outputs(stage):
     raise ValueError(f"Unknown planned stage: {stage.name}")
 
 
-def _run_logged(stage, root, *, resume=False):
+def _run_logged(stage, root, *, resume=False, lock_fd):
     log_path = root / "logs" / f"{stage.name}.log"
     if log_path.exists():
         if not resume:
@@ -227,12 +230,17 @@ def _run_logged(stage, root, *, resume=False):
     with log_path.open("x", encoding="utf-8") as log:
         with subprocess.Popen(
             argv, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-            text=True, bufsize=1,
+            text=True, bufsize=1, pass_fds=(lock_fd,),
         ) as process:
-            for line in process.stdout:
-                print(line, end="", flush=True)
-                log.write(line)
-            code = process.wait()
+            try:
+                for line in process.stdout:
+                    log.write(line)
+                    print(line, end="", flush=True)
+                code = process.wait()
+            except BaseException:
+                if process.poll() is None:
+                    process.terminate()
+                raise
     if code != 0:
         raise RuntimeError(
             f"Stage {stage.name} failed (exit {code}); "
@@ -242,25 +250,30 @@ def _run_logged(stage, root, *, resume=False):
 
 
 def run(args):
-    _ensure_options(args)
-    root = Path(args.output_root)
-    if root.exists() and not args.resume:
-        raise FileExistsError(f"Refusing existing run directory: {root}")
-    if args.resume and not root.is_dir():
-        raise FileNotFoundError(f"Cannot resume nonexistent run: {root}")
     stages, rounds = build_plan(args)
-    # Resolve model file identities before any output creation or GPU work.
+    root = Path(args.output_root)
+    # Identify all source checkpoints before creating a new run directory.
     inputs = {
-        name: {
-            "path": str(value),
-            "sha256": _sha256(value),
-        }
+        name: {"path": str(value), "sha256": _sha256(value)}
         for name, value in (
             ("micro", args.base_micro_checkpoint),
             ("policy", args.base_policy_checkpoint),
             ("state_v", args.base_state_v_checkpoint),
         ) if value is not None
     }
+    if args.resume:
+        if not root.is_dir():
+            raise FileNotFoundError(f"Cannot resume nonexistent run: {root}")
+    else:
+        try:
+            root.mkdir(parents=True, exist_ok=False)
+        except FileExistsError as exc:
+            raise FileExistsError(f"Refusing existing run directory: {root}") from exc
+    with lock_run(root) as lock_fd:
+        _run_pipeline(args, root, stages, rounds, inputs, lock_fd)
+
+
+def _run_pipeline(args, root, stages, rounds, inputs, lock_fd):
     new_manifest = {
         "kind": "nine_ball_macro_micro_alternating_v3",
         "source_git_commit": _git_commit(),
@@ -287,7 +300,7 @@ def run(args):
         if not location.is_file():
             raise FileNotFoundError(f"Missing resume manifest: {location}")
         manifest = json.loads(location.read_text(encoding="utf-8"))
-        if manifest.get("status") != "interrupted":
+        if manifest.get("status") not in ("interrupted", "running"):
             raise ValueError("Only an interrupted run may be resumed")
         if (
             manifest.get("kind") != new_manifest["kind"]
@@ -337,7 +350,26 @@ def run(args):
                     raise FileNotFoundError(
                         f"Completed stage missing outputs: {expected.name}"
                     )
-            elif not expected.name.endswith("_self_play"):
+            elif expected.name.endswith("_self_play"):
+                # The collector publishes its summary only after every match
+                # write succeeds. The parent may have stopped just afterwards.
+                if saved["status"] == "running" and outputs[0].is_file():
+                    summary = json.loads(outputs[0].read_text(encoding="utf-8"))
+                    planned = rounds[int(expected.name.split("_", 1)[0])]
+                    match_seeds = range(
+                        planned["start_seed"],
+                        planned["start_seed"] + 2 * planned["race_to"] * planned["matches"],
+                        2 * planned["race_to"],
+                    )
+                    logged_seeds = [match["seed"] for match in summary["per_match"]]
+                    files_exist = all(
+                        (outputs[0].parent / f"match_seed_{seed}.json").is_file()
+                        for seed in match_seeds
+                    )
+                    if logged_seeds != list(match_seeds) or not files_exist:
+                        raise ValueError(f"Incomplete self-play summary: {outputs[0]}")
+                    saved.update(status="completed", recovered_from_summary=True)
+            else:
                 if any(p.exists() for p in outputs):
                     raise FileExistsError(
                         f"Incomplete non-collector stage has existing outputs: "
@@ -347,14 +379,10 @@ def run(args):
         manifest.pop("error", None)
     else:
         manifest = new_manifest
-        root.mkdir(parents=True, exist_ok=False)
         (root / "logs").mkdir()
 
     def save():
-        location.write_text(
-            json.dumps(manifest, indent=2, ensure_ascii=False) + "\n",
-            encoding="utf-8",
-        )
+        write_experiment_json(location, manifest, replace=True)
 
     save()
     try:
@@ -364,8 +392,9 @@ def run(args):
                 continue
             record["status"] = "running"
             save()
-            log = _run_logged(stage, root, resume=args.resume)
-            record.update(status="completed", log=log)
+            started = monotonic()
+            log = _run_logged(stage, root, resume=args.resume, lock_fd=lock_fd)
+            record.update(status="completed", log=log, elapsed_seconds=monotonic() - started)
             save()
         manifest["status"] = "completed"
     except BaseException as exc:
