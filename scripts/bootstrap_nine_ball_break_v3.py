@@ -83,8 +83,9 @@ def bootstrap(args, *, simulator_factory=MultiBallFastFizSimulator):
         args.micro_checkpoint, model_kind=MICRO_KIND, state_dim=MICRO_CONDITIONED_V3_DIM,
         action_dim=5,
     )
-    actor = GaussianActor(MICRO_CONDITIONED_V3_DIM, 5, int(ckpt["hidden_dim"]))
-    actor.load_state_dict(ckpt["actor"], strict=True)
+    break_policy = ckpt.get("frozen_break", ckpt)
+    actor = GaussianActor(MICRO_CONDITIONED_V3_DIM, 5, int(break_policy["hidden_dim"]))
+    actor.load_state_dict(break_policy["actor"], strict=True)
     layout_split = load_rack_layout_split(args.rack_layout_split) if args.rack_layout_split else None
     observations, pairs, outcomes = create_teacher(
         args.start_seed, args.racks, simulator_factory, layout_split=layout_split,
@@ -144,7 +145,9 @@ def bootstrap(args, *, simulator_factory=MultiBallFastFizSimulator):
         "seed": args.seed,
         "rack_layout_split_sha256": layout_split.sha256 if layout_split else None,
     }
-    ckpt["actor"] = actor.state_dict()
+    break_policy["actor"] = actor.state_dict()
+    if break_policy is not ckpt:
+        break_policy["source_checkpoint"] = str(args.micro_checkpoint)
     ckpt["learned_break"] = True
     ckpt["wpa_break_rules"] = True
     ckpt["break_bootstrap"] = summary

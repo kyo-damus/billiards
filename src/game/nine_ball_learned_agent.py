@@ -76,6 +76,16 @@ class NineBallMicroSACAgent(GeometryNineBallAgent):
         ).to(self.device)
         self.actor.load_state_dict(micro["actor"], strict=True)
         self.actor.eval()
+        self.frozen_break_actor = None
+        frozen_break = micro.get("frozen_break")
+        if frozen_break is not None:
+            self.frozen_break_actor = GaussianActor(
+                state_dim=MICRO_CONDITIONED_V3_DIM,
+                action_dim=5,
+                hidden_dim=int(frozen_break["hidden_dim"]),
+            ).to(self.device)
+            self.frozen_break_actor.load_state_dict(frozen_break["actor"], strict=True)
+            self.frozen_break_actor.eval()
         self.deterministic = deterministic
         self.learned_safety = learned_safety
         self.learned_break = learned_break
@@ -146,11 +156,14 @@ class NineBallMicroSACAgent(GeometryNineBallAgent):
             )
         observation = conditioned_observation_v3(state, goal, context)
         state_tensor = torch.from_numpy(observation).to(self.device).unsqueeze(0)
+        actor = self.actor
+        if goal.kind == "BREAK" and self.frozen_break_actor is not None:
+            actor = self.frozen_break_actor
         with torch.no_grad():
             if self.deterministic:
-                action = self.actor.deterministic(state_tensor)
+                action = actor.deterministic(state_tensor)
             else:
-                action, _ = self.actor.sample(state_tensor)
+                action, _ = actor.sample(state_tensor)
         normalized = action.squeeze(0).cpu().numpy()
         decoder = self.break_decoder if goal.kind == "BREAK" else self.decoder
         shot = decoder.decode(normalized, reference_angle_deg(state, goal))

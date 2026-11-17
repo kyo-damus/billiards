@@ -27,6 +27,7 @@ from src.game.nine_ball_encoding_v3 import (
     encode_rack_v3,
     generate_nine_ball_goals, reference_angle_deg,
 )
+from src.game.nine_ball_learned_agent import MICRO_KIND, _load_versioned
 from src.game.nine_ball_rules import NineBallContext, NineBallRules
 from src.game.nine_ball_physics_guard import (
     InvalidPhysicalTransition, simulate_nine_ball_shot,
@@ -221,7 +222,27 @@ def sample_keys(sample):
     return board, (rack.tobytes(), goal)
 
 
-def prepare_training_data(args):
+def load_frozen_break(args):
+    path = args.frozen_break_checkpoint or args.init_checkpoint
+    if path is None:
+        return None
+    ckpt = _load_versioned(
+        path, model_kind=MICRO_KIND, state_dim=MICRO_CONDITIONED_V3_DIM, action_dim=5,
+    )
+    if "frozen_break" in ckpt:
+        return ckpt["frozen_break"]
+    if args.frozen_break_checkpoint is not None:
+        return {
+            "actor": ckpt["actor"],
+            "hidden_dim": ckpt["hidden_dim"],
+            "source_checkpoint": str(path),
+        }
+    return None
+
+
+def prepare_training_data(args, *, frozen_break=None):
+    if frozen_break is not None and args.break_only:
+        raise ValueError("--break-only is incompatible with a frozen break actor")
     dirs = (args.rollout_dir, *args.extra_rollout_dir)
     paths = [path.resolve() for path in dirs]
     if len(set(paths)) != len(paths):
@@ -243,9 +264,12 @@ def prepare_training_data(args):
     )
     deduplicate = args.goal_source == "candidates" or len(dirs) > 1 or holdout is not None
     samples, seen, boards_by_goal = [], set(), {}
-    overlaps = duplicates = 0
+    overlaps = duplicates = skipped_breaks = 0
     for directory in dirs:
         for sample in load_training_states(directory, **options):
+            if frozen_break is not None and sample.state.break_shot:
+                skipped_breaks += 1
+                continue
             board, key = sample_keys(sample)
             if board in heldout_boards:
                 overlaps += 1
@@ -265,6 +289,8 @@ def prepare_training_data(args):
         "holdout_boards": len(heldout_boards),
         "excluded_overlapping_samples": overlaps,
         "removed_duplicate_samples": duplicates,
+        "excluded_frozen_break_samples": skipped_breaks,
+        "frozen_break_source": frozen_break["source_checkpoint"] if frozen_break else None,
         "training_samples": len(samples),
         "samples_by_goal": dict(Counter(
             sample.selected_goal.kind if sample.selected_goal else "generated_at_training"
@@ -400,7 +426,7 @@ def execute_valid_training_shot(simulator, rules, state, goal, context, shot):
     )
 
 
-def save_micro_checkpoint(agent, args, initial_steps, step, path):
+def save_micro_checkpoint(agent, args, initial_steps, step, path, *, frozen_break=None):
     checkpoint = {
         "format_version": ENCODING_VERSION,
         "model_kind": "nine_ball_goal_conditioned_micro_sac_5d",
@@ -422,6 +448,8 @@ def save_micro_checkpoint(agent, args, initial_steps, step, path):
         "critic_target": agent.critic_target.state_dict(),
         "log_alpha": agent.log_alpha.detach().cpu(),
     }
+    if frozen_break is not None:
+        checkpoint["frozen_break"] = frozen_break
     with NamedTemporaryFile(dir=path.parent, prefix=f".{path.name}.", delete=False) as stream:
         temporary = Path(stream.name)
         try:
@@ -449,7 +477,8 @@ def train(args, *, simulator_factory=MultiBallFastFizSimulator):
         raise ValueError("--output-dir is required for training")
     if args.output_dir.exists():
         raise FileExistsError(f"Refusing to overwrite {args.output_dir}")
-    samples, data = prepare_training_data(args)
+    frozen_break = load_frozen_break(args)
+    samples, data = prepare_training_data(args, frozen_break=frozen_break)
     buckets = (samples,)
     if args.balance_goals:
         grouped = {}
@@ -608,13 +637,16 @@ def train(args, *, simulator_factory=MultiBallFastFizSimulator):
             window_positions.clear()
         if args.checkpoint_interval and step % args.checkpoint_interval == 0 and step < args.steps:
             path = args.output_dir / "checkpoints" / f"step_{step:08d}.pt"
-            save_micro_checkpoint(agent, args, initial_steps, step, path)
+            save_micro_checkpoint(agent, args, initial_steps, step, path, frozen_break=frozen_break)
             print(f"Saved: {path}", flush=True)
 
     if not args.checkpoint_interval:
         args.output_dir.mkdir(parents=True, exist_ok=False)
         write_experiment_json(args.output_dir / "training_data.json", data)
-    save_micro_checkpoint(agent, args, initial_steps, args.steps, args.output_dir / "micro_sac_5d.pt")
+    save_micro_checkpoint(
+        agent, args, initial_steps, args.steps, args.output_dir / "micro_sac_5d.pt",
+        frozen_break=frozen_break,
+    )
     summary = {
         "version": ENCODING_VERSION,
         "method": "one_shot_goal_conditioned_sac",
@@ -660,6 +692,8 @@ def parse_args(argv=None):
     parser.add_argument("--inspect-only", action="store_true",
                         help="Report sample counts without running physics or training")
     parser.add_argument("--init-checkpoint", type=Path)
+    parser.add_argument("--frozen-break-checkpoint", type=Path,
+                        help="Embed this break actor and train only non-break goals")
     parser.add_argument(
         "--goal-source", choices=("uniform", "logged", "candidates"), default="uniform",
         help="fresh goals, the logged selected goal, or all logged Micro-controlled root goals",
@@ -690,7 +724,7 @@ def parse_args(argv=None):
 if __name__ == "__main__":
     args = parse_args()
     if args.inspect_only:
-        _, report = prepare_training_data(args)
+        _, report = prepare_training_data(args, frozen_break=load_frozen_break(args))
         print(json.dumps(report, indent=2, ensure_ascii=False))
     else:
         train(args)

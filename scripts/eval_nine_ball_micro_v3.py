@@ -14,7 +14,7 @@ from scripts.train_nine_ball_micro_sac import (
 )
 from src.env.multi_ball_fastfiz import MultiBallFastFizSimulator
 from src.game.nine_ball_learned_agent import NineBallMicroSACAgent
-from src.game.nine_ball_physics_guard import InvalidPhysicalTransition
+from src.game.nine_ball_physics_guard import InvalidPhysicalTransition, NativeShotRejected
 from src.game.nine_ball_rules import NineBallRules
 from src.game.rack_state import TableGameConfig
 from src.micro.shot_control import WPA_NINE_BALL_BREAK_DECODER
@@ -39,14 +39,18 @@ def evaluation_cases(samples, max_cases_per_goal, seed):
     }
 
 
-def record_trial(agent, sample, simulator, rules, counts, *, outcome_position):
+def record_trial(agent, sample, simulator, rules, counts, rejections, *, outcome_position):
     state, goal, context = sample.state, sample.selected_goal, sample.context
     plan = agent.plan_goal(state, goal, context)
     counts["attempted"] += 1
     try:
         physical, outcome = execute_valid_training_shot(simulator, rules, state, goal, context, plan.shot)
-    except InvalidPhysicalTransition:
+    except InvalidPhysicalTransition as exc:
         counts["physics_rejected"] += 1
+        reason = str(exc).split(":", 1)[0]
+        if isinstance(exc, NativeShotRejected):
+            reason = f"native precondition={exc.precondition}, placement={exc.placement}"
+        rejections[reason] += 1
         return False
     counts["executed"] += 1
     counts["fouls"] += int(outcome.foul)
@@ -88,10 +92,11 @@ def evaluate(args, *, simulator_factory=MultiBallFastFizSimulator, agent_factory
         if kind in ("DIRECT_ATTACK", "POSITION_ATTACK"):
             columns += ("exact_target_pot",)
         counts = {name: Counter(dict.fromkeys(columns, 0)) for name in agents}
+        rejections = {name: Counter() for name in agents}
         paired_success = Counter(both=0, base_only=0, candidate_only=0, neither=0)
         for sample in entries:
             base, candidate = (
-                record_trial(agent, sample, simulator, rules, counts[name],
+                record_trial(agent, sample, simulator, rules, counts[name], rejections[name],
                              outcome_position=args.outcome_position)
                 for name, agent in agents.items()
             )
@@ -104,6 +109,7 @@ def evaluate(args, *, simulator_factory=MultiBallFastFizSimulator, agent_factory
             **{
                 name: {
                     **metrics,
+                    "physics_rejection_reasons": dict(rejections[name]),
                     "goal_success_rate": metrics["goal_success"] / len(entries),
                     "legal_rate": metrics["legal"] / len(entries),
                 }

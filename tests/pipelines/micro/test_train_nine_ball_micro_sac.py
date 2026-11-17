@@ -138,18 +138,78 @@ def test_periodic_checkpoint_can_initialize_the_next_run(tmp_path, monkeypatch):
     assert (out / "micro_sac_5d.pt").is_file()
 
 
+def test_frozen_break_is_excluded_and_preserved_across_micro_training(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    import torch
+
+    from scripts import train_nine_ball_micro_sac as training
+    from src.game.nine_ball_learned_agent import NineBallMicroSACAgent
+    from src.micro.sac import SACAgent
+
+    folder = tmp_path / "data"
+    _candidate_rollout(folder)
+    path = folder / "match_seed_0.json"
+    payload = json.loads(path.read_text())
+    break_state = create_nine_ball_rack(breaker=0, seed=1)
+    break_goal = NineBallGoal("BREAK", 1)
+    raw_goal = encode_goal_v3(break_goal).tolist()
+    payload["learned_break"] = True
+    payload["trajectory"].append({
+        "state": {
+            **payload["trajectory"][0]["state"],
+            "positions": break_state.ball_positions.tolist(),
+            "pocket_indices": break_state.ball_pocket_indices.tolist(),
+            "break_shot": True,
+        },
+        "chosen_action": {
+            "goal_v3": raw_goal, "macro_search": {"goal_v3": [raw_goal], "chosen_index": 0},
+        },
+    })
+    path.write_text(json.dumps(payload))
+    out = tmp_path / "training"
+    base_path = tmp_path / "base.pt"
+    args = parse_args([
+        "--rollout-dir", str(folder), "--learned-safety", "--learned-break",
+        "--goal-source", "candidates", "--output-dir", str(out),
+        "--init-checkpoint", str(base_path), "--frozen-break-checkpoint", str(base_path),
+        "--steps", "4", "--batch-size", "2", "--hidden-dim", "8",
+    ])
+    initial = SACAgent(state_dim=108, action_dim=5, hidden_dim=8, device="cpu")
+    training.save_micro_checkpoint(initial, args, 0, 0, base_path)
+
+    def ordinary_shot(_, rules, state, goal, context, physical_shot):
+        assert goal.kind != "BREAK"
+        return SimpleNamespace(
+            first_contact_ball=goal.target_ball, pocket_indices=state.ball_pocket_indices,
+        ), SimpleNamespace(foul=True, newly_pocketed=())
+
+    monkeypatch.setattr(training, "execute_valid_training_shot", ordinary_shot)
+    report = training.train(args, simulator_factory=lambda _: object())
+    assert report["training_data"]["excluded_frozen_break_samples"] == 1
+    saved_path = out / "micro_sac_5d.pt"
+    base, trained = (NineBallMicroSACAgent(p) for p in (base_path, saved_path))
+    assert trained.plan_goal(break_state, break_goal).shot == base.plan_goal(
+        break_state, break_goal,
+    ).shot
+    assert not torch.equal(trained.actor.mu_head.weight, base.actor.mu_head.weight)
+    args.init_checkpoint = saved_path
+    args.frozen_break_checkpoint = None
+    assert training.load_frozen_break(args)["source_checkpoint"] == str(base_path)
+
+
 def test_paired_micro_evaluation_preserves_physics_rejections_in_denominator(tmp_path, monkeypatch):
     from types import SimpleNamespace
 
     from scripts import eval_nine_ball_micro_v3 as evaluation
-    from src.game.nine_ball_physics_guard import InvalidPhysicalTransition
+    from src.game.nine_ball_physics_guard import NativeShotRejected
 
     folder = tmp_path / "heldout"
     _candidate_rollout(folder)
 
     def execute(_, rules, state, goal, context, model):
         if model.name == "base.pt":
-            raise InvalidPhysicalTransition("fixture rejection")
+            raise NativeShotRejected(128, 0)
         pockets = state.ball_pocket_indices.copy()
         if goal.target_pocket is not None:
             pockets[goal.target_ball] = goal.target_pocket
@@ -171,6 +231,7 @@ def test_paired_micro_evaluation_preserves_physics_rejections_in_denominator(tmp
     )
     result = report["goals"]["DIRECT_ATTACK"]
     assert result["base"]["physics_rejected"] == 1
+    assert result["base"]["physics_rejection_reasons"] == {"native precondition=128, placement=0": 1}
     assert result["base"]["goal_success_rate"] == 0
     assert result["candidate"]["goal_success_rate"] == 1
     assert result["paired_goal_success"]["candidate_only"] == 1
