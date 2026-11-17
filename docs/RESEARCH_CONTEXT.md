@@ -689,3 +689,9 @@ python -m scripts.eval_nine_ball_micro_v3 \
 - Phase25の同一評価盤面では、Phase23、Phase28a 500 step、1000 stepの合法ブレイクがそれぞれ11、25、0件（各56件）。非ブレイク3種の合計物理棄却は5、140、85件（各768件）。位置取りの達成は2、7、8件（各256件）。大規模学習に入る前に、ブレイクの変動と非ブレイクの物理棄却を切り分ける。
 - 次の短い試行は上記と同じデータ・基点を使い、`--frozen-break-checkpoint "$base"` を学習コマンドに追加し、`out=artifacts/runs/phase28a_micro_frozen_break_1000_v1` を指定する。Phase23のブレイクActorを出力チェックポイントに同梱し、SACの追加学習では非ブレイクのGoalを使う。自己対戦・評価の推論でもブレイクに同梱Actorを使う。500 stepの合法ブレイク率の改善は、別の評価ラックでも確認してから採用を判断する。
 - 評価JSONの `physics_rejection_reasons` にネイティブのprecondition・placementコード等を保存する。既存の500/1000 stepチェックポイントも、別の出力名を使って再評価すれば同じ診断を取得できる。
+
+### Phase28aのキュー干渉診断
+
+- DGXのブレイク固定1,000 stepでは、Phase23と全56ケースでブレイクの結果が一致（合法11件）。位置取り達成は2→8件、直接攻撃の指定入球は21→17件、守備達成は61→52件（各256件）。通常ショットの物理棄却は5→138件（各768件）。ブレイク固定版と旧500 step版（140件）で記録された物理棄却はすべてキュー干渉 `precondition=128, placement=0`。
+- `scripts.eval_nine_ball_micro_v3 --cue-clearance-retry` は対戦MCTSと同じ仰角・撞点等の再試行を使う。初回干渉 `initial_cue_obstructions`、再試行で実行 `recovered_executable`、合法に回復 `recovered_legal`、再試行後も未実行 `physics_rejected` を区別する。補正前のActor出力は従来どおりフラグなしで比較する。
+- 学習率を比較する場合は同じPhase23起点・固定ブレイク・学習データ・seedで2ジョブを走らせる。最初の比較は各5,000ステップ、学習率は `3e-4` と `1e-4`。評価はPhase25の同じ盤面とGoalで、補正なし・ありの両方を保存する。

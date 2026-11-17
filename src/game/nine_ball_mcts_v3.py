@@ -9,6 +9,7 @@ not a learned dynamics model or proof of game-strength improvement.
 """
 
 from dataclasses import dataclass, field, replace
+from functools import partial
 import hashlib
 import math
 
@@ -23,13 +24,11 @@ from src.game.nine_ball_rules import NineBallContext, NineBallRules
 from src.game.nine_ball_session import NineBallRackSession, create_nine_ball_rack
 from src.game.match import MatchPosition
 from src.game.nine_ball_physics_guard import (
-    InvalidPhysicalTransition, NativeShotRejected, simulate_nine_ball_shot, validate_rack_layout,
+    CueClearanceExhausted, InvalidPhysicalTransition, simulate_nine_ball_shot,
+    simulate_with_cue_clearance, validate_rack_layout,
 )
 from src.game.nine_ball_position import generate_outcome_position_goals
 from src.game.rack_state import TableGameConfig
-
-
-CUE_STICK_COLLISION = 128  # FastFiz TableState precondition flag.
 
 
 @dataclass
@@ -221,46 +220,6 @@ class NineBallMCTS:
             ),
         )
 
-    def _simulate_plan(self, node, edge, plan):
-        _, outcome = simulate_nine_ball_shot(
-            self.simulator, self.rules, node.state, node.context,
-            target_ball=plan.target_ball, shot=plan.shot,
-            declared_push_out=edge.goal.kind == "PUSH_OUT",
-        )
-        return outcome
-
-    def _resolve_cue_clearance(self, node, edge, plan, rejected):
-        """Retry the same aiming line from the same board with a raised cue."""
-        shot = plan.shot
-        elevations = (20.0, 30.0, 40.0, 50.0, 60.0, 69.0)
-        # First retain the original power and spin. Then test a higher
-        # contact point and sufficient speed for the more elevated stroke.
-        variants = [replace(shot, elevation_deg=e) for e in elevations if e > shot.elevation_deg]
-        variants.extend(
-            replace(
-                shot, elevation_deg=e, speed_m_s=max(shot.speed_m_s, 2.2),
-                tip_x_mm=0.0, tip_y_mm=8.0,
-            )
-            for e in elevations if e >= max(30.0, shot.elevation_deg)
-        )
-        first_foul = None
-        for variant in variants:
-            edge.cue_clearance_trials += 1
-            retry = replace(plan, shot=variant)
-            try:
-                outcome = self._simulate_plan(node, edge, retry)
-            except InvalidPhysicalTransition:
-                continue
-            if not outcome.foul:
-                return retry, outcome
-            if first_foul is None:
-                first_foul = (retry, outcome)
-        if first_foul is not None:
-            return first_foul
-        raise InvalidPhysicalTransition(
-            f"{rejected}; cue-clearance trials exhausted ({edge.cue_clearance_trials})"
-        ) from rejected
-
     def _step(self, node, edge):
         """Return False only for a diagnosed physically invalid shot."""
         try:
@@ -272,13 +231,19 @@ class NineBallMCTS:
                 edge.plan = plan
                 edge.child = SearchNode(state, context, match_position=node.match_position)
                 return True
-            try:
-                outcome = self._simulate_plan(node, edge, plan)
-            except NativeShotRejected as exc:
-                if exc.precondition != CUE_STICK_COLLISION or exc.placement != 0:
-                    raise
-                plan, outcome = self._resolve_cue_clearance(node, edge, plan, exc)
+            simulate = partial(
+                simulate_nine_ball_shot, self.simulator, self.rules, node.state, node.context,
+                target_ball=plan.target_ball, declared_push_out=edge.goal.kind == "PUSH_OUT",
+            )
+            shot, _, outcome, trials = simulate_with_cue_clearance(
+                lambda shot: simulate(shot=shot), plan.shot,
+            )
+            edge.cue_clearance_trials += trials
+            if trials:
+                plan = replace(plan, shot=shot)
         except InvalidPhysicalTransition as exc:
+            if isinstance(exc, CueClearanceExhausted):
+                edge.cue_clearance_trials += exc.trials
             edge.invalid_reason = str(exc)
             return False
         edge.plan = plan

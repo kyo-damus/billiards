@@ -4,9 +4,14 @@ A native FastFiz failure is NOT a billiards foul, opponent win, or valid
 MCTS observation. Never assign an invented reward to an unexecuted shot.
 """
 
+from dataclasses import replace
+
 import numpy as np
 
 from src.game.rack_state import RackState
+
+
+CUE_STICK_COLLISION = 128  # FastFiz TableState precondition flag.
 
 
 class InvalidPhysicalTransition(RuntimeError):
@@ -23,6 +28,52 @@ class NativeShotRejected(InvalidPhysicalTransition):
             f"native precondition={precondition}, placement={placement}; "
             "no physical shot was executed"
         )
+
+
+class CueClearanceExhausted(InvalidPhysicalTransition):
+    def __init__(self, rejected, trials):
+        self.rejected = rejected
+        self.trials = trials
+        super().__init__(f"{rejected}; cue-clearance trials exhausted ({trials})")
+
+
+def is_cue_stick_collision(error):
+    return (
+        isinstance(error, NativeShotRejected)
+        and error.precondition == CUE_STICK_COLLISION and error.placement == 0
+    )
+
+
+def simulate_with_cue_clearance(simulate, shot):
+    """Apply the match search's same-aim retry to a snapshot-based simulator."""
+    try:
+        physical, outcome = simulate(shot)
+    except NativeShotRejected as rejected:
+        if not is_cue_stick_collision(rejected):
+            raise
+        elevations = (20.0, 30.0, 40.0, 50.0, 60.0, 69.0)
+        variants = [replace(shot, elevation_deg=e) for e in elevations if e > shot.elevation_deg]
+        variants.extend(
+            replace(
+                shot, elevation_deg=e, speed_m_s=max(shot.speed_m_s, 2.2),
+                tip_x_mm=0.0, tip_y_mm=8.0,
+            )
+            for e in elevations if e >= max(30.0, shot.elevation_deg)
+        )
+        first_foul = None
+        for trial, variant in enumerate(variants, start=1):
+            try:
+                physical, outcome = simulate(variant)
+            except InvalidPhysicalTransition:
+                continue
+            if not outcome.foul:
+                return variant, physical, outcome, trial
+            if first_foul is None:
+                first_foul = (variant, physical, outcome)
+        if first_foul is not None:
+            return (*first_foul, len(variants))
+        raise CueClearanceExhausted(rejected, len(variants)) from rejected
+    return shot, physical, outcome, 0
 
 
 def validate_physical_step(physical):

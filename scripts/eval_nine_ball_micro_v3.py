@@ -2,6 +2,7 @@
 
 import argparse
 from collections import Counter
+from functools import partial
 import json
 from pathlib import Path
 
@@ -14,7 +15,10 @@ from scripts.train_nine_ball_micro_sac import (
 )
 from src.env.multi_ball_fastfiz import MultiBallFastFizSimulator
 from src.game.nine_ball_learned_agent import NineBallMicroSACAgent
-from src.game.nine_ball_physics_guard import InvalidPhysicalTransition, NativeShotRejected
+from src.game.nine_ball_physics_guard import (
+    CueClearanceExhausted, InvalidPhysicalTransition, NativeShotRejected,
+    is_cue_stick_collision, simulate_with_cue_clearance,
+)
 from src.game.nine_ball_rules import NineBallRules
 from src.game.rack_state import TableGameConfig
 from src.micro.shot_control import WPA_NINE_BALL_BREAK_DECODER
@@ -39,22 +43,35 @@ def evaluation_cases(samples, max_cases_per_goal, seed):
     }
 
 
-def record_trial(agent, sample, simulator, rules, counts, rejections, *, outcome_position):
+def record_trial(agent, sample, simulator, rules, counts, rejections, *, outcome_position, cue_clearance_retry):
     state, goal, context = sample.state, sample.selected_goal, sample.context
     plan = agent.plan_goal(state, goal, context)
     counts["attempted"] += 1
+    simulate = partial(execute_valid_training_shot, simulator, rules, state, goal, context)
+    trials = 0
     try:
-        physical, outcome = execute_valid_training_shot(simulator, rules, state, goal, context, plan.shot)
+        if cue_clearance_retry:
+            _, physical, outcome, trials = simulate_with_cue_clearance(simulate, plan.shot)
+        else:
+            physical, outcome = simulate(plan.shot)
     except InvalidPhysicalTransition as exc:
         counts["physics_rejected"] += 1
-        reason = str(exc).split(":", 1)[0]
-        if isinstance(exc, NativeShotRejected):
-            reason = f"native precondition={exc.precondition}, placement={exc.placement}"
+        initial = exc.rejected if isinstance(exc, CueClearanceExhausted) else exc
+        if is_cue_stick_collision(initial):
+            counts["initial_cue_obstructions"] += 1
+        reason = str(initial).split(":", 1)[0]
+        if isinstance(initial, NativeShotRejected):
+            reason = f"native precondition={initial.precondition}, placement={initial.placement}"
         rejections[reason] += 1
         return False
     counts["executed"] += 1
     counts["fouls"] += int(outcome.foul)
-    counts["legal"] += int(not outcome.foul and not getattr(outcome, "illegal_break", False))
+    legal = not outcome.foul and not getattr(outcome, "illegal_break", False)
+    counts["legal"] += int(legal)
+    if trials:
+        counts["initial_cue_obstructions"] += 1
+        counts["recovered_executable"] += 1
+        counts["recovered_legal"] += int(legal)
     _, success = micro_reward(goal, state, physical, outcome, outcome_position=outcome_position)
     if goal.kind in ("DIRECT_ATTACK", "POSITION_ATTACK"):
         counts["exact_target_pot"] += int(success)
@@ -88,7 +105,10 @@ def evaluate(args, *, simulator_factory=MultiBallFastFizSimulator, agent_factory
     rules = NineBallRules(wpa_break_rules=args.wpa_break_rules)
     results = {}
     for kind, entries in cases.items():
-        columns = ("attempted", "executed", "physics_rejected", "fouls", "legal", "goal_success")
+        columns = (
+            "attempted", "executed", "physics_rejected", "fouls", "legal", "goal_success",
+            "initial_cue_obstructions", "recovered_executable", "recovered_legal",
+        )
         if kind in ("DIRECT_ATTACK", "POSITION_ATTACK"):
             columns += ("exact_target_pot",)
         counts = {name: Counter(dict.fromkeys(columns, 0)) for name in agents}
@@ -97,7 +117,8 @@ def evaluate(args, *, simulator_factory=MultiBallFastFizSimulator, agent_factory
         for sample in entries:
             base, candidate = (
                 record_trial(agent, sample, simulator, rules, counts[name], rejections[name],
-                             outcome_position=args.outcome_position)
+                             outcome_position=args.outcome_position,
+                             cue_clearance_retry=args.cue_clearance_retry)
                 for name, agent in agents.items()
             )
             paired_success[{
@@ -126,13 +147,14 @@ def evaluate(args, *, simulator_factory=MultiBallFastFizSimulator, agent_factory
         "sample_seed": args.seed,
         "wpa_break_rules": args.wpa_break_rules,
         "outcome_position": args.outcome_position,
+        "cue_clearance_retry": args.cue_clearance_retry,
         "success_definition": {
             "DIRECT_ATTACK": "Legal exact target pot.",
             "POSITION_ATTACK": "Legal exact target pot, continuation to the next ball, and cue-ball stop within the target radius.",
             "SAFETY": "Legal handoff that reduces geometric direct-pot options.",
             "BREAK": "Legal break with a pot.",
         },
-        "rate_denominator": "All attempted cases, including physical rejections.",
+        "rate_denominator": "All board/goal cases, including unresolved physical rejections.",
         "goals": results,
     }
     args.output.parent.mkdir(parents=True, exist_ok=True)
@@ -152,6 +174,8 @@ def parse_args(argv=None):
     parser.add_argument("--learned-break", action="store_true")
     parser.add_argument("--wpa-break-rules", action="store_true")
     parser.add_argument("--outcome-position", action="store_true")
+    parser.add_argument("--cue-clearance-retry", action="store_true",
+                        help="Use the same cue-obstruction retry as MCTS")
     parser.add_argument("--output", type=Path, required=True)
     return parser.parse_args(argv)
 

@@ -113,6 +113,10 @@ def test_position_goal_has_a_native_witness_and_leaves_the_next_ball():
 
 @pytest.mark.parametrize("obstruction", ("rail", "ball"))
 def test_mcts_replays_the_cue_clearance_adjustment_in_the_live_rack(monkeypatch, obstruction):
+    from collections import Counter
+
+    from scripts.eval_nine_ball_micro_v3 import record_trial
+    from scripts.train_nine_ball_micro_sac import TrainingSample
     import src.game.nine_ball_mcts_v3 as mcts
 
     rack = create_nine_ball_rack(breaker=0, seed=12345)
@@ -157,3 +161,14 @@ def test_mcts_replays_the_cue_clearance_adjustment_in_the_live_rack(monkeypatch,
     np.testing.assert_array_equal(
         outcome.next_state.ball_positions, agent.searcher.last_root.edges[0].child.state.ball_positions,
     )
+
+    for retry in (False, True):
+        counts, reasons = Counter(), Counter()
+        record_trial(
+            agent, TrainingSample(rack, context, goal), simulator, rules, counts, reasons,
+            outcome_position=False, cue_clearance_retry=retry,
+        )
+        assert counts["attempted"] == counts["initial_cue_obstructions"] == 1
+        assert counts["physics_rejected"] == int(not retry)
+        assert counts["recovered_executable"] == counts["recovered_legal"] == int(retry)
+        assert counts["legal"] == int(retry)
