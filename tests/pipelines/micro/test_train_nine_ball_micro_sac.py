@@ -8,10 +8,10 @@ import numpy as np
 import pytest
 
 from scripts.train_nine_ball_micro_sac import (
-    load_training_states, micro_reward, parse_args, resolve_device,
-    restore_micro_checkpoint,
+    load_training_states, micro_reward, parse_args, prepare_training_data,
+    resolve_device, restore_micro_checkpoint,
 )
-from src.game.nine_ball_encoding_v3 import NineBallGoal, encode_goal_v3
+from src.game.nine_ball_encoding_v3 import NineBallGoal, encode_goal_v3, generate_nine_ball_goals
 from src.game.nine_ball_session import create_nine_ball_rack
 from src.game.nine_ball_rules import NineBallContext
 
@@ -55,6 +55,125 @@ def test_training_loader_reads_versioned_state_and_rule_context(tmp_path):
 def test_training_loader_rejects_empty_rollouts(tmp_path):
     with pytest.raises(ValueError, match="No match_seed"):
         load_training_states(tmp_path)
+
+
+def _candidate_rollout(directory, *, cue_x=0.52):
+    _rollout(directory)
+    path = directory / "match_seed_0.json"
+    payload = json.loads(path.read_text())
+    row = payload["trajectory"][0]
+    positions = np.zeros((10, 2), dtype=np.float32)
+    positions[[0, 1, 9]] = [(cue_x, 1.68), (0.28, 1.94), (0.75, 1.2)]
+    pockets = np.zeros(10, dtype=np.int32)
+    pockets[[0, 1, 9]] = -1
+    row["state"].update(positions=positions.tolist(), pocket_indices=pockets.tolist())
+    state = replace(
+        create_nine_ball_rack(breaker=0, seed=1),
+        break_shot=False, ball_positions=positions, ball_pocket_indices=pockets,
+    )
+    goals = generate_nine_ball_goals(state, learned_safety=True)
+    candidates = [encode_goal_v3(goal).tolist() for goal in goals]
+    row["chosen_action"] = {
+        "goal_v3": candidates[0], "macro_search": {"goal_v3": candidates, "chosen_index": 0},
+    }
+    path.write_text(json.dumps(payload))
+    return len(goals)
+
+
+def test_candidate_goals_include_unselected_and_exclude_heldout_boards(tmp_path):
+    first, second, heldout = (tmp_path / name for name in ("first", "second", "heldout"))
+    count = _candidate_rollout(first)
+    _candidate_rollout(second)
+    heldout_count = _candidate_rollout(heldout, cue_x=0.55)
+    path = first / "match_seed_0.json"
+    payload = json.loads(path.read_text())
+    other = json.loads((heldout / path.name).read_text())["trajectory"][0]
+    payload["trajectory"].append(other)
+    path.write_text(json.dumps(payload))
+    args = parse_args([
+        "--rollout-dir", str(first), "--extra-rollout-dir", str(second),
+        "--holdout-rollout-dir", str(heldout), "--learned-safety", "--goal-source", "candidates",
+    ])
+    samples, report = prepare_training_data(args)
+    assert len(samples) == count
+    assert {sample.selected_goal.kind for sample in samples} == {
+        "SAFETY", "POSITION_ATTACK", "DIRECT_ATTACK",
+    }
+    assert report["excluded_overlapping_samples"] == heldout_count
+    assert report["removed_duplicate_samples"] == count
+    assert report["unique_boards_by_goal"] == dict.fromkeys(
+        ("DIRECT_ATTACK", "POSITION_ATTACK", "SAFETY"), 1,
+    )
+
+
+def test_periodic_checkpoint_can_initialize_the_next_run(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    from scripts import train_nine_ball_micro_sac as training
+
+    folder = tmp_path / "data"
+    _candidate_rollout(folder)
+    out = tmp_path / "training"
+
+    def shot(_, rules, state, goal, context, physical_shot):
+        physical = SimpleNamespace(
+            first_contact_ball=goal.target_ball, pocket_indices=state.ball_pocket_indices,
+        )
+        return physical, SimpleNamespace(foul=True, newly_pocketed=())
+
+    monkeypatch.setattr(training, "execute_valid_training_shot", shot)
+    args = parse_args([
+        "--rollout-dir", str(folder), "--learned-safety", "--goal-source", "candidates",
+        "--balance-goals", "--output-dir", str(out), "--checkpoint-interval", "2",
+        "--steps", "4", "--batch-size", "2", "--hidden-dim", "8",
+    ])
+    summary = training.train(args, simulator_factory=lambda _: object())
+    path = out / "checkpoints" / "step_00000002.pt"
+    args.init_checkpoint = path
+    args.output_dir = tmp_path / "continuation"
+    args.steps = 1
+    continued = training.train(args, simulator_factory=lambda _: object())
+    assert continued["previous_trained_steps"] == 2
+    assert sum(summary["accepted_steps_by_goal"].values()) == 4
+    assert (out / "micro_sac_5d.pt").is_file()
+
+
+def test_paired_micro_evaluation_preserves_physics_rejections_in_denominator(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    from scripts import eval_nine_ball_micro_v3 as evaluation
+    from src.game.nine_ball_physics_guard import InvalidPhysicalTransition
+
+    folder = tmp_path / "heldout"
+    _candidate_rollout(folder)
+
+    def execute(_, rules, state, goal, context, model):
+        if model.name == "base.pt":
+            raise InvalidPhysicalTransition("fixture rejection")
+        pockets = state.ball_pocket_indices.copy()
+        if goal.target_pocket is not None:
+            pockets[goal.target_ball] = goal.target_pocket
+        return SimpleNamespace(
+            pocket_indices=pockets, first_contact_ball=goal.target_ball, positions=state.ball_positions,
+        ), SimpleNamespace(
+            foul=goal.kind == "SAFETY", newly_pocketed=(goal.target_ball,), turn_changed=True,
+            rack_winner=None, next_state=replace(state, ball_pocket_indices=pockets),
+        )
+
+    monkeypatch.setattr(evaluation, "execute_valid_training_shot", execute)
+    args = evaluation.parse_args([
+        "--rollout-dir", str(folder), "--base-checkpoint", "base.pt", "--checkpoint", "candidate.pt",
+        "--learned-safety", "--max-cases-per-goal", "1", "--output", str(tmp_path / "eval.json"),
+    ])
+    report = evaluation.evaluate(
+        args, simulator_factory=lambda _: object(),
+        agent_factory=lambda path, **_: SimpleNamespace(plan_goal=lambda *x: SimpleNamespace(shot=path)),
+    )
+    result = report["goals"]["DIRECT_ATTACK"]
+    assert result["base"]["physics_rejected"] == 1
+    assert result["base"]["goal_success_rate"] == 0
+    assert result["candidate"]["goal_success_rate"] == 1
+    assert result["paired_goal_success"]["candidate_only"] == 1
 
 
 def test_logged_break_only_ignores_non_break_boards(tmp_path):

@@ -636,3 +636,50 @@ python -m scripts.iterate_nine_ball_hierarchical_v3 \
 - DGXのPhase26は9ラック先取32/32試合、全5ステージを完了。461ラック、8,981ショット、Policy教師8,847ルート、Q/V教師9,308行動。自己対戦は28分03秒。Macroの更新前後を、同一Microと先攻交代の組で評価する。
 - `scripts.prepare_nine_ball_rack_split_v3` が2〜8番球の5,040通りから評価用を固定する。旧runのmanifestと旧ブレイク教師のseed範囲を渡すと、対応する球配置を評価候補から除外する。指定した旧runは各試合の最大ラック数で保守的に除外する。
 - 新しい反復学習には `--rack-layout-split` で同じJSONを指定する。収集とMCTS内の次ラック見積もりは学習用配置を使い、対戦評価の実ラックだけが評価用配置を使う。旧manifestの対戦評価には同オプションで明示指定でき、評価側が旧runと重複する配置を検出したら停止する。ブレイク教師を新規生成する場合にも同オプションを渡す。分離対象はラックの球順で、既存checkpointについて学習履歴の全配置の未使用を保証するものではない。
+
+## 54. 2026-11-17 Phase28aのMicro追加学習
+
+Phase23のMicroを起点に、9ボールの守備・位置取りを含む追加学習を先行する。Phase28aで採用するMicroが決まった後に、そのMicroを固定した新規自己対戦とMacro学習へ進む。
+
+- `--goal-source candidates` は、自己対戦時にMCTSが記録した盤面・戦術目標を使う。未選択の候補も含め、Microで制御する候補について新しいショットをシミュレータで試してSACを更新する。過去のショットや勝敗は教師にしない。
+- `--balance-goals` は、収録されている戦術の種類を先に等確率で選んでから、その戦術の盤面・目標をサンプリングする。途中の物理棄却により有効ステップ数は戦術ごとに異なり得る。事前に `--inspect-only` で戦術別の件数とユニーク盤面数を確認する。
+- 下の例はPhase24と26を学習用、Phase25をMicroのチェックポイント選定用に使う。Phase28aの学習候補から、Phase25と同一の球配置を除外する。この除外はPhase23以前のモデルの学習履歴には遡及しない。最終の対戦評価では別途用意した評価用ラック配置を使う。
+- 途中チェックポイントは新しい出力ディレクトリで `--init-checkpoint` として読み込める。Actor・Critic・温度を引き継ぎ、optimizerとreplayは再初期化する。
+
+DGXでは自分で空いているGPUを選び、`CUDA_VISIBLE_DEVICES` に1枚だけ設定する。まず `steps=1000` で一通り確認し、本番の最初の予算は同じ手順で `steps=100000` とする。
+
+```bash
+conda activate bill_sub1
+cd ~/research
+set -o pipefail
+export BILLIARDS_FASTFIZ_BUILD_DIR=/tmp/billiards-fastfiz-wpa-phase22
+
+base=artifacts/runs/phase23_break_bootstrap_v1/micro_sac_5d.pt
+train=artifacts/runs/phase26_race9_fixed_micro_32_v1/iteration_000/rollouts
+extra=artifacts/runs/phase24_fixed_micro_smoke_v1/iteration_000/rollouts
+holdout=artifacts/runs/phase25_race9_fixed_micro_smoke_v1/iteration_000/rollouts
+flags=(--learned-safety --outcome-position --learned-break --wpa-break-rules)
+data=(--rollout-dir "$train" --extra-rollout-dir "$extra" --holdout-rollout-dir "$holdout"
+      --goal-source candidates "${flags[@]}")
+
+# GPUが空く前にも確認できる。
+python -m pytest -q tests/pipelines/micro/test_train_nine_ball_micro_sac.py
+python -m scripts.train_nine_ball_micro_sac "${data[@]}" --inspect-only
+
+# ここからはGPUを1枚選んで実行する。
+steps=1000
+interval=500
+out="artifacts/runs/phase28a_micro_${steps}_v1"
+mkdir -p artifacts/terminal_logs
+
+python -u -m scripts.train_nine_ball_micro_sac "${data[@]}" \
+  --init-checkpoint "$base" --balance-goals --steps "$steps" \
+  --checkpoint-interval "$interval" --device cuda --output-dir "$out" \
+  2>&1 | tee -a "artifacts/terminal_logs/phase28a_micro_${steps}_v1.log" &&
+python -m scripts.eval_nine_ball_micro_v3 \
+  --rollout-dir "$holdout" "${flags[@]}" --max-cases-per-goal 256 \
+  --base-checkpoint "$base" --checkpoint "$out/micro_sac_5d.pt" \
+  --output "$out/heldout_comparison.json"
+```
+
+本番で `steps=100000` にするときは `interval=10000` を用いる。評価はCPUで各モデルに同じ盤面・戦術目標を与え、目標達成・合法性・物理棄却を集計する。守備の達成条件は、合法に手番を渡し相手の幾何的な直入れ候補を減らすこと。位置取りでは指定入球と手球停止範囲への到達、ブレイクでは合法ブレイク率と合法入球率を確認する。
