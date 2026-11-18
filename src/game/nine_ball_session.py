@@ -20,6 +20,21 @@ from src.game.nine_ball_physics_guard import (
 )
 
 
+class CuePlacementExhausted(InvalidPhysicalTransition):
+    """No configured ball-in-hand position passed native validation."""
+
+
+def place_first_legal_cue_ball(session, candidates):
+    for x, y in candidates:
+        try:
+            session.place_cue_ball(x, y)
+            return x, y
+        except ValueError as exc:
+            if "overlaps" not in str(exc) and "outside playing surface" not in str(exc):
+                raise
+    raise CuePlacementExhausted("No valid cue-ball placement found for ball-in-hand")
+
+
 def create_nine_ball_rack(*, breaker: int, seed: int, layout_split=None, evaluation=False) -> RackState:
     """Diamond rack with 1 at apex and 9 at foot spot, 2..8 shuffled."""
     config = TableGameConfig.nine_ball_inventory()

@@ -303,3 +303,21 @@ def test_nonphysical_match_is_unfinished_not_an_invented_foul():
     assert outcome["shots"] == 0
     assert outcome["fouls"] == 0
     assert "root unavailable" in outcome["physics_failure"]["error"]
+
+
+def test_exhausted_cue_placement_is_unfinished_without_a_foul():
+    from dataclasses import replace
+
+    class FailedPlacementMatch(OneRackFakeMatch):
+        def place_cue_ball(self, x, y):
+            raise ValueError("Cue placement overlaps a ball or violates table constraints")
+
+    match = FailedPlacementMatch()
+    match.state = replace(match.state, ball_in_hand=True)
+    agents = (GeometryNineBallAgent(), GeometryNineBallAgent())
+    outcome = play_match(match, agents, max_shots_per_rack=3)
+    assert outcome["stop_reason"] == "invalid_physics"
+    assert outcome["match_finished"] is False
+    assert outcome["match_winner"] is None
+    assert outcome["shots"] == outcome["fouls"] == 0
+    assert "No valid cue-ball placement" in outcome["physics_failure"]["error"]

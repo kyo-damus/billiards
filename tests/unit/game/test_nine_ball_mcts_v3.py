@@ -131,6 +131,37 @@ def test_ball_in_hand_node_uses_game_session_placement():
     assert scratched.ball_in_hand
 
 
+def test_mcts_discards_leaf_when_native_rejects_every_cue_placement(monkeypatch):
+    root = create_nine_ball_rack(breaker=0, seed=10)
+    scratched = replace(root, ball_in_hand=True, turn_index=1)
+    blocked = NineBallGoal("DIRECT_ATTACK", 1, 0)
+    viable = NineBallGoal("DIRECT_ATTACK", 1, 1)
+    monkeypatch.setattr(module, "generate_nine_ball_goals", lambda *a, **kw: (blocked, viable))
+
+    class Physics(FakePhysics):
+        @property
+        def native(self):
+            return self
+
+        def get_ball_placement_code(self):
+            assert self.state.turn_index == 1
+            return 256
+
+    class Rules:
+        def apply(self, before, physical, context):
+            return SimpleNamespace(
+                next_state=scratched if physical.shot == 0 else root,
+                next_context=context,
+                rack_winner=None if physical.shot == 0 else 0,
+            )
+
+    search = NineBallMCTS(FakeMicro(), simulator=Physics(), rules=Rules(), simulations=2)
+    assert search.search(root) == viable
+    assert search.last_report["root_visits"] == [0, 2]
+    assert search.last_report["rejected_invalid_simulations"] == 1
+    assert "No valid cue-ball placement" in search.last_report["root_invalid_reasons"][0]
+
+
 def test_invalid_search_parameters():
     with pytest.raises(ValueError):
         NineBallMCTS(FakeMicro(), simulations=0)

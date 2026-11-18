@@ -107,6 +107,58 @@ def test_rejects_training_seeds_and_changed_starting_models(evaluation_args):
     assert not args.output_dir.exists()
 
 
+def test_resume_keeps_saved_half_pair_and_validates_config(evaluation_args, monkeypatch):
+    import scripts.collect_nine_ball_self_play as collector
+    import scripts.eval_nine_ball_hierarchical_v3 as evaluator
+
+    class Physics:
+        def restore(self, state):
+            pass
+
+    played = []
+    interrupt = True
+
+    def fake_play(match, agents, *, max_shots_per_rack):
+        played.append((match.seed, match.state.current_player))
+        if interrupt and len(played) == 2:
+            raise RuntimeError("interrupted second match")
+        return {"match_finished": True, "match_winner": 0, "stop_reason": "race_to_reached",
+                "shots": 1, "fouls": 0}
+
+    monkeypatch.setattr(collector, "play_match", fake_play)
+    monkeypatch.setattr(evaluator, "_git_commit", lambda: "before")
+    args = evaluation_args
+    factories = {"agent_factory": lambda *a, **kw: "agent", "simulator_factory": lambda _: Physics()}
+    with pytest.raises(RuntimeError, match="interrupted second match"):
+        evaluate(args, **factories)
+    assert not (args.output_dir / "summary.json").exists()
+    saved_file = args.output_dir / "seed_200_break_final.json"
+    legacy = json.loads(saved_file.read_text())
+    legacy.pop("evaluation_git_commit")
+    saved_file.write_text(json.dumps(legacy))
+    original = saved_file.read_bytes()
+    played.clear()
+
+    monkeypatch.setattr(evaluator, "_git_commit", lambda: "after")
+    args.resume = True
+    args.pairs = 1
+    with pytest.raises(ValueError, match="Resume settings or input checkpoints differ"):
+        evaluate(args, **factories)
+    assert not played
+    args.pairs = 2
+    interrupt = False
+    summary = evaluate(args, **factories)
+
+    assert played == [(200, 1), (201, 1), (201, 0)]
+    assert saved_file.read_bytes() == original
+    resumed = json.loads((args.output_dir / "seed_200_break_base.json").read_text())
+    assert resumed["evaluation_git_commit"] == "after"
+    assert summary["overall"]["completed"] == 4
+    assert summary["paired_results"] == {
+        "final_won_both": 1, "base_won_both": 1, "split": 0, "unfinished": 0,
+    }
+
+
 def test_micro_only_uses_final_macro_for_both_players(evaluation_args, monkeypatch):
     import scripts.collect_nine_ball_self_play as collector
 

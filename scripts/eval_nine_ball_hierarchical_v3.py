@@ -8,14 +8,9 @@ import os
 from pathlib import Path
 
 from scripts.iterate_nine_ball_hierarchical_v3 import _git_commit
+from src.pipelines.experiment_io import lock_run, write_experiment_json
 
 MODEL_KEYS = ("micro", "policy", "state_v")
-
-
-def _write_json(path, data):
-    with path.open("x", encoding="utf-8") as stream:
-        json.dump(data, stream, indent=2, ensure_ascii=False)
-        stream.write("\n")
 
 
 def _checkpoint_info(path, *, expected_sha256=None):
@@ -66,10 +61,29 @@ def _tally(games):
     }
 
 
+def _read_saved_match(path, identity):
+    game = json.loads(path.read_text(encoding="utf-8"))
+    finished = game["match_finished"]
+    winner = game["match_winner"]
+    players = identity["player_models"]
+    if (
+        any(game.get(key) != value for key, value in identity.items())
+        or type(finished) is not bool
+        or (finished and (type(winner) is not int or winner not in (0, 1) or game["winner"] != players[winner]))
+        or (not finished and game["winner"] is not None)
+        or not isinstance(game.get("stop_reason"), str)
+    ):
+        raise ValueError(f"Saved match does not match the evaluation schedule: {path}")
+    return {key: game[key] for key in ("breaking_model", "winner", "stop_reason")}
+
+
 def evaluate(args, *, agent_factory=None, simulator_factory=None):
     if args.pairs < 1 or args.start_seed < 0:
         raise ValueError("Use a positive number of pairs and a nonnegative start seed")
-    if args.output_dir.exists():
+    resume = getattr(args, "resume", False)
+    if resume and not args.output_dir.is_dir():
+        raise FileNotFoundError(f"Evaluation resume directory absent: {args.output_dir}")
+    if not resume and args.output_dir.exists():
         raise FileExistsError(f"Refusing to reuse evaluation output: {args.output_dir}")
 
     training = json.loads(args.training_manifest.read_text(encoding="utf-8"))
@@ -133,10 +147,6 @@ def evaluate(args, *, agent_factory=None, simulator_factory=None):
         if not visible or "," in visible:
             raise ValueError("Use exactly one existing CUDA_VISIBLE_DEVICES GPU ID")
 
-    from scripts.collect_nine_ball_self_play import play_match
-    from src.game.match import MatchConfig
-    from src.game.nine_ball_session import NineBallMatchSession
-
     if agent_factory is None:
         from src.game.nine_ball_mcts_agent import NineBallMCTSAgent
         agent_factory = NineBallMCTSAgent
@@ -154,8 +164,7 @@ def evaluate(args, *, agent_factory=None, simulator_factory=None):
         )
         for label, model in checkpoints.items()
     }
-    args.output_dir.mkdir(parents=True, exist_ok=False)
-    _write_json(args.output_dir / "evaluation_config.json", {
+    config = {
         "evaluation_git_commit": _git_commit(),
         "comparison": "micro_only" if candidate_micro is not None else "training_base_vs_final",
         "training_manifest": str(args.training_manifest),
@@ -169,7 +178,34 @@ def evaluate(args, *, agent_factory=None, simulator_factory=None):
         "search": {key: value for key, value in search.items() if key != "layout_split"},
         "rack_layout_split": {"path": str(split_path), "sha256": layout_split.sha256} if layout_split else None,
         "device": args.device,
-    })
+    }
+    if not resume:
+        args.output_dir.mkdir(parents=True, exist_ok=False)
+    with lock_run(args.output_dir):
+        config_path = args.output_dir / "evaluation_config.json"
+        if resume:
+            saved = json.loads(config_path.read_text(encoding="utf-8"))
+            # Match files written after resume record the new revision; the
+            # original config still identifies the revision of legacy files.
+            expected = dict(config, evaluation_git_commit=saved["evaluation_git_commit"])
+            if saved != expected:
+                raise ValueError(f"Resume settings or input checkpoints differ: {config_path}")
+        else:
+            write_experiment_json(config_path, config)
+        summary_path = args.output_dir / "summary.json"
+        if summary_path.exists():
+            summary = json.loads(summary_path.read_text(encoding="utf-8"))
+        else:
+            summary = _play_pairs(args.output_dir, config, seeds, agents, simulator_factory, layout_split)
+            write_experiment_json(summary_path, summary)
+    print(json.dumps(summary, ensure_ascii=False, indent=2))
+    return summary
+
+
+def _play_pairs(output_dir, config, seeds, agents, simulator_factory, layout_split):
+    from scripts.collect_nine_ball_self_play import play_match
+    from src.game.match import MatchConfig
+    from src.game.nine_ball_session import NineBallMatchSession
 
     games = []
     pairs = Counter()
@@ -179,34 +215,42 @@ def evaluate(args, *, agent_factory=None, simulator_factory=None):
         players = ("base", "final") if final_player else ("final", "base")
         pair = []
         for breaker in (final_player, 1 - final_player):
+            identity = {
+                "seed": seed,
+                "player_models": list(players),
+                "first_breaker": breaker,
+                "breaking_model": players[breaker],
+            }
+            path = output_dir / f"seed_{seed}_break_{players[breaker]}.json"
+            if path.exists():
+                pair.append(_read_saved_match(path, identity))
+                print(f"seed={seed} breaker={players[breaker]} reused saved match", flush=True)
+                continue
             match = NineBallMatchSession(
                 simulator_factory=simulator_factory,
                 match_config=MatchConfig(
-                    race_to=race_to, rule_id="nine_ball", first_breaker=breaker, break_policy=break_policy,
+                    race_to=config["race_to"], rule_id="nine_ball", first_breaker=breaker,
+                    break_policy=config["break_policy"],
                 ),
                 seed=seed,
-                wpa_break_rules=search["wpa_break_rules"],
+                wpa_break_rules=config["search"]["wpa_break_rules"],
                 layout_split=layout_split,
                 evaluation=True,
             )
             outcome = play_match(
                 match, tuple(agents[label] for label in players),
-                max_shots_per_rack=settings["max_shots_per_rack"],
+                max_shots_per_rack=config["max_shots_per_rack"],
             )
             winner = outcome["match_winner"]
             game = {
-                "seed": seed,
-                "player_models": list(players),
-                "first_breaker": breaker,
-                "breaking_model": players[breaker],
+                **identity,
                 "winner": players[winner] if outcome["match_finished"] else None,
                 "stop_reason": outcome["stop_reason"],
                 "shots": outcome["shots"],
                 "fouls": outcome["fouls"],
             }
-            _write_json(
-                args.output_dir / f"seed_{seed}_break_{players[breaker]}.json",
-                {**outcome, **game},
+            write_experiment_json(
+                path, {**outcome, **game, "evaluation_git_commit": config["evaluation_git_commit"]},
             )
             pair.append(game)
             print(
@@ -223,7 +267,7 @@ def evaluate(args, *, agent_factory=None, simulator_factory=None):
         else:
             pairs["split"] += 1
 
-    summary = {
+    return {
         "overall": _tally(games),
         "by_breaking_model": {
             label: _tally([game for game in games if game["breaking_model"] == label])
@@ -236,9 +280,6 @@ def evaluate(args, *, agent_factory=None, simulator_factory=None):
             "unfinished": pairs["unfinished"],
         },
     }
-    _write_json(args.output_dir / "summary.json", summary)
-    print(json.dumps(summary, ensure_ascii=False, indent=2))
-    return summary
 
 
 def parse_args(argv=None):
@@ -249,6 +290,8 @@ def parse_args(argv=None):
         help="Compare this Micro with the starting Micro, using the final Macro Policy and State V for both.",
     )
     parser.add_argument("--output-dir", required=True, type=Path)
+    parser.add_argument("--resume", action="store_true",
+                        help="Keep saved matches in this output directory and play the missing ones.")
     parser.add_argument("--pairs", type=int, default=32)
     parser.add_argument("--start-seed", type=int, default=710000)
     parser.add_argument("--rack-layout-split", type=Path)

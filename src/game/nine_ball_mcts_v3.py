@@ -21,7 +21,9 @@ from src.game.nine_ball_encoding_v3 import (
     TABLE_CHOICES, encode_goal_v3, encode_macro_state, generate_nine_ball_goals, rule_goals,
 )
 from src.game.nine_ball_rules import NineBallContext, NineBallRules
-from src.game.nine_ball_session import NineBallRackSession, create_nine_ball_rack
+from src.game.nine_ball_session import (
+    CuePlacementExhausted, NineBallRackSession, create_nine_ball_rack, place_first_legal_cue_ball,
+)
 from src.game.match import MatchPosition
 from src.game.nine_ball_physics_guard import (
     CueClearanceExhausted, InvalidPhysicalTransition, simulate_nine_ball_shot,
@@ -119,14 +121,8 @@ class NineBallMCTS:
         session = NineBallRackSession(
             self.simulator, node.state, rules=self.rules,
         )
-        for x, y in self.micro_agent.cue_placement_candidates(node.state):
-            try:
-                node.state = session.place_cue_ball(x, y)
-                return
-            except ValueError as exc:
-                if "overlaps" not in str(exc) and "outside playing surface" not in str(exc):
-                    raise
-        raise RuntimeError("No valid cue-ball placement found in MCTS")
+        place_first_legal_cue_ball(session, self.micro_agent.cue_placement_candidates(node.state))
+        node.state = session.state
 
     def _expand(self, node):
         if node.expanded or node.winner is not None:
@@ -317,8 +313,14 @@ class NineBallMCTS:
                 self._discard_backups(accepted_paths, invalid_edge)
                 return False
             fresh = edge.child is None
-            if fresh and not self._step(node, edge):
-                return False
+            if fresh:
+                if not self._step(node, edge):
+                    return False
+                try:
+                    self._prepare(edge.child)
+                except CuePlacementExhausted as exc:
+                    edge.invalid_reason = str(exc)
+                    return False
             path.append((node, edge))
             node = edge.child
             shots += edge.goal.kind not in TABLE_CHOICES

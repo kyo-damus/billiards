@@ -13,7 +13,7 @@ from src.env.multi_ball_fastfiz import MultiBallFastFizSimulator
 from src.game.match import MatchConfig
 from src.game.nine_ball_agents import GeometryNineBallAgent
 from src.game.nine_ball_encoding_v3 import TABLE_CHOICES, encode_goal_v3
-from src.game.nine_ball_session import NineBallMatchSession
+from src.game.nine_ball_session import NineBallMatchSession, place_first_legal_cue_ball
 from src.game.nine_ball_physics_guard import InvalidPhysicalTransition
 from src.game.nine_ball_rack_split import load_rack_layout_split
 from src.pipelines.experiment_io import write_experiment_json
@@ -59,25 +59,10 @@ def play_match(
     while not match.match.snapshot().finished:
         if rack_shots >= max_shots_per_rack:
             break  # No invented winner for a truncated rack.
-        before = match.state
-        player = int(before.current_player)
+        state = match.state
+        player = int(state.current_player)
         agent = agents[player]
         cue_placement = None
-        if before.ball_in_hand:
-            for candidate in agent.cue_placement_candidates(before):
-                try:
-                    match.place_cue_ball(*candidate)
-                    cue_placement = list(candidate)
-                    break
-                except ValueError as exc:
-                    if (
-                        "overlaps" not in str(exc)
-                        and "outside playing surface" not in str(exc)
-                    ):
-                        raise
-            if cue_placement is None:
-                raise RuntimeError("No valid cue placement found for ball-in-hand.")
-        state = match.state
         match_position = match.match.position
         match_context = {
             "race_to": match_position.race_to,
@@ -88,6 +73,11 @@ def play_match(
         context = getattr(match.rack, "context", None)
         context_before = rule_context_json(context)
         try:
+            if state.ball_in_hand:
+                cue_placement = list(place_first_legal_cue_ball(
+                    match, agent.cue_placement_candidates(state),
+                ))
+                state = match.state
             if match_position.race_to > 1 and hasattr(agent, "choose_match_shot"):
                 plan = agent.choose_match_shot(state, context, match_position)
             else:
