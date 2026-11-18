@@ -1,4 +1,4 @@
-"""Evaluate a completed 9-ball v3 run against its starting models on paired matches."""
+"""Run paired 9-ball matches for a training run or with only Micro changed."""
 
 import argparse
 from collections import Counter
@@ -18,25 +18,38 @@ def _write_json(path, data):
         stream.write("\n")
 
 
-def _model_inputs(training):
+def _checkpoint_info(path, *, expected_sha256=None):
+    if path is None:
+        return {"path": None, "sha256": None}
+    with Path(path).open("rb") as stream:
+        digest = hashlib.file_digest(stream, "sha256").hexdigest()
+    if expected_sha256 is not None and digest != expected_sha256:
+        raise ValueError(f"Starting checkpoint differs from the training manifest: {path}")
+    return {"path": str(path), "sha256": digest}
+
+
+def _model_inputs(training, *, candidate_micro_checkpoint=None):
     base = training["source_checkpoints"]
     final = training["rounds"][-1]
-    models = {}
-    for label, paths in (
-        ("base", {key: base.get(key, {}).get("path") for key in MODEL_KEYS}),
-        ("final", {key: final[key] for key in MODEL_KEYS}),
-    ):
-        models[label] = {}
-        for key, path in paths.items():
-            if key == "state_v" and path is None:
-                models[label][key] = {"path": None, "sha256": None}
-                continue
-            with Path(path).open("rb") as stream:
-                digest = hashlib.file_digest(stream, "sha256").hexdigest()
-            if label == "base" and digest != base[key]["sha256"]:
-                raise ValueError(f"Starting checkpoint differs from the training manifest: {path}")
-            models[label][key] = {"path": path, "sha256": digest}
-    return models
+    starting_keys = MODEL_KEYS if candidate_micro_checkpoint is None else ("micro",)
+    starting = {}
+    for key in starting_keys:
+        recorded = base.get(key, {})
+        path = recorded.get("path")
+        if key == "state_v" and path is None:
+            starting[key] = _checkpoint_info(None)
+        else:
+            starting[key] = _checkpoint_info(recorded["path"], expected_sha256=recorded["sha256"])
+    macro = {key: _checkpoint_info(final[key]) for key in ("policy", "state_v")}
+    if candidate_micro_checkpoint is not None:
+        return {
+            "base": {**starting, **macro},
+            "final": {"micro": _checkpoint_info(candidate_micro_checkpoint), **macro},
+        }
+    return {
+        "base": starting,
+        "final": {"micro": _checkpoint_info(final["micro"]), **macro},
+    }
 
 
 def _tally(games):
@@ -113,7 +126,8 @@ def evaluate(args, *, agent_factory=None, simulator_factory=None):
     }
     if layout_split is not None:
         search["layout_split"] = layout_split
-    checkpoints = _model_inputs(training)
+    candidate_micro = getattr(args, "candidate_micro_checkpoint", None)
+    checkpoints = _model_inputs(training, candidate_micro_checkpoint=candidate_micro)
     if args.device == "cuda":
         visible = os.environ.get("CUDA_VISIBLE_DEVICES", "").strip()
         if not visible or "," in visible:
@@ -143,6 +157,7 @@ def evaluate(args, *, agent_factory=None, simulator_factory=None):
     args.output_dir.mkdir(parents=True, exist_ok=False)
     _write_json(args.output_dir / "evaluation_config.json", {
         "evaluation_git_commit": _git_commit(),
+        "comparison": "micro_only" if candidate_micro is not None else "training_base_vs_final",
         "training_manifest": str(args.training_manifest),
         "training_git_commit": training.get("source_git_commit"),
         "checkpoints": checkpoints,
@@ -229,6 +244,10 @@ def evaluate(args, *, agent_factory=None, simulator_factory=None):
 def parse_args(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--training-manifest", required=True, type=Path)
+    parser.add_argument(
+        "--candidate-micro-checkpoint", type=Path,
+        help="Compare this Micro with the starting Micro, using the final Macro Policy and State V for both.",
+    )
     parser.add_argument("--output-dir", required=True, type=Path)
     parser.add_argument("--pairs", type=int, default=32)
     parser.add_argument("--start-seed", type=int, default=710000)

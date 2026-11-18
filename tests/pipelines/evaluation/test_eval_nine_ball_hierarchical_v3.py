@@ -107,6 +107,49 @@ def test_rejects_training_seeds_and_changed_starting_models(evaluation_args):
     assert not args.output_dir.exists()
 
 
+def test_micro_only_uses_final_macro_for_both_players(evaluation_args, monkeypatch):
+    import scripts.collect_nine_ball_self_play as collector
+
+    args = evaluation_args
+    args.pairs = 1
+    manifest = args.training_manifest.read_bytes()
+    training = json.loads(manifest)
+    final = training["rounds"][-1]
+    candidate = args.training_manifest.with_name("candidate_micro.pt")
+    candidate.write_bytes(b"new micro")
+    args.candidate_micro_checkpoint = candidate
+    for key in ("policy", "state_v"):
+        args.training_manifest.with_name(f"base_{key}.pt").unlink()
+
+    class Physics:
+        def restore(self, state):
+            pass
+
+    seen_micro = []
+
+    def fake_agent(micro_checkpoint, *, macro_policy_checkpoint, state_value_checkpoint, **kwargs):
+        seen_micro.append(micro_checkpoint)
+        assert macro_policy_checkpoint == final["policy"]
+        assert state_value_checkpoint == final["state_v"]
+
+    def fake_play(match, agents, *, max_shots_per_rack):
+        return {"match_finished": True, "match_winner": 0, "stop_reason": "race_to_reached",
+                "shots": 1, "fouls": 0}
+
+    monkeypatch.setattr(collector, "play_match", fake_play)
+    summary = evaluate(args, agent_factory=fake_agent, simulator_factory=lambda _: Physics())
+    assert seen_micro == [training["source_checkpoints"]["micro"]["path"], str(candidate)]
+    assert summary["paired_results"]["final_won_both"] == 1
+    saved = json.loads((args.output_dir / "evaluation_config.json").read_text())
+    assert saved["comparison"] == "micro_only"
+    base_models, final_models = (saved["checkpoints"][label] for label in ("base", "final"))
+    assert base_models["micro"] == training["source_checkpoints"]["micro"]
+    assert final_models["micro"]["sha256"] == hashlib.sha256(candidate.read_bytes()).hexdigest()
+    assert base_models["policy"] == final_models["policy"]
+    assert base_models["state_v"] == final_models["state_v"]
+    assert args.training_manifest.read_bytes() == manifest
+
+
 def test_multirack_evaluation_rejects_overlap_with_later_training_rack(evaluation_args):
     args = evaluation_args
     training = json.loads(args.training_manifest.read_text())
