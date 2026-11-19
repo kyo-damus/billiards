@@ -202,6 +202,40 @@ def test_micro_only_uses_final_macro_for_both_players(evaluation_args, monkeypat
     assert args.training_manifest.read_bytes() == manifest
 
 
+def test_state_v_only_keeps_starting_micro_and_policy(evaluation_args, monkeypatch):
+    import scripts.collect_nine_ball_self_play as collector
+
+    args = parse_args([
+        "--training-manifest", str(evaluation_args.training_manifest), "--state-v-only",
+        "--output-dir", str(evaluation_args.output_dir), "--pairs", "1", "--start-seed", "200",
+    ])
+    manifest = json.loads(args.training_manifest.read_text())
+    base = manifest["source_checkpoints"]
+    final = manifest["rounds"][-1]
+    for key in ("micro", "policy"):
+        args.training_manifest.with_name(f"final_{key}.pt").unlink()
+
+    seen = []
+
+    def fake_agent(micro_checkpoint, *, macro_policy_checkpoint, state_value_checkpoint, **kwargs):
+        assert micro_checkpoint == base["micro"]["path"]
+        assert macro_policy_checkpoint == base["policy"]["path"]
+        seen.append(state_value_checkpoint)
+
+    outcome = {"match_finished": True, "match_winner": 0, "stop_reason": "race_to_reached",
+               "shots": 1, "fouls": 0}
+    monkeypatch.setattr(collector, "play_match", lambda *a, **kw: outcome)
+    physics = SimpleNamespace(restore=lambda _: None)
+    evaluate(args, agent_factory=fake_agent, simulator_factory=lambda _: physics)
+    assert seen == [base["state_v"]["path"], final["state_v"]]
+    saved = json.loads((args.output_dir / "evaluation_config.json").read_text())
+    assert saved["comparison"] == "state_v_only"
+    assert saved["checkpoints"]["base"] == base
+    assert saved["checkpoints"]["final"] == {
+        **base, "state_v": {"path": final["state_v"], "sha256": hashlib.sha256(b"state_vfinal").hexdigest()},
+    }
+
+
 def test_multirack_evaluation_rejects_overlap_with_later_training_rack(evaluation_args):
     args = evaluation_args
     training = json.loads(args.training_manifest.read_text())

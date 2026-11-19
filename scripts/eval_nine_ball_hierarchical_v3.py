@@ -1,4 +1,4 @@
-"""Run paired 9-ball matches for a training run or with only Micro changed."""
+"""Run paired 9-ball matches for a training run, a Micro change, or a State V change."""
 
 import argparse
 from collections import Counter
@@ -23,7 +23,9 @@ def _checkpoint_info(path, *, expected_sha256=None):
     return {"path": str(path), "sha256": digest}
 
 
-def _model_inputs(training, *, candidate_micro_checkpoint=None):
+def _model_inputs(training, *, candidate_micro_checkpoint=None, state_v_only=False):
+    if state_v_only and candidate_micro_checkpoint is not None:
+        raise ValueError("State V and Micro comparisons must be run separately")
     base = training["source_checkpoints"]
     final = training["rounds"][-1]
     starting_keys = MODEL_KEYS if candidate_micro_checkpoint is None else ("micro",)
@@ -35,6 +37,13 @@ def _model_inputs(training, *, candidate_micro_checkpoint=None):
             starting[key] = _checkpoint_info(None)
         else:
             starting[key] = _checkpoint_info(recorded["path"], expected_sha256=recorded["sha256"])
+    if state_v_only:
+        if final["state_v"] is None:
+            raise ValueError("State V comparison requires a final State V checkpoint")
+        return {
+            "base": starting,
+            "final": {**starting, "state_v": _checkpoint_info(final["state_v"])},
+        }
     macro = {key: _checkpoint_info(final[key]) for key in ("policy", "state_v")}
     if candidate_micro_checkpoint is not None:
         return {
@@ -141,7 +150,15 @@ def evaluate(args, *, agent_factory=None, simulator_factory=None):
     if layout_split is not None:
         search["layout_split"] = layout_split
     candidate_micro = getattr(args, "candidate_micro_checkpoint", None)
-    checkpoints = _model_inputs(training, candidate_micro_checkpoint=candidate_micro)
+    state_v_only = getattr(args, "state_v_only", False)
+    checkpoints = _model_inputs(
+        training, candidate_micro_checkpoint=candidate_micro, state_v_only=state_v_only,
+    )
+    comparison = "training_base_vs_final"
+    if candidate_micro is not None:
+        comparison = "micro_only"
+    elif state_v_only:
+        comparison = "state_v_only"
     if args.device == "cuda":
         visible = os.environ.get("CUDA_VISIBLE_DEVICES", "").strip()
         if not visible or "," in visible:
@@ -166,7 +183,7 @@ def evaluate(args, *, agent_factory=None, simulator_factory=None):
     }
     config = {
         "evaluation_git_commit": _git_commit(),
-        "comparison": "micro_only" if candidate_micro is not None else "training_base_vs_final",
+        "comparison": comparison,
         "training_manifest": str(args.training_manifest),
         "training_git_commit": training.get("source_git_commit"),
         "checkpoints": checkpoints,
@@ -285,9 +302,14 @@ def _play_pairs(output_dir, config, seeds, agents, simulator_factory, layout_spl
 def parse_args(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--training-manifest", required=True, type=Path)
-    parser.add_argument(
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument(
         "--candidate-micro-checkpoint", type=Path,
         help="Compare this Micro with the starting Micro, using the final Macro Policy and State V for both.",
+    )
+    mode.add_argument(
+        "--state-v-only", action="store_true",
+        help="Compare starting and final State V while using the starting Micro and Macro Policy for both.",
     )
     parser.add_argument("--output-dir", required=True, type=Path)
     parser.add_argument("--resume", action="store_true",
