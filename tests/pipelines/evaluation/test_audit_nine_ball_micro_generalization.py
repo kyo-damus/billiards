@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 
 from scripts.evaluation.audit_nine_ball_micro_generalization import (
-    goal_from_vector, sample_from_trajectory, select_cases,
+    goal_from_vector, sample_from_trajectory, select_cases, all_micro_board_hashes,
 )
 from scripts.collect_nine_ball_self_play import rack_state_json, rule_context_json
 from src.game.nine_ball_encoding_v3 import NineBallGoal, encode_goal_v3
@@ -59,6 +59,14 @@ def test_reads_saved_proposed_and_evaluation_trajectory_goals(tmp_path):
     assert len(a["DIRECT_ATTACK"]) == 1
     assert len(b["DIRECT_ATTACK"]) == 1
     assert boards_a == boards_b
+    blacklist = all_micro_board_hashes(eval_folder, goal_source="logged")
+    assert blacklist == boards_a
+    filtered, _, stats = select_cases(
+        train, max_matches=1, per_goal=5, seed=1,
+        goal_source="logged", excluded_board_hashes=blacklist,
+    )
+    assert not filtered
+    assert stats["excluded_holdout_overlap_cases"] == 1
     assert meta_a["sampled_match_files"] == meta_b["sampled_match_files"] == 1
 
 
