@@ -53,6 +53,12 @@ def _ensure_options(args):
         or not 0.0 < args.gamma <= 1.0
     ):
         raise ValueError("Invalid hierarchical iteration parameters")
+    if args.freeze_policy and args.qv_epochs < 1:
+        raise ValueError("Frozen Policy requires Q/V training (qv_epochs >= 1)")
+    if args.warm_start_state_v and (
+        args.qv_epochs < 1 or args.base_state_v_checkpoint is None
+    ):
+        raise ValueError("State V warm start requires a starting V and Q/V training")
     if args.device == "cuda":
         visible = os.environ.get("CUDA_VISIBLE_DEVICES", "")
         if not visible or len(visible.split(",")) != 1 or not visible.split(",")[0].strip():
@@ -128,20 +134,21 @@ def build_plan(args):
             collect.extend(["--state-value-checkpoint", str(state_v)])
         collect.extend(goal_flags)
         stages.append(Stage(f"{index:03d}_self_play", tuple(collect)))
-        stages.append(Stage(f"{index:03d}_visit_dataset", (
-            python, "-m", "scripts.build_nine_ball_mcts_visit_dataset_v3",
-            "--rollout-dir", str(rollouts), "--output", str(visits),
-            *match_flags,
-        )))
-        stages.append(Stage(f"{index:03d}_macro_policy", (
-            python, "-m", "scripts.train_nine_ball_macro_visits_v3",
-            "--dataset", str(visits),
-            "--base-policy-checkpoint", str(initial_policy),
-            "--output", str(policy),
-            "--epochs", str(args.policy_epochs),
-            "--device", args.device,
-            "--seed", str(args.train_seed + index),
-        )))
+        if not args.freeze_policy:
+            stages.append(Stage(f"{index:03d}_visit_dataset", (
+                python, "-m", "scripts.build_nine_ball_mcts_visit_dataset_v3",
+                "--rollout-dir", str(rollouts), "--output", str(visits),
+                *match_flags,
+            )))
+            stages.append(Stage(f"{index:03d}_macro_policy", (
+                python, "-m", "scripts.train_nine_ball_macro_visits_v3",
+                "--dataset", str(visits),
+                "--base-policy-checkpoint", str(initial_policy),
+                "--output", str(policy),
+                "--epochs", str(args.policy_epochs),
+                "--device", args.device,
+                "--seed", str(args.train_seed + index),
+            )))
         if args.qv_epochs:
             stages.append(Stage(f"{index:03d}_return_dataset", (
                 python, "-m", "scripts.build_nine_ball_macro_returns_v3",
@@ -149,13 +156,16 @@ def build_plan(args):
                 "--gamma", str(args.gamma),
                 *match_flags,
             )))
-            stages.append(Stage(f"{index:03d}_macro_qv", (
+            qv_command = [
                 python, "-m", "scripts.train_nine_ball_macro_qv_v3",
                 "--dataset", str(returns), "--output-dir", str(qv),
                 "--epochs", str(args.qv_epochs),
                 "--device", args.device,
                 "--seed", str(args.train_seed + 10000 + index),
-            )))
+            ]
+            if args.warm_start_state_v:
+                qv_command.extend(["--init-state-v-checkpoint", str(state_v)])
+            stages.append(Stage(f"{index:03d}_macro_qv", tuple(qv_command)))
             state_v = qv / "state_v_v3.pt"
         if args.micro_steps:
             stages.append(Stage(f"{index:03d}_micro_finetune", (
@@ -171,7 +181,8 @@ def build_plan(args):
                 *goal_flags,
             )))
             initial_micro = micro_dir / "micro_sac_5d.pt"
-        initial_policy = policy
+        if not args.freeze_policy:
+            initial_policy = policy
         iteration_summaries.append({
             "iteration": index,
             "start_seed": seed,
@@ -182,6 +193,8 @@ def build_plan(args):
             "micro": str(initial_micro),
             "state_v": str(state_v) if state_v else None,
             "qv_trained": bool(args.qv_epochs),
+            "policy_trained": not args.freeze_policy,
+            "state_v_warm_started": bool(args.warm_start_state_v),
             "micro_trained": bool(args.micro_steps),
         })
     return stages, iteration_summaries
@@ -286,6 +299,9 @@ def _run_pipeline(args, root, stages, rounds, inputs, lock_fd):
         "status": "running",
         "source": "version_3_self_play",
         "objective": (
+            "Frozen Macro Policy + warm-started State V on new self-play "
+            "terminal returns; Q from scratch. Development experiment only."
+            if args.freeze_policy and args.warm_start_state_v else
             "MCTS visit Policy imitation + selected-action terminal-return "
             "Q/V regression + fixed-rollout-goal Micro SAC fine-tuning. "
             "Not independent evaluation; partial nine-ball rules."
@@ -339,6 +355,8 @@ def _run_pipeline(args, root, stages, rounds, inputs, lock_fd):
         previous_settings.setdefault("break_policy", "alternate")
         previous_settings.setdefault("wpa_break_rules", False)
         previous_settings.setdefault("rack_layout_split", None)
+        previous_settings.setdefault("freeze_policy", False)
+        previous_settings.setdefault("warm_start_state_v", False)
         if previous_settings != current_settings:
             raise ValueError("Resume settings differ from previous run")
         original_commit = manifest.get("source_git_commit")
@@ -441,6 +459,10 @@ def parse_args(argv=None):
     p.add_argument("--mcts-c-puct", type=float, default=1.5)
     p.add_argument("--gamma", type=float)
     p.add_argument("--policy-epochs", type=int, default=10)
+    p.add_argument("--freeze-policy", action="store_true",
+                   help="Hold Macro Policy checkpoint fixed; skip visit imitation stages.")
+    p.add_argument("--warm-start-state-v", action="store_true",
+                   help="Initialize each round State V from the previous V weights.")
     p.add_argument("--qv-epochs", type=int, default=5)
     p.add_argument("--micro-steps", type=int, default=5000)
     p.add_argument("--learned-safety", action="store_true")
