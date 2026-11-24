@@ -287,5 +287,19 @@ class PickPocketAdaptedAgent(GeometryNineBallAgent):
         if state.break_shot:
             goal = NineBallGoal("BREAK", target)
             plan = self.break_agent.plan_goal(state, goal, context)
+            self._ensure_simulator(state)
+            try:
+                corrected, _, _, _ = simulate_with_cue_clearance(
+                    lambda attempt: simulate_nine_ball_shot(
+                        self.simulator, self.rules, state, context,
+                        target_ball=target, shot=attempt,
+                    ),
+                    plan.shot,
+                )
+                plan = replace(plan, shot=corrected)
+            except InvalidPhysicalTransition:
+                # Keep the original physical request; the live collector
+                # will mark a non-executable shot as unfinished, not foul.
+                pass
             return replace(plan, goal_label="PICKPOCKET_V0_SHARED_BREAK_MICRO")
         return self._select(state, context)
