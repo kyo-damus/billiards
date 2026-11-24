@@ -54,8 +54,8 @@ def test_reads_saved_proposed_and_evaluation_trajectory_goals(tmp_path):
     eval_folder.mkdir()
     (train / "match_seed_100.json").write_text(json.dumps({"trajectory": [row]}))
     (eval_folder / "seed_200_break_final.json").write_text(json.dumps({"trajectory": [row]}))
-    a, boards_a, meta_a = select_cases(train, max_matches=1, per_goal=5, seed=1)
-    b, boards_b, meta_b = select_cases(eval_folder, max_matches=1, per_goal=5, seed=2)
+    a, boards_a, meta_a = select_cases(train, max_matches=1, per_goal=5, seed=1, goal_source="logged")
+    b, boards_b, meta_b = select_cases(eval_folder, max_matches=1, per_goal=5, seed=2, goal_source="logged")
     assert len(a["DIRECT_ATTACK"]) == 1
     assert len(b["DIRECT_ATTACK"]) == 1
     assert boards_a == boards_b
@@ -67,3 +67,53 @@ def test_rejects_nonmicro_pocket_data():
     v[21] = 1  # Invalid: both pocket 0 and pocket 1 are active
     with pytest.raises(ValueError):
         goal_from_vector(v)
+
+
+
+def test_can_read_all_root_candidates_and_validate_training_provenance(tmp_path):
+    from types import SimpleNamespace
+    from scripts.evaluation.audit_nine_ball_micro_generalization import _check_provenance
+
+    rack = replace(create_nine_ball_rack(breaker=0, seed=8), break_shot=False)
+    attack = NineBallGoal("DIRECT_ATTACK", 1, 0)
+    safety = NineBallGoal("SAFETY", 1)
+    row = {
+        "state": rack_state_json(rack),
+        "rule_context": rule_context_json(NineBallContext()),
+        "chosen_action": {
+            "goal_v3": encode_goal_v3(attack).tolist(),
+            "macro_search": {"goal_v3": [
+                encode_goal_v3(attack).tolist(),
+                encode_goal_v3(safety).tolist(),
+            ]},
+        },
+    }
+    training_folder = tmp_path / "training"
+    heldout_folder = tmp_path / "holdout"
+    training_folder.mkdir()
+    heldout_folder.mkdir()
+    (training_folder / "match_seed_100.json").write_text(json.dumps({"trajectory": [row]}))
+    found, _, _ = select_cases(
+        training_folder, max_matches=1, per_goal=10, seed=5, goal_source="candidates"
+    )
+    assert set(found) == {"DIRECT_ATTACK", "SAFETY"}
+
+    summary = tmp_path / "micro_summary.json"
+    summary.write_text(json.dumps({
+        "training_data": {
+            "rollout_dirs": [str(training_folder)],
+            "holdout_rollout_dir": str(heldout_folder),
+        },
+        "goal_source": "candidates",
+        "wpa_break_rules": True,
+        "outcome_position": True,
+        "training_steps_this_run": 100000,
+    }))
+    args = SimpleNamespace(
+        training_summary=summary, train_dir=training_folder,
+        holdout_dir=heldout_folder, goal_source="candidates", outcome_position=True,
+    )
+    assert _check_provenance(args)["training_steps_this_run"] == 100000
+    args.holdout_dir = training_folder
+    with pytest.raises(ValueError, match="Holdout directory"):
+        _check_provenance(args)
