@@ -211,3 +211,46 @@ def test_match_returns_use_final_winner_across_racks_and_validate_scores(tmp_pat
         build(parse_build_args([
             "--rollout-dir", str(folder), "--output", str(tmp_path / "bad.npz"), "--match-aware",
         ]))
+
+
+def test_state_v_warm_start_records_provenance_and_requires_matching_dimensions(tmp_path):
+    import hashlib
+
+    folder = tmp_path / "rollouts"
+    folder.mkdir()
+    for seed, winner in ((10, 1), (20, 0), (30, 1), (40, 0)):
+        write_match(folder, seed, winner=winner)
+    dataset = tmp_path / "selected_returns.npz"
+    build(parse_build_args([
+        "--rollout-dir", str(folder), "--output", str(dataset),
+    ]))
+    source_dir = tmp_path / "source"
+    train(parse_train_args([
+        "--dataset", str(dataset), "--output-dir", str(source_dir),
+        "--device", "cpu", "--epochs", "1", "--hidden-dim", "16",
+        "--batch-size", "4",
+    ]))
+    source = source_dir / "state_v_v3.pt"
+    target_dir = tmp_path / "warm"
+    output = train(parse_train_args([
+        "--dataset", str(dataset), "--output-dir", str(target_dir),
+        "--device", "cpu", "--epochs", "1", "--hidden-dim", "16",
+        "--batch-size", "4", "--init-state-v-checkpoint", str(source),
+    ]))
+    assert output["v"]["init_state_v_checkpoint"] == str(source)
+    expected_hash = hashlib.sha256(source.read_bytes()).hexdigest()
+    assert output["v"]["init_state_v_sha256"] == expected_hash
+    saved = torch.load(target_dir / "state_v_v3.pt", weights_only=True)
+    assert saved["init_state_v_checkpoint"] == str(source)
+    assert saved["init_state_v_sha256"] == expected_hash
+    assert saved["optimizer_state_carried_over"] is False
+    model, _ = load_state_v_v3(target_dir / "state_v_v3.pt")
+    assert model is not None
+
+    with pytest.raises(ValueError, match="warm start differs"):
+        train(parse_train_args([
+            "--dataset", str(dataset), "--output-dir", str(tmp_path / "mismatch"),
+            "--device", "cpu", "--epochs", "1", "--hidden-dim", "32",
+            "--init-state-v-checkpoint", str(source),
+        ]))
+    assert not (tmp_path / "mismatch").exists()
