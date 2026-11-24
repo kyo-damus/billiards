@@ -11,7 +11,7 @@ import torch
 
 from scripts.train_nine_ball_micro_sac import (
     execute_valid_training_shot, load_training_states, micro_reward,
-    position_goal_success, sample_keys,
+    position_goal_success, sample_keys, _continues_position_goal, _cue_stop_distance,
 )
 from src.env.multi_ball_fastfiz import MultiBallFastFizSimulator
 from src.game.nine_ball_learned_agent import NineBallMicroSACAgent
@@ -43,7 +43,7 @@ def evaluation_cases(samples, max_cases_per_goal, seed):
     }
 
 
-def record_trial(agent, sample, simulator, rules, counts, rejections, *, outcome_position, cue_clearance_retry):
+def record_trial(agent, sample, simulator, rules, counts, rejections, *, outcome_position, cue_clearance_retry, position_details=None):
     state, goal, context = sample.state, sample.selected_goal, sample.context
     plan = agent.plan_goal(state, goal, context)
     counts["attempted"] += 1
@@ -76,6 +76,25 @@ def record_trial(agent, sample, simulator, rules, counts, rejections, *, outcome
     if goal.kind in ("DIRECT_ATTACK", "POSITION_ATTACK"):
         counts["exact_target_pot"] += int(success)
     if goal.kind == "POSITION_ATTACK":
+        if position_details is not None and success:
+            # This block only runs after a *legal, exact-pocket pot*.
+            # Failures before that are accounted for in existing counts.
+            continued = _continues_position_goal(state, goal, outcome)
+            distance_m = _cue_stop_distance(goal, physical)
+            within_goal = distance_m <= goal.cue_stop_radius
+            position_details["exact_pots"] += 1
+            position_details["continued_after_pot"] += int(continued)
+            position_details["within_goal_radius_after_pot"] += int(within_goal)
+            position_details["continued_and_within_goal_radius"] += int(continued and within_goal)
+            position_details["stop_distances_after_pot_m"].append(distance_m)
+            position_details["relative_stop_distances_after_pot"].append(
+                distance_m / goal.cue_stop_radius
+            )
+            if continued:
+                position_details["stop_distances_after_continued_pot_m"].append(distance_m)
+                position_details["relative_stop_distances_after_continued_pot"].append(
+                    distance_m / goal.cue_stop_radius
+                )
         success = position_goal_success(state, goal, physical, outcome, exact_pot=success)
     counts["goal_success"] += int(success)
     return success
