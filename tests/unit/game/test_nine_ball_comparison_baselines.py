@@ -50,3 +50,30 @@ def test_seed_preflight_rejects_overlap_and_accepts_new_seed():
     with pytest.raises(ValueError, match="overlap"):
         _check_seed_isolation(training, 1400018, 1)
     _check_seed_isolation(training, 1460000, 32)
+
+
+def test_agent_namespaces_keep_compatibility_imports():
+    from src.game.agents.proposed.hierarchical import NineBallMCTSAgent
+    from src.game.nine_ball_mcts_agent import NineBallMCTSAgent as OriginalMCTS
+    from src.game.agents.baselines.pot_only_greedy import PotOnlyGreedyAgent as GroupedGreedy
+    from src.game.nine_ball_comparison_baselines import PotOnlyGreedyAgent as OriginalGreedy
+    assert NineBallMCTSAgent is OriginalMCTS
+    assert GroupedGreedy is OriginalGreedy
+
+
+def test_uniform_mcts_forces_no_learned_policy_or_value(monkeypatch):
+    import src.game.agents.baselines.uniform_mcts as module
+    captured = {}
+
+    def record(self, micro_checkpoint, **kwargs):
+        captured.update(micro_checkpoint=micro_checkpoint, **kwargs)
+
+    monkeypatch.setattr(module.NineBallMCTSAgent, "__init__", record)
+    module.UniformPriorMCTSAgent(
+        "micro.pt", macro_policy_checkpoint="should_not_be_used",
+        state_value_checkpoint="should_not_be_used", simulations=24,
+    )
+    assert captured["micro_checkpoint"] == "micro.pt"
+    assert captured["macro_policy_checkpoint"] is None
+    assert captured["state_value_checkpoint"] is None
+    assert captured["simulations"] == 24
