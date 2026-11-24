@@ -102,7 +102,7 @@ def _match_files(folder):
     return files
 
 
-def select_cases(folder, *, max_matches, per_goal, seed, goal_source="candidates"):
+def select_cases(folder, *, max_matches, per_goal, seed, goal_source="candidates", excluded_board_hashes=None):
     if max_matches < 1 or per_goal < 1:
         raise ValueError("max_matches and per_goal must be >= 1")
     rng = np.random.default_rng(seed)
@@ -114,6 +114,8 @@ def select_cases(folder, *, max_matches, per_goal, seed, goal_source="candidates
     encountered = Counter()
     unique = set()
     boards = set()
+    excluded_board_hashes = excluded_board_hashes or set()
+    excluded_overlaps = 0
     cfg = TableGameConfig.nine_ball_inventory()
     for index in file_selection:
         path = files[int(index)]
@@ -137,6 +139,9 @@ def select_cases(folder, *, max_matches, per_goal, seed, goal_source="candidates
                 encountered[kind] += 1
                 rack = encode_rack_v3(case.state, case.context)
                 board = hashlib.sha256(rack[:64].tobytes()).hexdigest()
+                if board in excluded_board_hashes:
+                    excluded_overlaps += 1
+                    continue
                 key = (rack.tobytes(), encode_goal_v3(case.selected_goal).tobytes())
                 if key in unique or len(samples[kind]) >= per_goal:
                     continue
@@ -149,7 +154,32 @@ def select_cases(folder, *, max_matches, per_goal, seed, goal_source="candidates
         "eligible_goals_seen": dict(encountered),
         "unique_selected_goals": {k: len(v) for k, v in samples.items()},
         "sampled_board_hashes": len(boards),
+        "excluded_holdout_overlap_cases": excluded_overlaps,
     }
+
+
+def all_micro_board_hashes(folder, *, goal_source="candidates"):
+    """Full holdout board set, matching Phase28a pretraining exclusion."""
+    cfg = TableGameConfig.nine_ball_inventory()
+    result = set()
+    for path in _match_files(folder):
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        for row in payload.get("trajectory", []):
+            action = row.get("chosen_action") or {}
+            vectors = (
+                (action.get("macro_search") or {}).get("goal_v3") or []
+                if goal_source == "candidates"
+                else (action.get("goal_v3"),)
+            )
+            for vector in vectors:
+                if vector is None:
+                    continue
+                sample = sample_from_trajectory(row, cfg, goal_vector=vector)
+                if sample is not None:
+                    rack = encode_rack_v3(sample.state, sample.context)
+                    result.add(hashlib.sha256(rack[:64].tobytes()).hexdigest())
+                    break
+    return result
 
 
 def _check_provenance(args):
@@ -178,9 +208,15 @@ def audit(args):
     if args.train_dir.resolve() == args.holdout_dir.resolve():
         raise ValueError("Train and heldout must be different directories")
     training_summary = _check_provenance(args)
+    # Phase28a trainer excludes *all* heldout boards from its replay inputs.
+    # Apply the same exclusion when auditing original input rollouts.
+    all_holdout_boards = all_micro_board_hashes(
+        args.holdout_dir, goal_source=args.goal_source,
+    )
     train, train_boards, train_meta = select_cases(
         args.train_dir, max_matches=args.max_matches_per_split,
         per_goal=args.max_cases_per_goal, seed=args.seed, goal_source=args.goal_source,
+        excluded_board_hashes=all_holdout_boards,
     )
     heldout, heldout_boards, heldout_meta = select_cases(
         args.holdout_dir, max_matches=args.max_matches_per_split,
@@ -242,6 +278,7 @@ def audit(args):
         "train_sample": train_meta,
         "heldout_sample": heldout_meta,
         "sampled_board_overlap": 0,
+        "all_holdout_boards_excluded_from_train": len(all_holdout_boards),
         "wpa_break_rules": True,
         "cue_clearance_retry": True,
         "by_goal": result,
