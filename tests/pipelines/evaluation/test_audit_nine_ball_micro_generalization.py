@@ -64,7 +64,6 @@ def test_reads_saved_proposed_and_evaluation_trajectory_goals(tmp_path):
 
 def test_rejects_nonmicro_pocket_data():
     v = encode_goal_v3(NineBallGoal("DIRECT_ATTACK", 1, 0)).copy()
-    v[20] = 0
-    v[21] = 1
+    v[21] = 1  # Invalid: both pocket 0 and pocket 1 are active
     with pytest.raises(ValueError):
         goal_from_vector(v)
