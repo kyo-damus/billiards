@@ -194,3 +194,53 @@ def test_multirack_plan_reserves_seeds_and_uses_match_return(tmp_path):
     assert collect[collect.index("--race-to") + 1] == "9"
     assert collect[collect.index("--break-policy") + 1] == "winner"
     assert "--match-aware" in stages[1].argv and "--match-aware" in stages[3].argv
+
+
+def test_policy_frozen_value_warm_start_plan_preserves_policy_and_micro(tmp_path):
+    args = _args(tmp_path, (
+        "--freeze-policy", "--warm-start-state-v",
+        "--micro-steps", "0", "--qv-epochs", "2",
+        "--race-to", "9",
+    ))
+    stages, rounds = build_plan(args)
+    assert [stage.name for stage in stages] == [
+        "000_self_play", "000_return_dataset", "000_macro_qv",
+        "001_self_play", "001_return_dataset", "001_macro_qv",
+    ]
+    assert all(rnd["policy"] == str(args.base_policy_checkpoint) for rnd in rounds)
+    assert all(rnd["micro"] == str(args.base_micro_checkpoint) for rnd in rounds)
+    assert all(rnd["policy_trained"] is False for rnd in rounds)
+    assert all(rnd["state_v_warm_started"] is True for rnd in rounds)
+
+    def flag(argv, name):
+        return argv[argv.index(name) + 1]
+
+    assert flag(stages[2].argv, "--init-state-v-checkpoint") == str(
+        args.base_state_v_checkpoint
+    )
+    assert flag(stages[3].argv, "--macro-policy-checkpoint") == str(
+        args.base_policy_checkpoint
+    )
+    assert flag(stages[3].argv, "--state-value-checkpoint") == str(
+        tmp_path / "runs" / "iteration_000" / "qv" / "state_v_v3.pt"
+    )
+    assert flag(stages[5].argv, "--init-state-v-checkpoint") == str(
+        tmp_path / "runs" / "iteration_000" / "qv" / "state_v_v3.pt"
+    )
+    assert "--match-aware" in stages[1].argv
+
+
+def test_policy_frozen_invalid_settings_fail_before_run(tmp_path):
+    args = _args(tmp_path, (
+        "--freeze-policy", "--micro-steps", "0", "--qv-epochs", "0",
+    ))
+    with pytest.raises(ValueError, match="Frozen Policy requires"):
+        build_plan(args)
+    assert not args.output_root.exists()
+
+    args = _args(tmp_path, (
+        "--warm-start-state-v", "--micro-steps", "0",
+    ))
+    args.base_state_v_checkpoint = None
+    with pytest.raises(ValueError, match="State V warm start requires"):
+        build_plan(args)
