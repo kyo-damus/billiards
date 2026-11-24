@@ -97,3 +97,31 @@ def test_accept_table_requires_no_simulation_or_micro(monkeypatch):
 def module_context(choice):
     from src.game.nine_ball_rules import NineBallContext
     return NineBallContext(pending_choice=choice)
+
+
+
+def test_paired_evaluator_constructs_pickpocket_separately(monkeypatch):
+    import scripts.comparisons.eval_nine_ball_baselines as evaluation
+
+    class FakeAgent:
+        def __init__(self, micro, **kwargs):
+            self.micro = micro
+            self.kwargs = kwargs
+
+    monkeypatch.setattr(evaluation, "PickPocketAdaptedAgent", FakeAgent)
+    monkeypatch.setattr(evaluation, "NineBallMCTSAgent", FakeAgent)
+    settings = {
+        "mcts_simulations": 24, "mcts_max_depth": 2,
+        "mcts_c_puct": 1.5, "gamma": 1.0, "mcts_root_min_visits": 1,
+    }
+    agents = evaluation._agents(
+        "pickpocket_mc", "micro.pt", "policy.pt", "value.pt",
+        settings=settings, layout_split=object(), device="cpu",
+        pickpocket={"samples": 2, "max_candidates": 4, "seed": 11},
+    )
+    assert agents["base"].kwargs["samples"] == 2
+    assert agents["base"].kwargs["max_candidates"] == 4
+    assert agents["base"].kwargs["seed"] == 11
+    assert "macro_policy_checkpoint" not in agents["base"].kwargs
+    assert agents["final"].kwargs["macro_policy_checkpoint"] == "policy.pt"
+    assert agents["final"].kwargs["state_value_checkpoint"] == "value.pt"
