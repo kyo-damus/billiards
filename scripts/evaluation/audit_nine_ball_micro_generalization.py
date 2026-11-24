@@ -60,11 +60,11 @@ def goal_from_vector(raw):
     return goal
 
 
-def sample_from_trajectory(row, cfg):
+def sample_from_trajectory(row, cfg, *, goal_vector=None):
     raw_state, raw_ctx = row.get("state"), row.get("rule_context")
     if raw_state is None or raw_ctx is None or raw_ctx.get("pending_choice") is not None:
         return None
-    selected = (row.get("chosen_action") or {}).get("goal_v3")
+    selected = goal_vector if goal_vector is not None else (row.get("chosen_action") or {}).get("goal_v3")
     if selected is None or raw_state.get("ball_in_hand"):
         return None
     goal = goal_from_vector(selected)
@@ -102,7 +102,7 @@ def _match_files(folder):
     return files
 
 
-def select_cases(folder, *, max_matches, per_goal, seed):
+def select_cases(folder, *, max_matches, per_goal, seed, goal_source="candidates"):
     if max_matches < 1 or per_goal < 1:
         raise ValueError("max_matches and per_goal must be >= 1")
     rng = np.random.default_rng(seed)
@@ -119,19 +119,30 @@ def select_cases(folder, *, max_matches, per_goal, seed):
         path = files[int(index)]
         payload = json.loads(path.read_text(encoding="utf-8"))
         for row in payload.get("trajectory", []):
-            case = sample_from_trajectory(row, cfg)
-            if case is None:
-                continue
-            kind = case.selected_goal.kind
-            encountered[kind] += 1
-            rack = encode_rack_v3(case.state, case.context)
-            board = hashlib.sha256(rack[:64].tobytes()).hexdigest()
-            key = (rack.tobytes(), encode_goal_v3(case.selected_goal).tobytes())
-            if key in unique or len(samples[kind]) >= per_goal:
-                continue
-            unique.add(key)
-            boards.add(board)
-            samples[kind].append(case)
+            action = row.get("chosen_action") or {}
+            if goal_source == "candidates":
+                root = action.get("macro_search") or {}
+                vectors = root.get("goal_v3") or []
+            elif goal_source == "logged":
+                vectors = (action.get("goal_v3"),)
+            else:
+                raise ValueError("Unknown --goal-source")
+            for vector in vectors:
+                if vector is None:
+                    continue
+                case = sample_from_trajectory(row, cfg, goal_vector=vector)
+                if case is None:
+                    continue
+                kind = case.selected_goal.kind
+                encountered[kind] += 1
+                rack = encode_rack_v3(case.state, case.context)
+                board = hashlib.sha256(rack[:64].tobytes()).hexdigest()
+                key = (rack.tobytes(), encode_goal_v3(case.selected_goal).tobytes())
+                if key in unique or len(samples[kind]) >= per_goal:
+                    continue
+                unique.add(key)
+                boards.add(board)
+                samples[kind].append(case)
     return dict(samples), boards, {
         "available_match_files": len(files),
         "sampled_match_files": len(file_selection),
@@ -141,18 +152,40 @@ def select_cases(folder, *, max_matches, per_goal, seed):
     }
 
 
+def _check_provenance(args):
+    summary = json.loads(args.training_summary.read_text(encoding="utf-8"))
+    training = summary.get("training_data") or {}
+    sources = {Path(p).resolve() for p in training.get("rollout_dirs", [])}
+    expected_holdout = training.get("holdout_rollout_dir")
+    if args.train_dir.resolve() not in sources:
+        raise ValueError("Train directory is not recorded as Micro training input")
+    if expected_holdout is None or args.holdout_dir.resolve() != Path(expected_holdout).resolve():
+        raise ValueError("Holdout directory does not match Micro training exclusion")
+    if summary.get("goal_source") != args.goal_source:
+        raise ValueError("Micro training goal-source differs from audit")
+    if not summary.get("wpa_break_rules", False):
+        raise ValueError("This audit requires WPA training rules")
+    if summary.get("outcome_position", False) != args.outcome_position:
+        raise ValueError("Outcome position setting differs from Micro training")
+    if summary.get("training_steps_this_run", 0) <= 0:
+        raise ValueError("Invalid saved Micro training summary")
+    return summary
+
+
 def audit(args):
     if args.output.exists():
         raise FileExistsError(f"Refusing to overwrite {args.output}")
     if args.train_dir.resolve() == args.holdout_dir.resolve():
         raise ValueError("Train and heldout must be different directories")
+    training_summary = _check_provenance(args)
     train, train_boards, train_meta = select_cases(
         args.train_dir, max_matches=args.max_matches_per_split,
-        per_goal=args.max_cases_per_goal, seed=args.seed,
+        per_goal=args.max_cases_per_goal, seed=args.seed, goal_source=args.goal_source,
     )
     heldout, heldout_boards, heldout_meta = select_cases(
         args.holdout_dir, max_matches=args.max_matches_per_split,
         per_goal=args.max_cases_per_goal, seed=args.seed + 1,
+        goal_source=args.goal_source,
     )
     if train_boards & heldout_boards:
         raise ValueError("Training/holdout contain identical sampled boards: leakage")
@@ -197,6 +230,9 @@ def audit(args):
     output = {
         "kind": "nine_ball_micro_generalization_audit_v1",
         "checkpoint": str(args.checkpoint),
+        "training_summary": str(args.training_summary),
+        "training_steps_this_run": training_summary["training_steps_this_run"],
+        "goal_source": args.goal_source,
         "base_checkpoint": str(args.base_checkpoint) if args.base_checkpoint else None,
         "train_dir": str(args.train_dir),
         "holdout_dir": str(args.holdout_dir),
@@ -223,6 +259,8 @@ def audit(args):
 
 def parse_args(argv=None):
     p = argparse.ArgumentParser(description=__doc__)
+    p.add_argument("--training-summary", type=Path, required=True)
+    p.add_argument("--goal-source", choices=("candidates", "logged"), default="candidates")
     p.add_argument("--train-dir", type=Path, required=True)
     p.add_argument("--holdout-dir", type=Path, required=True)
     p.add_argument("--checkpoint", type=Path, required=True)
