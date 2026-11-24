@@ -202,6 +202,67 @@ def _check_provenance(args):
     return summary
 
 
+def _new_position_details():
+    """Counts after legal exact pot and unaggregated physical stop distances."""
+    return {
+        "exact_pots": 0,
+        "continued_after_pot": 0,
+        "within_goal_radius_after_pot": 0,
+        "continued_and_within_goal_radius": 0,
+        "stop_distances_after_pot_m": [],
+        "stop_distances_after_continued_pot_m": [],
+        "relative_stop_distances_after_pot": [],
+        "relative_stop_distances_after_continued_pot": [],
+    }
+
+
+def summarize_position_details(details):
+    """Separate: exact pot -> next-ball continuation -> stopping precision."""
+    exact = details["exact_pots"]
+    continued = details["continued_after_pot"]
+    within = details["within_goal_radius_after_pot"]
+    both = details["continued_and_within_goal_radius"]
+
+    def distribution(values):
+        if not values:
+            return {"n": 0, "mean": None, "median": None, "p90": None}
+        return {
+            "n": len(values),
+            "mean": float(np.mean(values)),
+            "median": float(np.median(values)),
+            "p90": float(np.percentile(values, 90)),
+        }
+
+    distances = details["stop_distances_after_pot_m"]
+    continued_distances = details["stop_distances_after_continued_pot_m"]
+    return {
+        "legal_exact_pots": exact,
+        "continued_after_exact_pot": continued,
+        "within_goal_radius_after_exact_pot": within,
+        "continued_and_within_goal_radius": both,
+        "continuation_rate_given_exact_pot": continued / exact if exact else None,
+        "within_radius_rate_given_exact_pot": within / exact if exact else None,
+        "within_radius_rate_given_continued_pot": both / continued if continued else None,
+        "goal_success_rate_given_exact_pot": both / exact if exact else None,
+        "failed_continuation_after_pot": exact - continued,
+        "continued_but_missed_goal_radius": continued - both,
+        "stopping_distance_m_after_exact_pot": distribution(distances),
+        "stopping_distance_m_after_continued_pot": distribution(continued_distances),
+        "within_absolute_radius_m_after_continued_pot": {
+            str(radius): sum(distance <= radius for distance in continued_distances)
+            for radius in (0.10, 0.20, 0.30)
+        },
+        "relative_to_goal_radius_after_continued_pot": distribution(
+            details["relative_stop_distances_after_continued_pot"]
+        ),
+        "meaning": (
+            "Continuation means shooter keeps turn, next ball remains on table, "
+            "and no rack winner. Stopping error is Euclidean cue distance to "
+            "goal center in meters."
+        ),
+    }
+
+
 def audit(args):
     if args.output.exists():
         raise FileExistsError(f"Refusing to overwrite {args.output}")
@@ -245,11 +306,13 @@ def audit(args):
             for name, agent in agents.items():
                 counts = Counter()
                 reasons = Counter()
+                details = _new_position_details() if kind == "POSITION_ATTACK" else None
                 for case in cases:
                     record_trial(
                         agent, case, simulator, rules, counts, reasons,
                         outcome_position=args.outcome_position,
                         cue_clearance_retry=True,
+                        position_details=details,
                     )
                 count = len(cases)
                 by_model[name] = {
@@ -260,11 +323,20 @@ def audit(args):
                     "physics_rejection_rate": counts["physics_rejected"] / count,
                     "foul_rate": counts["fouls"] / count,
                     "physical_rejections": dict(reasons),
+                    **(
+                        {"position_decomposition": summarize_position_details(details)}
+                        if details is not None else {}
+                    ),
                 }
+                if details is not None:
+                    if details["exact_pots"] != counts["exact_target_pot"]:
+                        raise RuntimeError("POSITION exact-pot accounting differs")
+                    if details["continued_and_within_goal_radius"] != counts["goal_success"]:
+                        raise RuntimeError("POSITION goal-success accounting differs")
             subset[kind] = by_model
         result[group_name] = subset
     output = {
-        "kind": "nine_ball_micro_generalization_audit_v1",
+        "kind": "nine_ball_micro_generalization_audit_v2_position_decomposition",
         "checkpoint": str(args.checkpoint),
         "training_summary": str(args.training_summary),
         "training_steps_this_run": training_summary["training_steps_this_run"],
