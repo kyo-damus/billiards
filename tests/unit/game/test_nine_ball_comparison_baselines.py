@@ -24,7 +24,7 @@ def test_baseline_only_attacks_nonbreak_positions(selector):
 
 
 def test_baseline_falls_back_to_lowest_ball_without_clear_pocket(selector, monkeypatch):
-    import src.game.nine_ball_comparison_baselines as module
+    import src.game.agents.baselines.pot_only_greedy as module
     monkeypatch.setattr(module, "direct_pocket_candidates", lambda state, target: ())
     state = replace(create_nine_ball_rack(breaker=0, seed=12), break_shot=False)
     goal = selector._choose_goal(state, NineBallContext())

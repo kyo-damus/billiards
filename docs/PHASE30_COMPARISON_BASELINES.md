@@ -67,3 +67,20 @@ an interrupted same-directory evaluation. Do not reuse smoke
 output directories for the definitive 32-pair evaluation.
 
 The 2-pair smoke checks integration only, not game strength.
+
+
+## Code organization
+
+    src/game/agents/
+      proposed/
+        hierarchical.py       # Public entry to established proposal MCTS/Micro
+        README.md             # Map of the validated Phase29 components
+      baselines/
+        pot_only_greedy.py    # Real pot-only implementation
+        uniform_mcts.py       # Explicit uniform-prior MCTS ablation
+    scripts/comparisons/
+      eval_nine_ball_baselines.py  # The comparison runner
+
+The previous script entry, python -m scripts.eval_nine_ball_comparison_baselines_v1,
+and the old pot-only import remain supported via compatibility shims.
+Phase29 source, training entrypoints, checkpoints, and artifacts are unchanged.
