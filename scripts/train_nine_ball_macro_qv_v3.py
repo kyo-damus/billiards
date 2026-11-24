@@ -5,6 +5,7 @@ unselected candidate goals, and does not imply the learned Q is optimal.
 """
 
 import argparse
+import hashlib
 import copy
 import json
 import os
@@ -21,6 +22,7 @@ from src.game.nine_ball_encoding_v3 import (
 )
 from src.macro.candidate_value import MacroCandidateValueNetwork
 from src.macro.value import MacroValueNetwork
+from src.game.nine_ball_value_v3 import load_state_v_v3
 
 
 def load_returns(path):
@@ -146,6 +148,21 @@ def train(args):
     v = MacroValueNetwork(
         state_dim=state_dim, hidden_dim=args.hidden_dim,
     ).to(device)
+    init_v_path = getattr(args, "init_state_v_checkpoint", None)
+    initial_v_sha256 = None
+    if init_v_path is not None:
+        # Weight-only fine-tuning: do not restore optimizer state.
+        original, meta = load_state_v_v3(
+            init_v_path, device=device,
+            match_aware=state_dim == MATCH_MACRO_STATE_DIM,
+        )
+        if meta["state_dim"] != state_dim or meta["hidden_dim"] != args.hidden_dim:
+            raise ValueError(
+                "State V warm start differs in observation or hidden size"
+            )
+        v.load_state_dict(original.state_dict(), strict=True)
+        with Path(init_v_path).open("rb") as f:
+            initial_v_sha256 = hashlib.file_digest(f, "sha256").hexdigest()
     q_weights, q_epoch, q_mse = fit_model(
         "q", q, state, goal, target, train_ids, val_ids, args, device,
     )
@@ -171,6 +188,9 @@ def train(args):
     }
     v_ckpt = {
         **common,
+        "init_state_v_checkpoint": str(init_v_path) if init_v_path else None,
+        "init_state_v_sha256": initial_v_sha256,
+        "optimizer_state_carried_over": False,
         "model_kind": "nine_ball_macro_state_v_v3",
         "state_value_network": v_weights,
         "best_epoch": v_epoch,
@@ -188,7 +208,12 @@ def train(args):
         "train_shots": len(train_ids),
         "validation_shots": len(val_ids),
         "q": {"best_epoch": q_epoch, "validation_mse": q_mse},
-        "v": {"best_epoch": v_epoch, "validation_mse": v_mse},
+        "v": {
+            "best_epoch": v_epoch, "validation_mse": v_mse,
+            "init_state_v_checkpoint": str(init_v_path) if init_v_path else None,
+            "init_state_v_sha256": initial_v_sha256,
+            "optimizer_state_carried_over": False,
+        },
         "constant_train_mean_baseline_val_mse": baseline,
         "warning": (
             "Behavior-policy terminal MC returns only, selected action for Q; "
@@ -212,6 +237,8 @@ def parse_args(argv=None):
     p.add_argument("--batch-size", type=int, default=64)
     p.add_argument("--hidden-dim", type=int, default=128)
     p.add_argument("--learning-rate", type=float, default=3e-4)
+    p.add_argument("--init-state-v-checkpoint", type=Path,
+                   help="Warm-start State V weights only; Q is trained from scratch.")
     p.add_argument("--validation-fraction", type=float, default=0.34)
     p.add_argument("--seed", type=int, default=420100)
     p.add_argument("--device", choices=("cpu", "cuda"), default="cpu")
