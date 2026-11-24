@@ -12,13 +12,14 @@ from pathlib import Path
 from scripts.eval_nine_ball_hierarchical_v3 import _checkpoint_info, _play_pairs
 from scripts.iterate_nine_ball_hierarchical_v3 import _git_commit
 from src.game.agents.baselines.pot_only_greedy import PotOnlyGreedyAgent
+from src.game.agents.baselines.pickpocket.agent import PickPocketAdaptedAgent
 from src.game.agents.baselines.uniform_mcts import UniformPriorMCTSAgent
 from src.game.agents.proposed.hierarchical import NineBallMCTSAgent
 from src.game.nine_ball_rack_split import load_rack_layout_split
 from src.pipelines.experiment_io import lock_run, write_experiment_json
 
 
-BASELINES = ("pot_greedy", "uniform_mcts")
+BASELINES = ("pot_greedy", "uniform_mcts", "pickpocket_mc")
 
 
 def _check_seed_isolation(training, start_seed, pairs):
@@ -39,10 +40,17 @@ def _check_seed_isolation(training, start_seed, pairs):
                 raise ValueError("Comparison seed interval overlaps training rack seeds")
 
 
-def _agents(baseline, micro, policy, state_v, *, settings, layout_split, device):
+def _agents(baseline, micro, policy, state_v, *, settings, layout_split, device, pickpocket=None):
     base = (
         PotOnlyGreedyAgent(micro, device=device)
         if baseline == "pot_greedy"
+        else PickPocketAdaptedAgent(
+            micro, device=device,
+            samples=(pickpocket or {}).get("samples", 3),
+            max_candidates=(pickpocket or {}).get("max_candidates", 8),
+            seed=(pickpocket or {}).get("seed", 32),
+        )
+        if baseline == "pickpocket_mc"
         else UniformPriorMCTSAgent(
             micro,
             simulations=settings["mcts_simulations"],
@@ -148,6 +156,14 @@ def evaluate(args):
         "rack_layout_split": split_record,
         "device": args.device,
     }
+    if args.baseline == "pickpocket_mc":
+        config["pickpocket"] = {
+            "samples": args.pickpocket_samples,
+            "max_candidates": args.pickpocket_max_candidates,
+            "seed": args.pickpocket_seed,
+            "algorithm_version": "root_noisy_mc_v0",
+            "shared_micro_usage": "break_only",
+        }
     if not args.resume:
         if args.output_dir.exists():
             raise FileExistsError(f"Refusing existing evaluation output: {args.output_dir}")
@@ -173,6 +189,7 @@ def evaluate(args):
             agents = _agents(
                 args.baseline, micro["path"], policy["path"], state_v["path"],
                 settings=settings, layout_split=split, device=args.device,
+                pickpocket=config.get("pickpocket"),
             )
             seeds = range(
                 args.start_seed,
@@ -197,6 +214,9 @@ def parse_args(argv=None):
     p.add_argument("--start-seed", type=int, default=1460000)
     p.add_argument("--device", choices=("cpu", "cuda"), default="cpu")
     p.add_argument("--resume", action="store_true")
+    p.add_argument("--pickpocket-samples", type=int, default=3)
+    p.add_argument("--pickpocket-max-candidates", type=int, default=8)
+    p.add_argument("--pickpocket-seed", type=int, default=32)
     return p.parse_args(argv)
 
 
