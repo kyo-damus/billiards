@@ -69,10 +69,20 @@ def model_predictions(model, state, goal, indices, model_kind):
     return model(state[index]).reshape(-1)
 
 
-def fit_model(kind, model, state, goals, targets, train_ids, val_ids, args, device):
+def fit_model(kind, model, state, goals, targets, train_ids, val_ids, args, device, *, include_initial=False):
     opt = torch.optim.Adam(model.parameters(), lr=args.learning_rate)
     rng = np.random.default_rng(args.seed + (1 if kind == "q" else 2))
     best_loss, best_epoch, best_state = float("inf"), None, None
+    if include_initial:
+        # Do not replace a strong prior State V if this round's held-out
+        # match-level validation has not improved at all.
+        model.eval()
+        with torch.no_grad():
+            val_prediction = model_predictions(model, state, goals, val_ids, kind)
+            best_loss = float(F.mse_loss(val_prediction, targets[val_ids]).item())
+        best_epoch = 0
+        best_state = copy.deepcopy(model.state_dict())
+        print(f"{kind} warm_start epoch=0 val_mse={best_loss:.6f}")
     for epoch in range(1, args.epochs + 1):
         model.train()
         groups = np.array_split(
@@ -168,6 +178,7 @@ def train(args):
     )
     v_weights, v_epoch, v_mse = fit_model(
         "v", v, state, goal, target, train_ids, val_ids, args, device,
+        include_initial=init_v_path is not None,
     )
     common = {
         "format_version": ENCODING_VERSION,
@@ -191,6 +202,7 @@ def train(args):
         "init_state_v_checkpoint": str(init_v_path) if init_v_path else None,
         "init_state_v_sha256": initial_v_sha256,
         "optimizer_state_carried_over": False,
+        "warm_start_epoch_zero_eligible": init_v_path is not None,
         "model_kind": "nine_ball_macro_state_v_v3",
         "state_value_network": v_weights,
         "best_epoch": v_epoch,
