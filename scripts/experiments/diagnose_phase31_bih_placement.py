@@ -69,6 +69,7 @@ def quality_tuple(metrics, shooter):
 def _one_micro_shot(agent, simulator, rules, context, position, state):
     from src.game.nine_ball_physics_guard import (
         InvalidPhysicalTransition, simulate_nine_ball_shot,
+        simulate_with_cue_clearance,
     )
     plan = agent.choose_match_shot(state, context, position)
     if plan.shot is None:
@@ -77,10 +78,13 @@ def _one_micro_shot(agent, simulator, rules, context, position, state):
             "goal_kind": plan.macro_goal.kind,
         }
     try:
-        physical, outcome = simulate_nine_ball_shot(
-            simulator, rules, state, context,
-            target_ball=plan.target_ball, shot=plan.shot,
-            declared_push_out=plan.macro_goal.kind == "PUSH_OUT",
+        executed, physical, outcome, clearance_trials = simulate_with_cue_clearance(
+            lambda shot: simulate_nine_ball_shot(
+                simulator, rules, state, context,
+                target_ball=plan.target_ball, shot=shot,
+                declared_push_out=plan.macro_goal.kind == "PUSH_OUT",
+            ),
+            plan.shot,
         )
     except InvalidPhysicalTransition as exc:
         return {
@@ -93,6 +97,8 @@ def _one_micro_shot(agent, simulator, rules, context, position, state):
         "goal_kind": plan.macro_goal.kind,
         "declared_pocket": plan.target_pocket,
         "quality": list(quality_tuple(metrics, state.current_player)),
+        "cue_clearance_trials": int(clearance_trials),
+        "executed_physical_shot": executed.to_fastfiz_kwargs(),
         "metrics": metrics,
     }
 
