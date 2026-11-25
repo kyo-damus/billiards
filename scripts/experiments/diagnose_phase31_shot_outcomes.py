@@ -57,6 +57,8 @@ def load_cases(root_diagnostic, evaluation_dir):
             "rule_context": original["rule_context"],
             "match_context": original["match_context"],
             "logged_action": original["chosen_action"],
+            "logged_physical": original.get("physical"),
+            "logged_rule_result": original.get("rule_result"),
             "expected": row,
         })
     if not cases:
@@ -116,7 +118,9 @@ def shot_metrics(state, context, plan, physical, outcome):
         "declared_target_ball": int(target_id),
         "declared_target_pocket": expected_pocket,
         "physical_shot": plan.shot.to_fastfiz_kwargs(),
-        "first_contact_ball": physical.first_contact_ball,
+        "first_contact_ball": (
+            int(physical.first_contact_ball) if physical.first_contact_ball is not None else None
+        ),
         "foul": bool(outcome.foul),
         "foul_reasons": list(outcome.foul_reasons),
         "newly_pocketed": list(outcome.newly_pocketed),
@@ -167,6 +171,20 @@ def replay_and_evaluate(models, simulator, rules, case):
             shot=plan.shot, declared_push_out=(plan.macro_goal.kind == "PUSH_OUT"),
         )
         outputs[side] = shot_metrics(state, context, plan, physical, outcome)
+        if side == "final":
+            original_physical = case.get("logged_physical")
+            original_result = case.get("logged_rule_result")
+            if original_physical is not None and (
+                outputs[side]["first_contact_ball"] != original_physical.get("first_contact_ball")
+            ):
+                raise ValueError("C-prime one-shot first contact differs from match log")
+            if original_result is not None and (
+                outputs[side]["foul"] != original_result["foul"]
+                or outputs[side]["newly_pocketed"] != original_result["newly_pocketed"]
+                or outputs[side]["rack_winner"] != original_result["rack_winner"]
+                or outputs[side]["turn_changed"] != original_result["turn_changed"]
+            ):
+                raise ValueError("C-prime one-shot rule outcome differs from match log")
     return outputs
 
 
