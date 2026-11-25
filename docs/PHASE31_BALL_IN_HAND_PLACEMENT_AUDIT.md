@@ -37,8 +37,10 @@ On each of three original recorded C-prime scratches:
    number of unobstructed target pockets, then shortest candidate
    cue-to-ghost + ball-to-pocket path.
 6. Evaluate the SAME frozen trained Macro Policy and Micro SAC actor
-   with **one deterministic policy-selected shot** at baseline and
-   alternative, using the same FastFiz and WPA rules.
+   with **one deterministic policy-selected goal/shot** at baseline and
+   alternative, using the same FastFiz and WPA rules. Apply the same
+   cue-stick-clearance retry as MCTS when FastFiz rejects a shot due
+   to cue-stick collision, and record both requested/executed controls.
 7. For context only, evaluate up to 17 positions, including sampled
    nearby and distant points. Label the best realized outcome
    sampled_oracle. This hindsight oracle uses the physical results
