@@ -6,9 +6,9 @@ Both variants share the Phase28a Micro, frozen Phase28b Macro Policy,
 nine-ball rules, FastFiz, search budget, and rack split. Only State V differs.
 
 - C: Phase29 final State V, SHA256
-  \`890e1cd515d1972b04966caea39019bbb758ad57be1521365a7df0e69780396a\`.
+  `890e1cd515d1972b04966caea39019bbb758ad57be1521365a7df0e69780396a`.
 - C-prime: Phase31 value-only iteration_001 State V, SHA256
-  \`3743d650f09644ab7603133fdafbae7c733ec16da986c2b19b07f9f9fd7a9533\`.
+  `3743d650f09644ab7603133fdafbae7c733ec16da986c2b19b07f9f9fd7a9533`.
 - C vs C-prime: 32 pairs, 64 complete race-to-N matches,
   C 55 wins vs C-prime 9; 24 both-for-C pairs,
   1 both-for-C-prime, 7 split.
@@ -65,10 +65,10 @@ On DGX:
       --output-dir artifacts/runs/phase31_C_vs_Cprime_mcts_diag_16_v1
 
 Files:
-- \`summary.json\`: chosen disagreement count/rate, prior mismatch,
+- `summary.json`: chosen disagreement count/rate, prior mismatch,
   visit-distribution total variation (normalized L1 / 2), whether the
   re-run reproduces the historical logged action.
-- \`details.json\`: per-board candidate encoded IDs, visits, priors,
+- `details.json`: per-board candidate encoded IDs, visits, priors,
   empirical root Q values and chosen goals for both models.
 
 ## Validity and limits
